@@ -264,7 +264,7 @@ void main() {
       expect(readiness.devicePath, '/dev/input/uinput');
       expect(factory.openedPaths, ['/dev/uinput', '/dev/input/uinput']);
     });
-  });
+  }, skip: !Platform.isLinux);
 
   test('uses Linux generic ioctl encoding for uinput commands', () {
     expect(LinuxUinputIoctl.deviceCreate, 0x00005501);
@@ -274,9 +274,13 @@ void main() {
     expect(LinuxUinputIoctl.setKeyBit, 0x40045565);
   });
 
-  test('the focused tests run on Linux without requiring /dev/uinput', () {
-    expect(Platform.isLinux, isTrue);
-  });
+  test(
+    'the focused tests run on Linux without requiring /dev/uinput',
+    () {
+      expect(Platform.isLinux, isTrue);
+    },
+    skip: !Platform.isLinux,
+  );
 }
 
 class _FakeUinputFactory implements LinuxUinputDeviceFactory {

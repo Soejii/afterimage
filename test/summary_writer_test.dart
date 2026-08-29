@@ -42,7 +42,7 @@ void main() {
           replays: [first],
         ),
       );
-      final summaryFile = File('${directory.path}/summary.json');
+      final summaryFile = File(_path(directory, 'summary.json'));
       final firstJson =
           jsonDecode(await summaryFile.readAsString()) as Map<String, dynamic>;
       expect(firstJson['schemaVersion'], 1);
@@ -78,7 +78,7 @@ void main() {
     test('restores the last valid summary when replacement fails', () async {
       final directory = await createTempDirectory();
       addTearDown(() => directory.delete(recursive: true));
-      final targetPath = '${directory.path}/summary.json';
+      final targetPath = _path(directory, 'summary.json');
       final initialSummary = ReplayBatchSummary.fromResults(
         updatedAt: DateTime(2026, 8, 29),
         outcome: ReplaySummaryOutcome.running,
@@ -142,7 +142,7 @@ void main() {
     test('keeps a recoverable backup if restoration also fails', () async {
       final directory = await createTempDirectory();
       addTearDown(() => directory.delete(recursive: true));
-      final targetPath = '${directory.path}/summary.json';
+      final targetPath = _path(directory, 'summary.json');
       final initialSummary = ReplayBatchSummary.fromResults(
         updatedAt: DateTime(2026, 8, 29),
         outcome: ReplaySummaryOutcome.running,
@@ -190,7 +190,7 @@ void main() {
     test('does not overwrite an unrelated pre-existing summary', () async {
       final directory = await createTempDirectory();
       addTearDown(() => directory.delete(recursive: true));
-      final targetPath = '${directory.path}/summary.json';
+      final targetPath = _path(directory, 'summary.json');
       await File(targetPath).writeAsString('{"owner":"another-tool"}\n');
 
       final error = await captureError(
@@ -214,7 +214,7 @@ void main() {
     test('a new batch can replace an Afterimage-owned summary', () async {
       final directory = await createTempDirectory();
       addTearDown(() => directory.delete(recursive: true));
-      final targetPath = '${directory.path}/summary.json';
+      final targetPath = _path(directory, 'summary.json');
       final firstWriter = FileSummaryWriter(batchId: 'first-batch');
       final secondWriter = FileSummaryWriter(batchId: 'second-batch');
       addTearDown(secondWriter.close);
@@ -305,3 +305,6 @@ Iterable<FileSystemEntity> _temporaryFiles(Directory directory) {
     return name.contains('.tmp-') || name.contains('.bak-');
   });
 }
+
+String _path(Directory directory, String name) =>
+    '${directory.path}${Platform.pathSeparator}$name';

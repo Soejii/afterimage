@@ -445,7 +445,7 @@ void main() {
         isEmpty,
       );
     });
-  });
+  }, skip: !Platform.isLinux);
 }
 
 Matcher _nativeCode(LinuxNativeErrorCode code) =>
