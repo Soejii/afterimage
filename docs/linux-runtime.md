@@ -7,13 +7,14 @@ read-only fallback.
 
 ## Runtime packages
 
-Install the X11 and XTest runtime libraries supplied by your distribution:
+Install the GTK 3, X11, and XTest runtime libraries supplied by your
+distribution:
 
 | Distribution family | Packages |
 | --- | --- |
-| Arch Linux | `libx11`, `libxtst` |
-| Debian or Ubuntu | `libx11-6`, `libxtst6` |
-| Fedora | `libX11`, `libXtst` |
+| Arch Linux | `gtk3`, `libx11`, `libxtst` |
+| Debian or Ubuntu | `libgtk-3-0` or `libgtk-3-0t64`, `libx11-6`, `libxtst6` |
+| Fedora | `gtk3`, `libX11`, `libXtst` |
 
 The development `-dev` or `-devel` packages are not required for a released
 Afterimage build. They are only needed when compiling the application locally.

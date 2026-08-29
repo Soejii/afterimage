@@ -7,6 +7,97 @@ This repository is an independent successor project. The existing
 `ggst-replay-recorder` repository remains the separate behavioral reference while
 the desktop application is built out.
 
+## Install
+
+Afterimage is portable. You do not need to install Python, Flutter, Dart, or a
+compiler.
+
+Download the archive for your computer from the
+[`v0.1.0` alpha release](https://github.com/Soejii/afterimage/releases/tag/v0.1.0),
+then follow the matching instructions below. Keep every extracted file together.
+
+### Windows 10 or 11
+
+1. Download `afterimage-windows-x64.zip` from the release page.
+2. Right-click the ZIP file, select **Extract All**, and open the extracted
+   folder.
+3. Double-click `afterimage.exe`.
+
+This alpha build is not code-signed, so Windows may show a security warning.
+Only continue if the archive came from the official release page linked above.
+Windows currently supports **Keyboard** input only; controller input is not yet
+available.
+
+### 64-bit Linux
+
+1. Install the GTK 3, X11, and XTest runtime libraries listed in
+   [`docs/linux-runtime.md`](docs/linux-runtime.md).
+2. Download `afterimage-linux-x64.tar.gz` from the release page.
+3. Extract the archive with your file manager, or run:
+
+   ```bash
+   tar -xzf afterimage-linux-x64.tar.gz
+   ```
+
+4. Open the extracted folder and run `afterimage`, or run:
+
+   ```bash
+   ./afterimage
+   ```
+
+If Linux reports that the file is not executable, run
+`chmod +x afterimage` once. Keyboard input requires GGST to be running through
+gamescope. Optional controller input uses Linux `uinput`; see
+[`docs/linux-controller.md`](docs/linux-controller.md).
+
+## Before your first recording
+
+1. Install and open OBS Studio.
+2. In OBS, open **Tools > WebSocket Server Settings**, enable the WebSocket
+   server, and apply the change. Afterimage uses the local OBS WebSocket v5
+   server, normally on port `4455`.
+3. Start Guilty Gear -Strive- and open **Collection > Replay > Saved Replays**.
+   Highlight the bottom replay in the list.
+4. Open Afterimage. On **Setup**, select **Refresh checks** and follow any
+   blocker shown by the app.
+5. Open **Recorder**, choose the batch size, video layout, input source, and an
+   output folder.
+6. Select **Start batch**. Do not operate the replay menu while the batch is
+   running. **Stop safely** preserves the current recording as a partial output.
+
+Afterimage refuses to start until GGST, OBS, the replay library, the selected
+input method, and the output folder pass their checks. OBS must not already be
+recording when a batch starts.
+
+## Update or uninstall
+
+To update, download the newer archive from the
+[`Releases`](https://github.com/Soejii/afterimage/releases) page and extract it
+into a new folder. Your recordings remain in the output folder you selected.
+
+To uninstall, close Afterimage and delete its extracted folder. Afterimage does
+not install Python, services, drivers, or system-wide files. A Linux controller
+permission rule, if you added one manually, must be removed separately.
+
+## Troubleshooting
+
+- **The app does not start on Linux:** install the GTK 3 runtime and the X11
+  packages from [`docs/linux-runtime.md`](docs/linux-runtime.md).
+- **OBS is not ready:** open OBS, enable its WebSocket server, and confirm that
+  another app is not already using port `4455`.
+- **GGST is not found:** start GGST and Afterimage as the same user, then select
+  **Refresh checks**.
+- **Keyboard input does nothing on Windows:** run GGST and Afterimage at the same
+  Windows integrity level. Normally, neither should be run as administrator.
+- **Keyboard input is blocked on Linux:** launch GGST through gamescope and
+  install `libX11` and `libXtst` for your distribution.
+- **Controller input is unavailable:** it is Linux-only in this alpha and needs
+  access to `/dev/uinput`. Keyboard remains available.
+
+For detailed platform diagnostics, see
+[`docs/windows-runtime.md`](docs/windows-runtime.md) or
+[`docs/linux-runtime.md`](docs/linux-runtime.md).
+
 ## Current status
 
 Version `0.1.0+1` is an alpha desktop release:
