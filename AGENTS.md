@@ -40,6 +40,20 @@ claim a Windows build was verified locally from Linux. A regression test must
 be demonstrated failing for the expected reason before the fix, then passing
 with the fix restored.
 
+## Local Wofi deployment
+
+- After every implementation or fix that changes runtime behavior, run the
+  required checks and `fvm flutter build linux --release`, then replace the
+  complete portable bundle at `/home/suji/.local/opt/afterimage`. Wofi launches
+  `/home/suji/.local/opt/afterimage/afterimage` through
+  `/home/suji/.local/share/applications/io.github.soejii.afterimage.desktop`.
+- Preserve `afterimage-icon.png` and keep a rollback copy until the updated
+  Wofi-launched app passes a live acceptance check. Replace the whole bundle,
+  not only the executable, because its `data` and `lib` directories must stay
+  synchronized.
+- Restart only Afterimage when deploying. Do not stop or restart GGST or OBS.
+- Keep the user-local bundle, rollback copy, and desktop entry out of Git.
+
 ## Safety boundaries
 
 - Process-memory adapters are read-only. Never add game-memory writes, patches,
