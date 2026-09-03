@@ -201,6 +201,51 @@ void main() {
     expect(replayCheck?.value, populatedRoot.path);
     expect(replayCheck?.detail, contains('1 REP###.sav file found'));
   });
+
+  test('LocalSetupService uses the Steam manifest install directory', () async {
+    final root = await createTempDirectory();
+    addTearDown(() => root.delete(recursive: true));
+    final steamRoot = Directory('${root.path}/Steam');
+    final gameLibrary = Directory('${root.path}/Games');
+    final actualInstall = Directory(
+      '${gameLibrary.path}/steamapps/common/GGST Custom Install',
+    );
+    await Directory('${steamRoot.path}/steamapps').create(recursive: true);
+    await actualInstall.create(recursive: true);
+    await File('${steamRoot.path}/steamapps/libraryfolders.vdf')
+        .writeAsString('''
+"libraryfolders"
+{
+  "1"
+  {
+    "path" "${gameLibrary.path}"
+  }
+}
+''');
+    await File('${gameLibrary.path}/steamapps/appmanifest_1384160.acf')
+        .writeAsString('''
+"AppState"
+{
+  "appid" "1384160"
+  "name" "GUILTY GEAR -STRIVE-"
+  "installdir" "GGST Custom Install"
+}
+''');
+
+    final service = LocalSetupService(
+      obsProbe: const FakeObsProbe(
+        ObsProbeResult.blocked(detail: 'OBS is closed.'),
+      ),
+      replayRootCandidates: const [],
+      steamLibraryRootCandidates: [steamRoot.path],
+    );
+
+    final report = await service.inspect();
+    final installCheck = report.checkFor(SetupCheckId.gameInstall);
+
+    expect(installCheck?.status, SetupCheckStatus.ready);
+    expect(installCheck?.value, actualInstall.path);
+  });
 }
 
 class _ReadyNativeBackend

@@ -103,9 +103,9 @@ For detailed platform diagnostics, see
 Version `0.1.0+1` is an alpha desktop release:
 
 - Material 3 dark desktop UI with responsive setup and recorder screens.
-- Read-only checks for the supported OS, common GGST/Steam locations, the
-  `GGST-Win64-Shipping.exe` process, localhost OBS WebSocket port `4455`, and
-  `REP###.sav` replay files.
+- Read-only checks for the supported OS, GGST Steam app manifests across
+  configured library folders, the `GGST-Win64-Shipping.exe` process, localhost
+  OBS WebSocket port `4455`, and `REP###.sav` replay files.
 - Production startup selects the real Windows or Linux native backend. Start
   remains locked until the game, OBS, replay library, selected input mode, and
   output folder all pass their checks.

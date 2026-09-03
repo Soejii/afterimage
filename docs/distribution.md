@@ -33,7 +33,8 @@ Get-FileHash .\afterimage-windows-x64.zip -Algorithm SHA256
 Everyone needs Guilty Gear -Strive-, OBS Studio with its WebSocket server
 enabled, and saved replays. Linux needs the GTK 3 desktop runtime. Linux
 keyboard automation additionally needs X11, XTest, and a gamescope X display.
-The app reports missing recording requirements before it enables recording.
+The app reads Steam's app manifest and configured library folders to locate
+GGST. It reports missing recording requirements before it enables recording.
 
 ## Updating and removing
 

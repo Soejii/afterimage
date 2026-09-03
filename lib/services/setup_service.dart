@@ -17,12 +17,16 @@ class LocalSetupService implements SetupService {
     this.obsProbe = const LocalObsReadinessProbe(),
     this.nativeBackend,
     this.replayRootCandidates,
+    this.steamLibraryRootCandidates,
   });
 
+  static const _gameAppId = '1384160';
   static const _gameExecutable = 'GGST-Win64-Shipping.exe';
+  static const _gameInstallFolder = 'GUILTY GEAR STRIVE';
   final ObsReadinessProbe obsProbe;
   final NativeRecorderBackend? nativeBackend;
   final Iterable<String>? replayRootCandidates;
+  final Iterable<String>? steamLibraryRootCandidates;
 
   @override
   Future<SetupReport> inspect() async {
@@ -145,8 +149,19 @@ class LocalSetupService implements SetupService {
   }
 
   String? _findGameInstall() {
-    final paths = _gameInstallCandidates();
-    for (final path in paths) {
+    final libraryRoots = _steamLibraryRoots();
+    for (final libraryRoot in libraryRoots) {
+      final path = _gameInstallFromManifest(libraryRoot);
+      if (path != null) {
+        return path;
+      }
+    }
+
+    for (final libraryRoot in libraryRoots) {
+      final path = _joinParts(
+        libraryRoot,
+        ['steamapps', 'common', _gameInstallFolder],
+      );
       try {
         if (Directory(path).existsSync()) {
           return path;
@@ -159,34 +174,105 @@ class LocalSetupService implements SetupService {
     return null;
   }
 
-  List<String> _gameInstallCandidates() {
+  List<String> _steamLibraryRoots() {
+    final suppliedRoots = steamLibraryRootCandidates;
+    final roots = suppliedRoots == null
+        ? _defaultSteamLibraryRoots()
+        : _unique(suppliedRoots);
+    final discoveredRoots = <String>[...roots];
+
+    for (final root in roots) {
+      final libraryFolders = File(
+        _joinParts(root, ['steamapps', 'libraryfolders.vdf']),
+      );
+      discoveredRoots.addAll(_readVdfValues(libraryFolders, 'path'));
+    }
+
+    return _unique(discoveredRoots);
+  }
+
+  List<String> _defaultSteamLibraryRoots() {
     final environment = Platform.environment;
     final home = environment['HOME'] ?? environment['USERPROFILE'] ?? '';
-    const gameFolder = 'GUILTY GEAR -STRIVE-';
 
     if (Platform.isWindows) {
       final programFiles = environment['ProgramFiles'] ?? r'C:\Program Files';
       final programFilesX86 =
           environment['ProgramFiles(x86)'] ?? r'C:\Program Files (x86)';
       return _unique([
-        _joinParts(
-            programFilesX86, ['Steam', 'steamapps', 'common', gameFolder]),
-        _joinParts(programFiles, ['Steam', 'steamapps', 'common', gameFolder]),
+        _joinParts(programFilesX86, ['Steam']),
+        _joinParts(programFiles, ['Steam']),
       ]);
     }
 
     return _unique([
-      _joinParts(home, ['.steam', 'steam', 'steamapps', 'common', gameFolder]),
-      _joinParts(home, [
-        '.local',
-        'share',
-        'Steam',
-        'steamapps',
-        'common',
-        gameFolder,
-      ]),
-      _joinParts(home, ['Games', 'steamapps', 'common', gameFolder]),
+      _joinParts(home, ['.steam', 'steam']),
+      _joinParts(home, ['.local', 'share', 'Steam']),
+      _joinParts(home, ['Games']),
     ]);
+  }
+
+  String? _gameInstallFromManifest(String libraryRoot) {
+    final manifest = File(
+      _joinParts(
+        libraryRoot,
+        ['steamapps', 'appmanifest_$_gameAppId.acf'],
+      ),
+    );
+    final installDirectories = _readVdfValues(manifest, 'installdir');
+    if (installDirectories.isEmpty) {
+      return null;
+    }
+
+    final installDirectory = installDirectories.first;
+    if (!_isSafeInstallDirectory(installDirectory)) {
+      return null;
+    }
+
+    final path = _joinParts(
+      libraryRoot,
+      ['steamapps', 'common', installDirectory],
+    );
+    try {
+      return Directory(path).existsSync() ? path : null;
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  List<String> _readVdfValues(File file, String requestedKey) {
+    final values = <String>[];
+    final entryPattern = RegExp(
+      r'^\s*"([^"]+)"\s*"((?:\\.|[^"])*)"\s*$',
+    );
+
+    try {
+      for (final line in file.readAsLinesSync()) {
+        final match = entryPattern.firstMatch(line);
+        if (match == null || match.group(1) != requestedKey) {
+          continue;
+        }
+        values.add(_decodeVdfValue(match.group(2)!));
+      }
+    } on FileSystemException {
+      return const [];
+    } on FormatException {
+      return const [];
+    }
+
+    return values;
+  }
+
+  String _decodeVdfValue(String value) {
+    return value.replaceAll(r'\"', '"').replaceAll(r'\\', '\\');
+  }
+
+  bool _isSafeInstallDirectory(String value) {
+    return value.isNotEmpty &&
+        value != '.' &&
+        value != '..' &&
+        !value.contains('/') &&
+        !value.contains('\\');
   }
 
   _ReplayInventory _inspectReplayLibrary() {
