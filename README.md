@@ -105,7 +105,7 @@ For detailed platform diagnostics, see
 
 ## Current status
 
-Version `0.1.0+1` is an alpha desktop release:
+Version `0.1.1+2` is an alpha desktop release:
 
 - Material 3 dark desktop UI with responsive setup and recorder screens.
 - Read-only checks for the supported OS, GGST Steam app manifests across
