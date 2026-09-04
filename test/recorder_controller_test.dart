@@ -185,11 +185,12 @@ void main() {
 }
 
 Future<void> _waitUntil(bool Function() condition) async {
-  for (var index = 0; index < 100; index++) {
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (DateTime.now().isBefore(deadline)) {
     if (condition()) {
       return;
     }
-    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(const Duration(milliseconds: 1));
   }
   fail('Condition did not become true in time.');
 }
