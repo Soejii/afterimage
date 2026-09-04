@@ -12,6 +12,7 @@ import 'package:afterimage/services/windows_native_backend.dart';
 import 'package:afterimage/services/windows_native_errors.dart';
 import 'package:afterimage/services/windows_process_memory.dart';
 import 'package:afterimage/services/windows_replay_monitor.dart';
+import 'package:afterimage/services/windows_virtual_controller.dart';
 import 'package:afterimage/services/output_organizer.dart';
 
 void main() {
@@ -312,16 +313,129 @@ void main() {
     });
   });
 
-  group('Windows native backend', () {
-    test('does not silently fall back from virtual controller mode', () async {
-      final backend = WindowsNativeRecorderBackend(
-        platformIsWindows: true,
-        memoryFactory: (_) => _FakeWindowsMemorySession.withGWorldSignature(),
+  group('Windows virtual controller', () {
+    test('maps replay actions to position-neutral controller buttons', () {
+      final mapping = WindowsVirtualControllerMapping();
+
+      expect(mapping.sequenceFor(ReplayMenuAction.openReplay), [
+        WindowsControllerButton.south,
+        WindowsControllerButton.south,
+      ]);
+      expect(
+        mapping.sequenceFor(ReplayMenuAction.exitToReplayList),
+        [WindowsControllerButton.south],
+      );
+      expect(
+        mapping.sequenceFor(ReplayMenuAction.selectNextReplay),
+        [WindowsControllerButton.dpadUp],
+      );
+    });
+
+    test('presses, releases, waits, and removes the virtual controller',
+        () async {
+      final driver = _FakeWindowsVirtualControllerDriver();
+      final delays = <Duration>[];
+      final input = WindowsVirtualControllerMenuInput(
+        driver: driver,
+        delay: (duration) async => delays.add(duration),
+      );
+
+      await input.perform(ReplayMenuAction.openReplay);
+      expect(driver.openCount, 1);
+      expect(driver.states, [
+        WindowsControllerButton.south,
+        0,
+        WindowsControllerButton.south,
+        0,
+      ]);
+      expect(delays, [
+        const Duration(milliseconds: 80),
+        const Duration(milliseconds: 800),
+        const Duration(milliseconds: 80),
+      ]);
+
+      await input.close();
+      expect(driver.closeCount, 1);
+    });
+
+    test('releases the button and closes after an input failure', () async {
+      final driver = _FakeWindowsVirtualControllerDriver();
+      final input = WindowsVirtualControllerMenuInput(
+        driver: driver,
+        delay: (_) async => throw StateError('synthetic delay failure'),
       );
 
       await expectLater(
-        backend.openMenuInput(InputMode.virtualController),
-        throwsA(_windowsCode(WindowsNativeErrorCode.unsupportedController)),
+        input.perform(ReplayMenuAction.exitToReplayList),
+        throwsA(isA<StateError>()),
+      );
+      expect(driver.states, [WindowsControllerButton.south, 0]);
+      expect(driver.closeCount, 1);
+    });
+
+    test('reports a missing virtual-controller bus distinctly', () {
+      final readiness = WindowsVirtualControllerReadinessProbe(
+        api: _FakeWindowsControllerApi(
+          probeResult: windowsControllerBusNotFound,
+        ),
+        platformIsWindows: true,
+      ).inspect();
+
+      expect(readiness.ready, isFalse);
+      expect(readiness.code, WindowsNativeErrorCode.controllerDriverMissing);
+      expect(
+          readiness.detail, contains('Install the ViGEmBus driver manually'));
+    });
+
+    test('drives and destroys the native virtual-controller handle', () async {
+      final api = _FakeWindowsControllerApi(createResultAddress: 42);
+      final driver = WindowsViGEmControllerDriver(api: api);
+
+      await driver.open();
+      await driver.setButtons(WindowsControllerButton.south);
+      await driver.close();
+
+      expect(api.updates, [WindowsControllerButton.south]);
+      expect(api.destroyCount, 1);
+    });
+
+    test('surfaces the native create failure instead of falling back',
+        () async {
+      final driver = WindowsViGEmControllerDriver(
+        api: _FakeWindowsControllerApi(
+          createResultAddress: 0,
+          lastErrorResult: windowsControllerBusNotFound,
+        ),
+      );
+
+      await expectLater(
+        driver.open(),
+        throwsA(_windowsCode(WindowsNativeErrorCode.controllerDriverMissing)),
+      );
+    });
+  });
+
+  group('Windows native backend', () {
+    test('opens controller mode without consuming the physical controller',
+        () async {
+      final nativeApi = _FakeWindowsControllerApi();
+      final driver = _FakeWindowsVirtualControllerDriver();
+      final backend = WindowsNativeRecorderBackend(
+        platformIsWindows: true,
+        memoryFactory: (_) => _FakeWindowsMemorySession.withGWorldSignature(),
+        controllerProbe: WindowsVirtualControllerReadinessProbe(
+          api: nativeApi,
+          platformIsWindows: true,
+        ),
+        controllerDriverFactory: () => driver,
+      );
+
+      final input = await backend.openMenuInput(InputMode.virtualController);
+      expect(input, isA<WindowsVirtualControllerMenuInput>());
+      await input.perform(ReplayMenuAction.selectNextReplay);
+      expect(
+        driver.states,
+        [WindowsControllerButton.dpadUp, 0],
       );
     });
 
@@ -347,25 +461,22 @@ void main() {
       );
     });
 
-    test('reports controller mode as blocked in detailed readiness', () async {
+    test('reports controller mode ready when the bus probe connects', () async {
       final backend = WindowsNativeRecorderBackend(
         platformIsWindows: true,
         memoryFactory: (_) => _FakeWindowsMemorySession.withGWorldSignature(),
+        controllerProbe: WindowsVirtualControllerReadinessProbe(
+          api: _FakeWindowsControllerApi(),
+          platformIsWindows: true,
+        ),
       );
 
       final report = await backend.inspectDetailed(
         inputMode: InputMode.virtualController,
       );
 
-      expect(report.ready, isFalse);
-      expect(
-        report.blockingChecks,
-        contains(isA<WindowsReadinessCheck>().having(
-          (check) => check.code,
-          'code',
-          WindowsNativeErrorCode.unsupportedController,
-        )),
-      );
+      expect(report.ready, isTrue);
+      expect(report.blockingChecks, isEmpty);
     });
   });
 }
@@ -550,6 +661,63 @@ class _FakeWindowsKeyboardDriver implements WindowsKeyboardDriver {
   @override
   Future<void> close() async {
     closeCount++;
+  }
+}
+
+class _FakeWindowsVirtualControllerDriver
+    implements WindowsVirtualControllerDriver {
+  int openCount = 0;
+  int closeCount = 0;
+  final List<int> states = <int>[];
+
+  @override
+  Future<void> open() async {
+    openCount++;
+  }
+
+  @override
+  Future<void> setButtons(int buttons) async {
+    states.add(buttons);
+  }
+
+  @override
+  Future<void> close() async {
+    closeCount++;
+  }
+}
+
+class _FakeWindowsControllerApi implements WindowsVirtualControllerNativeApi {
+  _FakeWindowsControllerApi({
+    this.probeResult = windowsControllerSuccess,
+    this.createResultAddress = 1,
+    this.lastErrorResult = windowsControllerBusNotFound,
+  });
+
+  final int probeResult;
+  final int createResultAddress;
+  final int lastErrorResult;
+  final List<int> updates = <int>[];
+  int destroyCount = 0;
+
+  @override
+  int probe() => probeResult;
+
+  @override
+  Pointer<Void> create() => Pointer<Void>.fromAddress(createResultAddress);
+
+  @override
+  int lastError() => lastErrorResult;
+
+  @override
+  int update(Pointer<Void> controller, int buttons) {
+    updates.add(buttons);
+    return windowsControllerSuccess;
+  }
+
+  @override
+  int destroy(Pointer<Void> controller) {
+    destroyCount++;
+    return windowsControllerSuccess;
   }
 }
 

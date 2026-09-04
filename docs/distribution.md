@@ -44,8 +44,8 @@ the user.
 
 Remove Afterimage by closing the app and deleting the extracted folder. The
 portable bundle does not install services, drivers, or language runtimes.
-Optional Linux permission changes made manually are outside the bundle and must
-be reverted separately.
+Optional Linux permission changes and the optional Windows ViGEmBus driver are
+manual system changes outside the bundle and must be reverted separately.
 
 Portable archives are the first distribution target. A signed Windows
 installer and a Linux store package should be added only after the application

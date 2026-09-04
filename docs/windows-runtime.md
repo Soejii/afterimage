@@ -32,13 +32,15 @@ The Windows preflight keeps these cases separate:
   supported by this adapter. No write or patch is attempted.
 - **Keyboard input unavailable:** check that Afterimage and GGST run at the
   same Windows integrity level.
-- **Virtual controller unsupported:** select keyboard mode. The adapter does
-  not silently fall back to keyboard input.
+- **Virtual controller driver missing:** install ViGEmBus manually, restart
+  Afterimage, and refresh the setup checks. The adapter does not install a
+  driver or silently fall back to keyboard input. See
+  [`windows-controller.md`](windows-controller.md).
 
 The keyboard adapter sends `U,U` to open a replay, `U` to return to the replay
 list, and `W` to select the next replay. It releases every key even when an
 input call fails, and waits 800 milliseconds between the two keys in `U,U`.
 
-The automated tests use fake process-memory and SendInput providers. They run
-on Linux and do not claim that a live GGST process, Windows process handle,
-or Windows keyboard event has been verified.
+The automated tests use fake process-memory, SendInput, and virtual-controller
+providers. They run on Linux and do not claim that a live GGST process, Windows
+process handle, Windows keyboard event, or virtual controller has been verified.

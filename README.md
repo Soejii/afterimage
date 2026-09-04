@@ -25,8 +25,10 @@ then follow the matching instructions below. Keep every extracted file together.
 
 This alpha build is not code-signed, so Windows may show a security warning.
 Only continue if the archive came from the official release page linked above.
-Windows currently supports **Keyboard** input only; controller input is not yet
-available.
+Windows supports **Keyboard** input and an optional virtual controller. The
+controller mode works alongside a physical Xbox, DualShock, or DualSense pad;
+it requires a separately installed ViGEmBus driver. See
+[`docs/windows-controller.md`](docs/windows-controller.md).
 
 ### 64-bit Linux
 
@@ -91,8 +93,11 @@ permission rule, if you added one manually, must be removed separately.
   Windows integrity level. Normally, neither should be run as administrator.
 - **Keyboard input is blocked on Linux:** launch GGST through gamescope and
   install `libX11` and `libXtst` for your distribution.
-- **Controller input is unavailable:** it is Linux-only in this alpha and needs
-  access to `/dev/uinput`. Keyboard remains available.
+- **Controller input is unavailable on Linux:** Afterimage needs access to
+  `/dev/uinput`. Keyboard remains available.
+- **Controller input is unavailable on Windows:** install ViGEmBus manually,
+  restart Afterimage, and refresh the setup checks. Afterimage never installs
+  or changes a driver automatically.
 
 For detailed platform diagnostics, see
 [`docs/windows-runtime.md`](docs/windows-runtime.md) or
@@ -111,8 +116,10 @@ Version `0.1.0+1` is an alpha desktop release:
   output folder all pass their checks.
 - Keyboard automation is implemented on Windows through `SendInput` and on
   Linux through targeted gamescope XTest events. Linux also supports an
-  optional `uinput` virtual controller. Windows reports controller mode as
-  unavailable instead of silently falling back to keyboard.
+  optional `uinput` virtual controller. Windows supports an optional
+  Xbox-compatible virtual controller through a separately installed ViGEmBus
+  driver. Neither platform consumes the user's physical controller, and neither
+  silently falls back to keyboard.
 - No Python installation is needed. Release builds are intended to be
   self-contained.
 - The replay batch engine is now ported behind testable Dart contracts. It waits

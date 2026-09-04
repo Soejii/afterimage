@@ -14,7 +14,10 @@ enum WindowsNativeErrorCode {
   nativeApiUnavailable,
   inputUnavailable,
   invalidKey,
-  unsupportedController,
+  controllerDriverMissing,
+  controllerSlotsFull,
+  controllerUnavailable,
+  invalidControllerMapping,
   closed,
   notAttached,
 }

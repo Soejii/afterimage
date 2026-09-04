@@ -15,8 +15,10 @@ The port presents a digital gamepad named `Afterimage Replay Controller`:
 | Exit to replay list | `U` | South face button, normally `A` |
 | Select next replay | `W` | D-pad up |
 
-The face-button names are the position-neutral Linux kernel names, so the
-mapping remains clear across Xbox-style and other controller labels. The
+The face-button names are the position-neutral Linux kernel names. South is
+normally A on Xbox layouts and Cross on PlayStation layouts, so the mapping
+remains clear across physical controller brands. Afterimage does not read or
+disconnect the user's physical controller. The
 adapter defines the remaining face and D-pad codes for future mappings, but it
 does not create analog axes, rumble, or force feedback.
 

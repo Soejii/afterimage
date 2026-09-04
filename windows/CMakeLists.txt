@@ -49,6 +49,31 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
+# Build the pinned, MIT-licensed ViGEm client used by the optional Windows
+# virtual-controller bridge. The bus driver remains a separate manual install.
+include(FetchContent)
+FetchContent_Declare(
+  vigem_client_source
+  GIT_REPOSITORY https://github.com/nefarius/ViGEmClient.git
+  GIT_TAG b66d02d57e32cc8595369c53418b843e958649b4
+  GIT_SHALLOW FALSE
+)
+FetchContent_GetProperties(vigem_client_source)
+if(NOT vigem_client_source_POPULATED)
+  FetchContent_Populate(vigem_client_source)
+endif()
+add_library(vigem_client STATIC
+  "${vigem_client_source_SOURCE_DIR}/src/ViGEmClient.cpp"
+  "${vigem_client_source_SOURCE_DIR}/src/ViGEmClient.rc"
+)
+target_include_directories(vigem_client PUBLIC
+  "${vigem_client_source_SOURCE_DIR}/include"
+  PRIVATE "${vigem_client_source_SOURCE_DIR}/src"
+)
+target_compile_definitions(vigem_client PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_features(vigem_client PUBLIC cxx_std_17)
+target_link_libraries(vigem_client PRIVATE setupapi.lib)
+
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
@@ -74,6 +99,12 @@ set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
+
+install(TARGETS afterimage_controller RUNTIME
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+
+install(FILES "${CMAKE_SOURCE_DIR}/../THIRD_PARTY_NOTICES.md"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)

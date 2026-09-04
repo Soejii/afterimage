@@ -10,6 +10,7 @@ import 'windows_menu_input.dart';
 import 'windows_native_errors.dart';
 import 'windows_process_memory.dart';
 import 'windows_replay_monitor.dart';
+import 'windows_virtual_controller.dart';
 
 typedef WindowsObsRecorderFactory = ObsRecorderPort Function(
   ObsWebSocketConfig config,
@@ -27,12 +28,18 @@ class WindowsNativeRecorderBackend
     this.obsConfig,
     WindowsMemorySessionFactory? memoryFactory,
     WindowsKeyboardDriverFactory? keyboardDriverFactory,
+    WindowsVirtualControllerReadinessProbe? controllerProbe,
+    WindowsVirtualControllerDriverFactory? controllerDriverFactory,
     WindowsObsRecorderFactory? obsRecorderFactory,
     WindowsOutputOrganizerFactory? outputOrganizerFactory,
     bool? platformIsWindows,
   })  : memoryFactory = memoryFactory ?? _openWindowsMemorySession,
         keyboardDriverFactory =
             keyboardDriverFactory ?? WindowsSendInputDriver.new,
+        controllerProbe =
+            controllerProbe ?? WindowsVirtualControllerReadinessProbe(),
+        controllerDriverFactory =
+            controllerDriverFactory ?? WindowsViGEmControllerDriver.new,
         obsRecorderFactory =
             obsRecorderFactory ?? ((config) => ObsWebSocketRecorder(config)),
         outputOrganizerFactory =
@@ -43,6 +50,8 @@ class WindowsNativeRecorderBackend
   final ObsWebSocketConfig? obsConfig;
   final WindowsMemorySessionFactory memoryFactory;
   final WindowsKeyboardDriverFactory keyboardDriverFactory;
+  final WindowsVirtualControllerReadinessProbe controllerProbe;
+  final WindowsVirtualControllerDriverFactory controllerDriverFactory;
   final WindowsObsRecorderFactory obsRecorderFactory;
   final WindowsOutputOrganizerFactory outputOrganizerFactory;
   final bool? _platformIsWindows;
@@ -93,12 +102,12 @@ class WindowsNativeRecorderBackend
     final checks = <WindowsReadinessCheck>[];
     checks.add(await _inspectGame());
     if (inputMode == InputMode.virtualController) {
-      checks.add(const WindowsReadinessCheck(
-        code: WindowsNativeErrorCode.unsupportedController,
+      final controller = controllerProbe.inspect();
+      checks.add(WindowsReadinessCheck(
+        code: controller.code,
         title: 'Virtual controller',
-        detail:
-            'Virtual controller mode is not available in the Windows adapter yet. Keyboard mode must be selected.',
-        ready: false,
+        detail: controller.detail,
+        ready: controller.ready,
       ));
     } else {
       checks.add(const WindowsReadinessCheck(
@@ -119,13 +128,12 @@ class WindowsNativeRecorderBackend
 
   @override
   Future<MenuInputPort> openMenuInput(InputMode mode) async {
+    _ensureWindows();
     if (mode == InputMode.virtualController) {
-      throw const WindowsNativeException(
-        WindowsNativeErrorCode.unsupportedController,
-        'Virtual controller mode is not available in the Windows adapter yet. Keyboard mode must be selected.',
+      return WindowsVirtualControllerMenuInput(
+        driver: controllerDriverFactory(),
       );
     }
-    _ensureWindows();
     return WindowsKeyboardMenuInput(driver: keyboardDriverFactory());
   }
 
@@ -224,7 +232,7 @@ class WindowsReadinessReport {
 
   String get detail {
     if (ready) {
-      return 'Windows native replay monitor and keyboard input are ready.';
+      return 'Windows native replay monitor and selected input are ready.';
     }
     return blockingChecks.map((check) => check.detail).join(' ');
   }

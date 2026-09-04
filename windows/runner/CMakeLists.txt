@@ -16,6 +16,14 @@ add_executable(${BINARY_NAME} WIN32
   "runner.exe.manifest"
 )
 
+add_library(afterimage_controller SHARED "afterimage_controller.cpp")
+apply_standard_settings(afterimage_controller)
+target_compile_definitions(afterimage_controller PRIVATE NOMINMAX)
+target_link_libraries(afterimage_controller PRIVATE vigem_client setupapi.lib)
+set_target_properties(afterimage_controller PROPERTIES
+  OUTPUT_NAME "afterimage_controller"
+)
+
 # Apply the standard set of build settings. This can be removed for applications
 # that need different build settings.
 apply_standard_settings(${BINARY_NAME})

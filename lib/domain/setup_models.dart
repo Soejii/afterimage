@@ -145,7 +145,7 @@ extension InputModeLabel on InputMode {
       case InputMode.keyboard:
         return 'Use a mapped keyboard layout during playback.';
       case InputMode.virtualController:
-        return 'Use controller buttons through a supported virtual gamepad.';
+        return 'Use a separate virtual gamepad; your physical controller stays connected.';
     }
   }
 }
