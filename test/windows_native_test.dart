@@ -461,6 +461,23 @@ void main() {
       );
     });
 
+    test('input readiness does not depend on replay monitor attachment',
+        () async {
+      final backend = WindowsNativeRecorderBackend(
+        platformIsWindows: true,
+        memoryFactory: (_) => throw const WindowsNativeException(
+          WindowsNativeErrorCode.processMemoryDenied,
+          'memory monitor unavailable',
+        ),
+        keyboardDriverFactory: _FakeWindowsKeyboardDriver.new,
+      );
+
+      final readiness = await backend.inspectForInput(InputMode.keyboard);
+
+      expect(readiness.available, isTrue);
+      expect(readiness.detail, isNot(contains('memory monitor unavailable')));
+    });
+
     test('reports controller mode ready when the bus probe connects', () async {
       final backend = WindowsNativeRecorderBackend(
         platformIsWindows: true,

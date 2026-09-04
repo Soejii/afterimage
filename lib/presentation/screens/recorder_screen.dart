@@ -275,22 +275,22 @@ class _OptionsPanel extends StatelessWidget {
               }
             },
             child: Column(
-              children: InputMode.values
-                  .map(
-                    (mode) => _InputModeTile(
-                      tileKey: ValueKey('input-mode-${mode.name}'),
-                      mode: mode,
-                      available:
-                          controller?.isInputModeAvailable(mode) ?? false,
-                      checking: controller?.readinessFor(mode) == null &&
-                          (controller?.isChecking ?? false),
-                      enabled: !busy &&
-                          (options.inputMode == mode ||
-                              (controller?.isInputModeAvailable(mode) ??
-                                  false)),
-                    ),
-                  )
-                  .toList(),
+              children: InputMode.values.map(
+                (mode) {
+                  final readiness = controller?.readinessFor(mode);
+                  return _InputModeTile(
+                    tileKey: ValueKey('input-mode-${mode.name}'),
+                    mode: mode,
+                    available: readiness?.available ?? false,
+                    availabilityDetail: readiness?.detail,
+                    checking:
+                        readiness == null && (controller?.isChecking ?? false),
+                    enabled: !busy &&
+                        (options.inputMode == mode ||
+                            (readiness?.available ?? false)),
+                  );
+                },
+              ).toList(),
             ),
           ),
         ),
@@ -318,6 +318,7 @@ class _InputModeTile extends StatelessWidget {
     required this.tileKey,
     required this.mode,
     required this.available,
+    required this.availabilityDetail,
     required this.checking,
     required this.enabled,
   });
@@ -325,16 +326,20 @@ class _InputModeTile extends StatelessWidget {
   final Key tileKey;
   final InputMode mode;
   final bool available;
+  final String? availabilityDetail;
   final bool checking;
   final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    final availability = available
-        ? 'Ready on this machine.'
-        : checking
-            ? 'Checking availability…'
-            : 'Not available in the current backend.';
+    final reportedDetail = availabilityDetail?.trim();
+    final availability = checking
+        ? 'Checking availability…'
+        : reportedDetail != null && reportedDetail.isNotEmpty
+            ? reportedDetail
+            : available
+                ? 'Ready on this machine.'
+                : 'Availability could not be determined.';
     return RadioListTile<InputMode>(
       key: tileKey,
       value: mode,

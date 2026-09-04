@@ -101,10 +101,45 @@ class LinuxNativeRecorderBackend
 
   @override
   Future<NativeBackendReadiness> inspectForInput(InputMode inputMode) async {
-    final report = await inspectDetailed(inputMode: inputMode);
+    if (!Platform.isLinux) {
+      return const NativeBackendReadiness(
+        available: false,
+        detail: 'This backend is available only in a Linux desktop build.',
+      );
+    }
+
+    final checks = switch (inputMode) {
+      InputMode.keyboard => <LinuxReadinessCheck>[
+          _inspectX11(),
+          _inspectXTest(),
+          _inspectDisplay(),
+          const LinuxReadinessCheck(
+            code: null,
+            title: 'Keyboard input',
+            detail: 'Linux XTest keyboard input is selected.',
+            ready: true,
+          ),
+        ],
+      InputMode.virtualController => <LinuxReadinessCheck>[
+          () {
+            final controller = controllerProbe.inspect();
+            return LinuxReadinessCheck(
+              code: controller.ready
+                  ? null
+                  : LinuxNativeErrorCode.unsupportedController,
+              title: 'Virtual controller',
+              detail: controller.detail,
+              ready: controller.ready,
+            );
+          }(),
+        ],
+    };
+    final report = LinuxReadinessReport(checks: List.unmodifiable(checks));
     return NativeBackendReadiness(
       available: report.ready,
-      detail: report.detail,
+      detail: report.ready
+          ? '${inputMode.label} is ready.'
+          : report.blockingChecks.map((check) => check.detail).join(' '),
     );
   }
 

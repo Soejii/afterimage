@@ -75,10 +75,23 @@ class WindowsNativeRecorderBackend
 
   @override
   Future<NativeBackendReadiness> inspectForInput(InputMode inputMode) async {
-    final report = await inspectDetailed(inputMode: inputMode);
+    if (!_isWindows) {
+      return const NativeBackendReadiness(
+        available: false,
+        detail: 'This backend is available only in a Windows desktop build.',
+      );
+    }
+    if (inputMode == InputMode.keyboard) {
+      return const NativeBackendReadiness(
+        available: true,
+        detail: 'Windows SendInput keyboard input is ready.',
+      );
+    }
+
+    final controller = controllerProbe.inspect();
     return NativeBackendReadiness(
-      available: report.ready,
-      detail: report.detail,
+      available: controller.ready,
+      detail: controller.detail,
     );
   }
 

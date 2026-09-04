@@ -100,8 +100,14 @@ void main() {
       find.byKey(const ValueKey('input-mode-virtualController')),
     );
     expect(controllerTile.enabled, isFalse);
-    expect(find.textContaining('Not available in the current backend.'),
-        findsOneWidget);
+    expect(
+      find.textContaining('No virtual controller driver is installed.'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Not available in the current backend.'),
+      findsNothing,
+    );
   });
 
   testWidgets('sidebar follows selected input readiness changes',

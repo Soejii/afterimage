@@ -390,6 +390,28 @@ void main() {
       expect(report.detail, contains('game absent'));
     });
 
+    test('input readiness does not depend on replay monitor attachment',
+        () async {
+      final backend = LinuxNativeRecorderBackend(
+        libraryProbe: _FakeLibraryProbe(
+          <String>{'libX11.so.6', 'libXtst.so.6'},
+        ),
+        displayDiscovery: LinuxGamescopeDisplayDiscovery(
+          procFileSystem: _gameProc(':5'),
+        ),
+        memoryFactory: (_) => throw const LinuxNativeException(
+          LinuxNativeErrorCode.processMemoryDenied,
+          'memory monitor unavailable',
+        ),
+        keyboardDriverFactory: _FakeKeyboardDriver.new,
+      );
+
+      final readiness = await backend.inspectForInput(InputMode.keyboard);
+
+      expect(readiness.available, isTrue);
+      expect(readiness.detail, isNot(contains('memory monitor unavailable')));
+    });
+
     test('assembles monitor, keyboard, OBS, and output ports', () async {
       final fakeDriver = _FakeKeyboardDriver();
       final fakeObs = _FakeObsRecorder();

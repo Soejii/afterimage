@@ -69,7 +69,7 @@ class LinuxReadinessReport {
 
   String get detail {
     if (ready) {
-      return 'Linux native replay monitor and keyboard input are ready.';
+      return 'Linux native replay monitor and selected input are ready.';
     }
     return blockingChecks.map((check) => check.detail).join(' ');
   }
