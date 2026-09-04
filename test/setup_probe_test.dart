@@ -205,15 +205,19 @@ void main() {
   test('LocalSetupService uses the Steam manifest install directory', () async {
     final root = await createTempDirectory();
     addTearDown(() => root.delete(recursive: true));
-    final steamRoot = Directory('${root.path}/Steam');
-    final gameLibrary = Directory('${root.path}/Games');
+    final separator = Platform.pathSeparator;
+    final steamRoot = Directory('${root.path}${separator}Steam');
+    final gameLibrary = Directory('${root.path}${separator}Games');
     final actualInstall = Directory(
-      '${gameLibrary.path}/steamapps/common/GGST Custom Install',
+      '${gameLibrary.path}${separator}steamapps${separator}common'
+      '${separator}GGST Custom Install',
     );
-    await Directory('${steamRoot.path}/steamapps').create(recursive: true);
+    await Directory('${steamRoot.path}${separator}steamapps')
+        .create(recursive: true);
     await actualInstall.create(recursive: true);
-    await File('${steamRoot.path}/steamapps/libraryfolders.vdf')
-        .writeAsString('''
+    await File(
+      '${steamRoot.path}${separator}steamapps${separator}libraryfolders.vdf',
+    ).writeAsString('''
 "libraryfolders"
 {
   "1"
@@ -222,8 +226,10 @@ void main() {
   }
 }
 ''');
-    await File('${gameLibrary.path}/steamapps/appmanifest_1384160.acf')
-        .writeAsString('''
+    await File(
+      '${gameLibrary.path}${separator}steamapps'
+      '${separator}appmanifest_1384160.acf',
+    ).writeAsString('''
 "AppState"
 {
   "appid" "1384160"
