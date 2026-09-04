@@ -48,9 +48,9 @@ class LinuxUinputMenuMapping {
     ReplayMenuAction.exitToReplayList: <LinuxUinputButton>[
       LinuxUinputButton.south,
     ],
-    // Keyboard W: move to the next replay with D-pad down.
+    // Keyboard W: move upward to the next replay with D-pad up.
     ReplayMenuAction.selectNextReplay: <LinuxUinputButton>[
-      LinuxUinputButton.dpadDown,
+      LinuxUinputButton.dpadUp,
     ],
   };
 

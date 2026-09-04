@@ -13,7 +13,7 @@ The port presents a digital gamepad named `Afterimage Replay Controller`:
 | --- | --- | --- |
 | Open replay | `U`, `U` | South face button, South face button, normally `A`, `A` |
 | Exit to replay list | `U` | South face button, normally `A` |
-| Select next replay | `W` | D-pad down |
+| Select next replay | `W` | D-pad up |
 
 The face-button names are the position-neutral Linux kernel names, so the
 mapping remains clear across Xbox-style and other controller labels. The

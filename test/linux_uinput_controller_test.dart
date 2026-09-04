@@ -20,7 +20,7 @@ void main() {
       );
       expect(
         mapping.sequenceFor(ReplayMenuAction.selectNextReplay),
-        [LinuxUinputButton.dpadDown],
+        [LinuxUinputButton.dpadUp],
       );
     });
 
@@ -69,7 +69,7 @@ void main() {
           device.keyBits,
           containsAll(<int>[
             LinuxUinputButton.south.code,
-            LinuxUinputButton.dpadDown.code,
+            LinuxUinputButton.dpadUp.code,
           ]));
       expect(device.actions, [
         'setup',
