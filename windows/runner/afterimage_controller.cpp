@@ -89,7 +89,7 @@ extern "C" __declspec(dllexport) std::uint32_t afterimage_controller_update(
   auto* handle = static_cast<ControllerHandle*>(raw_handle);
   if (handle == nullptr || handle->client == nullptr ||
       handle->target == nullptr) {
-    return VIGEM_ERROR_INVALID_TARGET;
+    return static_cast<std::uint32_t>(VIGEM_ERROR_INVALID_TARGET);
   }
   XUSB_REPORT report{};
   report.wButtons = buttons;
@@ -100,7 +100,7 @@ extern "C" __declspec(dllexport) std::uint32_t afterimage_controller_destroy(
     void* raw_handle) {
   auto* handle = static_cast<ControllerHandle*>(raw_handle);
   if (handle == nullptr) {
-    return VIGEM_ERROR_INVALID_TARGET;
+    return static_cast<std::uint32_t>(VIGEM_ERROR_INVALID_TARGET);
   }
   XUSB_REPORT report{};
   const auto neutral_result =
