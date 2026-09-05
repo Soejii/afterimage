@@ -62,7 +62,6 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/branding/
     - assets/help/obs-tools-menu.png
     - assets/help/obs-websocket-settings.png
 

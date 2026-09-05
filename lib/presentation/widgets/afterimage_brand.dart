@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 
-/// The application wordmark, using the real icon.
+/// The application wordmark.
 ///
-/// This used to draw `Icons.blur_on_rounded` inside a gradient square while the
-/// actual icon sat unreferenced in `assets/branding/`, so the application never
-/// showed its own logo. The asset is now bundled and used, with the old drawn
-/// mark kept only as a fallback if the image cannot load.
+/// There is deliberately no image here. The application shipped with a drawn
+/// icon that was not good enough to put in front of a user, so it was removed
+/// rather than kept out of sentiment. A mark can be added again when there is
+/// one worth showing.
 class AfterimageBrand extends StatelessWidget {
   const AfterimageBrand({
     super.key,
@@ -22,18 +22,21 @@ class AfterimageBrand extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SizedBox(
+        Container(
           width: markSize,
           height: markSize,
-          child: Image.asset(
-            'assets/branding/afterimage-icon.png',
-            width: markSize,
-            height: markSize,
-            filterQuality: FilterQuality.medium,
-            errorBuilder: (context, error, stackTrace) => _FallbackMark(
-              size: markSize,
-              compact: compact,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(compact ? 9 : 11),
+            gradient: const LinearGradient(
+              colors: [AfterimageTheme.accent, AfterimageTheme.accentStrong],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
+          ),
+          child: Icon(
+            Icons.motion_photos_on_outlined,
+            color: AfterimageTheme.canvas,
+            size: compact ? 19 : 24,
           ),
         ),
         const SizedBox(width: 11),
@@ -46,34 +49,6 @@ class AfterimageBrand extends StatelessWidget {
               ),
         ),
       ],
-    );
-  }
-}
-
-class _FallbackMark extends StatelessWidget {
-  const _FallbackMark({required this.size, required this.compact});
-
-  final double size;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(compact ? 9 : 12),
-        gradient: const LinearGradient(
-          colors: [AfterimageTheme.accent, AfterimageTheme.accentStrong],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Icon(
-        Icons.blur_on_rounded,
-        color: const Color(0xFF0B1A13),
-        size: compact ? 20 : 25,
-      ),
     );
   }
 }

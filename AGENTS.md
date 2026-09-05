@@ -62,10 +62,12 @@ part of the change, not as an optional follow-up.
 - Replacing the bundle under a running process does not update that process.
   Say plainly that Afterimage must be relaunched, and never kill it yourself
   while a batch could be recording.
-- Preserve `afterimage-icon.png` and keep a rollback copy until the updated
-  Wofi-launched app passes a live acceptance check. Replace the whole bundle,
-  not only the executable, because its `data` and `lib` directories must stay
-  synchronized.
+- Keep a rollback copy until the updated Wofi-launched app passes a live
+  acceptance check. Replace the whole bundle, not only the executable, because
+  its `data` and `lib` directories must stay synchronized.
+- Afterimage has no icon of its own. The desktop entry uses the themed name
+  `media-record`. Do not put an image back into the bundle without one that is
+  good enough to ship.
 - Restart only Afterimage when deploying. Do not stop or restart GGST or OBS.
 - Keep the user-local bundle, rollback copy, and desktop entry out of Git.
 
