@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app/afterimage_app.dart';
 import 'presentation/recorder_controller.dart';
@@ -9,6 +10,8 @@ import 'services/setup_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
+  await windowManager.setPreventClose(true);
   final obs = ObsConnectionService();
   final backend =
       createPlatformNativeRecorderBackend(obsConfigProvider: obs.configuration);
@@ -29,5 +32,6 @@ Future<void> main() async {
     setupService: setup,
     recorderBackend: backend,
     recorderController: controller,
+    enableWindowGuard: true,
   ));
 }
