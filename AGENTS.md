@@ -45,11 +45,23 @@ with the fix restored.
 
 ## Local Wofi deployment
 
-- After every implementation or fix that changes runtime behavior, run the
-  required checks and `fvm flutter build linux --release`, then replace the
-  complete portable bundle at `/home/suji/.local/opt/afterimage`. Wofi launches
+**The installed application must never be older than the work.** Suji launches
+Afterimage from Wofi with Super+R and expects that copy to contain whatever
+changed. Finishing a session without updating it means he tests yesterday's
+build and reports defects that were already fixed, so treat the redeploy as
+part of the change, not as an optional follow-up.
+
+- After every implementation or fix that changes runtime behavior, and again
+  before reporting a session finished, run the required checks and
+  `fvm flutter build linux --release`, then replace the complete portable
+  bundle at `/home/suji/.local/opt/afterimage`. Wofi launches
   `/home/suji/.local/opt/afterimage/afterimage` through
   `/home/suji/.local/share/applications/io.github.soejii.afterimage.desktop`.
+- When a release was cut from CI, deploy that artifact rather than a local
+  build, so the installed copy is byte-identical to what users download.
+- Replacing the bundle under a running process does not update that process.
+  Say plainly that Afterimage must be relaunched, and never kill it yourself
+  while a batch could be recording.
 - Preserve `afterimage-icon.png` and keep a rollback copy until the updated
   Wofi-launched app passes a live acceptance check. Replace the whole bundle,
   not only the executable, because its `data` and `lib` directories must stay
