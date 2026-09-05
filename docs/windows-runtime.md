@@ -15,6 +15,26 @@ The Windows desktop build includes the Dart runtime, so Python is not needed.
 - Run OBS with its WebSocket server enabled. Afterimage checks the WebSocket
   protocol and refuses to take over an existing OBS recording.
 
+## Game and replay discovery
+
+Afterimage checks the usual Steam folders, paths supplied by the Windows
+environment, and Steam's read-only registry values. It then follows Steam's
+configured library folders when looking for GGST. If discovery cannot see a
+library, choose the game or saved replay folder in Setup. The selected folders
+are read-only setup inputs and are never modified by Afterimage.
+
+Start with one replay and inspect the resulting video before recording a larger
+batch. Confirm that the picture shows GGST and that the expected game sound is
+present. Choose the keyboard or virtual-controller method under **Replay controls**; the
+controller method requires the separately installed ViGEmBus driver.
+
+After selecting Record, switch to GGST during the five-second countdown.
+Keyboard recording checks that GGST owns the active window before it sends
+keys and while the replay plays. If another app becomes active, Afterimage
+stops the batch and attempts to preserve the current recording as a partial
+video. Return to Saved Replays before trying again. These checks do not bring
+the game to the foreground automatically.
+
 Afterimage does not install drivers, change security policy, patch GGST, or
 modify replay files.
 

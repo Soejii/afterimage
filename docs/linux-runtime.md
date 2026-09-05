@@ -24,6 +24,19 @@ Afterimage sends XTest events to the `DISPLAY` inherited by
 window, take desktop focus, or inject into the default desktop display. Start
 GGST through gamescope and keep its process alive while a batch runs.
 
+## Game and replay discovery
+
+Afterimage reads Steam's `libraryfolders.vdf` and GGST's app manifest to find
+the installation. It checks the standard native Steam locations, Flatpak
+Steam's data locations, and every additional library declared by Steam. For a
+Proton installation it looks for saved replays under that same library's
+`steamapps/compatdata/1384160` save tree. This keeps the game and its replay
+files paired when GGST is installed on a secondary drive.
+
+If the folder is not visible to the desktop app, choose the game or saved
+replay folder from Setup. The check only reads the selected path. It does not
+create, edit, move, or delete replay files.
+
 ## Process-memory permission
 
 The monitor reads a few GGST values and never writes game memory. Linux may
@@ -65,3 +78,8 @@ The Linux preflight keeps these cases separate:
 The current automated tests use fake procfs, memory, keyboard, and controller
 providers. They do not claim that a live GGST process, gamescope display,
 XTest event, or uinput controller has been verified on this machine.
+
+The first recording should be one replay. Confirm the resulting video has the
+expected picture and sound before starting a larger batch. This is especially
+important on Linux because OBS scenes, PipeWire or PulseAudio sources, display
+permissions, and gamescope configuration are local to each desktop.

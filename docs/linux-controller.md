@@ -1,6 +1,6 @@
 # Optional Linux virtual controller
 
-Afterimage includes an optional Linux `uinput` menu-input port. It is a
+Afterimage includes an optional Linux `uinput` menu-input port. It is an
 adapter behind a small native seam and is available when the setup probe can
 open a uinput device. Keyboard mode remains an explicit user choice, not an
 automatic fallback after a controller failure.

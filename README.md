@@ -13,7 +13,7 @@ Afterimage is portable. You do not need to install Python, Flutter, Dart, or a
 compiler.
 
 Download the archive for your computer from the
-[`v0.1.0` alpha release](https://github.com/Soejii/afterimage/releases/tag/v0.1.0),
+[Releases](https://github.com/Soejii/afterimage/releases),
 then follow the matching instructions below. Keep every extracted file together.
 
 ### Windows 10 or 11
@@ -52,24 +52,35 @@ If Linux reports that the file is not executable, run
 gamescope. Optional controller input uses Linux `uinput`; see
 [`docs/linux-controller.md`](docs/linux-controller.md).
 
-## Before your first recording
+## First recording
 
-1. Install and open OBS Studio.
-2. In OBS, open **Tools > WebSocket Server Settings**, enable the WebSocket
-   server, and apply the change. Afterimage uses the local OBS WebSocket v5
-   server, normally on port `4455`.
-3. Start Guilty Gear -Strive- and open **Collection > Replay > Saved Replays**.
-   Highlight the bottom replay in the list.
-4. Open Afterimage. On **Setup**, select **Refresh checks** and follow any
-   blocker shown by the app.
-5. Open **Recorder**, choose the batch size, video layout, input source, and an
-   output folder.
-6. Select **Start batch**. Do not operate the replay menu while the batch is
-   running. **Stop safely** preserves the current recording as a partial output.
+Afterimage is designed to guide the first recording from one screen. You do
+not need to know what an OBS WebSocket is. Afterimage uses OBS as the recorder,
+so it can start and stop each video for you.
 
-Afterimage refuses to start until GGST, OBS, the replay library, the selected
-input method, and the output folder pass their checks. OBS must not already be
-recording when a batch starts.
+1. Open OBS and Guilty Gear -Strive-. In GGST, open **Collection > Replay >
+   Saved Replays** and leave the replay list visible.
+2. Open Afterimage and follow **Setup**. It checks the game, saved replays,
+   OBS, and the selected recording method without changing your computer.
+3. If a game or replay folder is not found automatically, use **Locate game** or **Locate saved replays**
+   in Setup. The selection is saved by the app and can be changed later.
+4. Afterimage starts with **one replay**. Use this short test to confirm that
+   the video shows the game and that its sound is present.
+5. Choose a larger **Batch size** only after the test video looks and sounds
+   right. **Replay controls** contains the keyboard or virtual-gamepad choice.
+6. Choose an output folder and start the batch. Each batch gets its own folder
+   so a second run cannot overwrite the first. The results screen can open the
+   folder and the saved video.
+
+Keep Afterimage and GGST open while a batch runs. Do not operate the replay
+menu during recording. **Stop safely** keeps the current recording as a
+partial output when OBS has already created it. Afterimage does not start when
+OBS is already recording.
+
+If OBS is not detected, open **Tools > WebSocket Server Settings** in OBS,
+enable the server, and apply the change. The default local port is `4455`.
+Password and port details are only needed when OBS uses settings different from
+the usual local setup.
 
 ## Update or uninstall
 
@@ -85,10 +96,12 @@ permission rule, if you added one manually, must be removed separately.
 
 - **The app does not start on Linux:** install the GTK 3 runtime and the X11
   packages from [`docs/linux-runtime.md`](docs/linux-runtime.md).
-- **OBS is not ready:** open OBS, enable its WebSocket server, and confirm that
-  another app is not already using port `4455`.
-- **GGST is not found:** start GGST and Afterimage as the same user, then select
-  **Refresh checks**.
+- **OBS is not ready:** open OBS, enable its WebSocket server, and select
+  **Refresh checks**. If Afterimage asks for a password, enter the password
+  shown in OBS's WebSocket Server Settings.
+- **GGST or saved replays are not found:** start GGST and Afterimage as the
+  same user, then use **Locate game** or **Locate saved replays** in Setup,
+  or select **Refresh checks**.
 - **Keyboard input does nothing on Windows:** run GGST and Afterimage at the same
   Windows integrity level. Normally, neither should be run as administrator.
 - **Keyboard input is blocked on Linux:** launch GGST through gamescope and
@@ -109,8 +122,10 @@ Version `0.1.1+2` is an alpha desktop release:
 
 - Material 3 dark desktop UI with responsive setup and recorder screens.
 - Read-only checks for the supported OS, GGST Steam app manifests across
-  configured library folders, the `GGST-Win64-Shipping.exe` process, localhost
-  OBS WebSocket port `4455`, and `REP###.sav` replay files.
+  configured library folders, the `GGST-Win64-Shipping.exe` process, the local
+  OBS recording connection, and `REP###.sav` replay files. Linux discovery
+  follows native and Flatpak Steam library folders; Windows also checks common
+  environment paths and Steam's read-only registry entries.
 - Production startup selects the real Windows or Linux native backend. Start
   remains locked until the game, OBS, replay library, selected input mode, and
   output folder all pass their checks.
@@ -142,8 +157,9 @@ Version `0.1.1+2` is an alpha desktop release:
   from checkpointing into the same output folder at once.
 
 No files are installed, modified, or deleted by the setup checks. The recorder
-provides a native output-folder picker, live progress, safe Stop, terminal
-results, and paths to preserved output.
+provides guided folder selection, a one-replay test path, an output-folder
+picker, live progress, safe Stop, terminal results, and paths to preserved
+output.
 
 The native adapters and UI are covered by automated tests, but live GGST input
 and process-memory operation still need end-to-end verification on both target
@@ -183,6 +199,10 @@ does not let close errors replace the primary batch result.
 `lib/services/obs_websocket_recorder.dart` is a small OBS WebSocket v5 client.
 `lib/services/obs_config_discovery.dart` reads native Linux, Flatpak Linux, and
 Windows config locations without writing credentials to disk or logs.
+`lib/services/setup_service.dart` searches Steam manifests and configured
+library folders, including Flatpak Steam on Linux, then scans the matching
+Proton save locations. User-selected game and replay folders take precedence
+without being modified by setup checks.
 `lib/services/output_organizer.dart` performs collision-checked moves, while
 `lib/services/summary_writer.dart` writes durable JSON checkpoints.
 
