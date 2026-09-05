@@ -40,6 +40,14 @@ class RecorderController extends ChangeNotifier {
 
   final ObsConnectionService? obsConnection;
   final NativeRecorderBackend backend;
+  Completer<void>? _batchDone;
+
+  Future<void> stopAndWait() async {
+    final done = _batchDone;
+    await requestStop();
+    await done?.future;
+  }
+
   final ReplayBatchEngineFactory engineFactory;
   final OutputDirectoryPicker directoryPicker;
   final OutputDirectoryPreflight outputPreflight;
@@ -73,9 +81,15 @@ class RecorderController extends ChangeNotifier {
   @override
   void dispose() {
     obsConnection?.removeListener(_onObsChanged);
+    unawaited(requestStop());
     _disposed = true;
     _readinessGeneration++;
     super.dispose();
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
   }
 
   RecordingOptions get options => _options;
@@ -341,6 +355,7 @@ class RecorderController extends ChangeNotifier {
     }
 
     _isBusy = true;
+    _batchDone = Completer<void>();
     _stopRequested = false;
     _state = ReplayBatchState.preparing;
     _progress = ReplayBatchProgress(
@@ -366,10 +381,15 @@ class RecorderController extends ChangeNotifier {
       if (!outputReadiness.ready) {
         throw StateError(outputReadiness.detail);
       }
+      _throwIfCancelled();
       monitor = await backend.openReplayMonitor();
+      _throwIfCancelled();
       menuInput = await backend.openMenuInput(_options.inputMode);
+      _throwIfCancelled();
       obs = await backend.openObsRecorder();
+      _throwIfCancelled();
       final organizer = await backend.openOutputOrganizer();
+      _throwIfCancelled();
       final engine = engineFactory(
         monitor: monitor,
         menuInput: menuInput,
@@ -397,6 +417,17 @@ class RecorderController extends ChangeNotifier {
       }
       _collectResultOutputs(result);
       return result;
+    } on _PreparationCancelled {
+      _state = ReplayBatchState.stopped;
+      _result = const ReplayBatchResult(
+          outcome: ReplayBatchOutcome.stopped, replays: []);
+      _progress = ReplayBatchProgress(
+          state: ReplayBatchState.stopped,
+          totalReplays: replayCount,
+          currentReplay: 0,
+          completedReplays: 0,
+          detail: 'Stopped before recording started.');
+      return _result;
     } catch (error) {
       _state = ReplayBatchState.failed;
       _error = error;
@@ -421,13 +452,14 @@ class RecorderController extends ChangeNotifier {
       _activeEngine = null;
       _isBusy = false;
       _stopRequested = false;
+      _batchDone?.complete();
       notifyListeners();
     }
   }
 
   Future<void> requestStop() async {
     final engine = _activeEngine;
-    if (!_isBusy || engine == null) {
+    if (!_isBusy) {
       return;
     }
     _stopRequested = true;
@@ -442,13 +474,17 @@ class RecorderController extends ChangeNotifier {
     );
     notifyListeners();
     try {
-      await engine.requestStop();
+      await engine?.requestStop();
     } catch (error) {
       _error = StateError(
         'The stop request could not be sent. The recorder will still close its connections. ${_friendlyError(error)}',
       );
       notifyListeners();
     }
+  }
+
+  void _throwIfCancelled() {
+    if (_stopRequested || _disposed) throw const _PreparationCancelled();
   }
 
   int? replayCountFromReport() {
@@ -613,4 +649,8 @@ class UnavailableNativeRecorderBackend implements NativeRecorderBackend {
   @override
   Future<OutputOrganizerPort> openOutputOrganizer() =>
       Future.error(const RecorderUnavailableException(_message));
+}
+
+class _PreparationCancelled implements Exception {
+  const _PreparationCancelled();
 }

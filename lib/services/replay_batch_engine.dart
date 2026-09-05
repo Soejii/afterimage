@@ -838,12 +838,11 @@ class ReplayBatchEngine implements RecordingEngine {
     } catch (summaryError) {
       finalError = _combineErrors(finalError, summaryError);
     }
-    _setState(
-        ReplayBatchState.stopped, 'Stop requested. Current output preserved.');
-    _emit(
-      ReplayBatchEventType.stopped,
-      message: 'Stop requested. Current output preserved.',
-    );
+    final detail = finalError == null
+        ? 'Recording stopped. Any available output has been preserved.'
+        : 'Recording stopped, but saving needs attention. Check OBS and your output folder.';
+    _setState(ReplayBatchState.stopped, detail);
+    _emit(ReplayBatchEventType.stopped, message: detail, error: finalError);
     return ReplayBatchResult(
       outcome: ReplayBatchOutcome.stopped,
       replays: List.unmodifiable(replayResults),

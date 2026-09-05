@@ -561,9 +561,21 @@ class _PreflightPanel extends StatelessWidget {
             child: busy
                 ? FilledButton.icon(
                     key: const ValueKey('stop-batch'),
-                    onPressed: () => unawaited(controller!.requestStop()),
-                    icon: const Icon(Icons.stop_circle_outlined),
-                    label: const Text('Stop safely'),
+                    onPressed: controller!.isStopping
+                        ? null
+                        : () => unawaited(controller!.requestStop()),
+                    icon: controller!.isStopping
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.stop_circle_outlined),
+                    label: Text(
+                      controller!.isStopping
+                          ? 'Saving before stopping…'
+                          : 'Stop safely',
+                    ),
                   )
                 : FilledButton.icon(
                     key: const ValueKey('start-batch'),
@@ -691,17 +703,21 @@ class _TerminalResult extends StatelessWidget {
         )
         .length;
     final stopped = result.outcome == ReplayBatchOutcome.stopped;
-    final failed = result.outcome == ReplayBatchOutcome.failed;
+    final needsAttention = stopped && result.error != null;
+    final failed =
+        result.outcome == ReplayBatchOutcome.failed || needsAttention;
     final color = failed
         ? const Color(0xFFFF9E9E)
         : stopped
             ? const Color(0xFFFFC67A)
             : const Color(0xFFB8F1D3);
-    final headline = failed
-        ? 'Batch stopped after a failure'
-        : stopped
-            ? 'Batch stopped safely'
-            : 'Batch completed';
+    final headline = needsAttention
+        ? 'Recording stopped, but saving needs attention'
+        : failed
+            ? 'Batch stopped after a failure'
+            : stopped
+                ? 'Batch stopped safely'
+                : 'Batch completed';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),

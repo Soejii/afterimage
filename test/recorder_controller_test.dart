@@ -114,6 +114,35 @@ void main() {
     controller.dispose();
   });
 
+  test('stop during preparation prevents opening recorder ports', () async {
+    final backend = _FakeBackend();
+    final preflight = _PendingPreflight();
+    final controller = RecorderController(
+      backend: backend,
+      outputPreflight: preflight,
+      engineFactory: (
+              {required monitor,
+              required menuInput,
+              required obs,
+              required organizer,
+              required onEvent}) =>
+          _ImmediateEngine(),
+      options: const RecordingOptions(outputDirectory: '/tmp/afterimage'),
+    )..setSetupReport(_readyReport());
+    await controller.refreshReadiness();
+    final run = controller.startBatch();
+    await preflight.started.future;
+    await controller.requestStop();
+    preflight.completion.complete(const OutputDirectoryReadiness.ready());
+    await run;
+    expect(backend.monitorOpens, 0,
+        reason:
+            'Stop during preparation must prevent opening the game monitor');
+    expect(backend.obsOpens, 0);
+    expect(controller.result?.outcome, ReplayBatchOutcome.stopped);
+    controller.dispose();
+  });
+
   test('folder picker updates the editable output path', () async {
     final controller = RecorderController(
       backend: _FakeBackend(),
@@ -390,4 +419,25 @@ class _FakeOrganizer implements OutputOrganizerPort {
       partial: partial,
     );
   }
+}
+
+class _PendingPreflight implements OutputDirectoryPreflight {
+  final started = Completer<void>();
+  final completion = Completer<OutputDirectoryReadiness>();
+  @override
+  Future<OutputDirectoryReadiness> check(String outputDirectory) {
+    started.complete();
+    return completion.future;
+  }
+}
+
+class _ImmediateEngine implements RecordingEngine {
+  @override
+  bool get isRunning => false;
+  @override
+  Future<void> requestStop() async {}
+  @override
+  Future<ReplayBatchResult> startBatch(ReplayBatchRequest request) async =>
+      const ReplayBatchResult(
+          outcome: ReplayBatchOutcome.completed, replays: []);
 }
