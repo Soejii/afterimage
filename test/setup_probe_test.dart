@@ -150,7 +150,6 @@ void main() {
 
     expect(obsCheck?.status, SetupCheckStatus.blocked);
     expect(obsCheck?.detail, contains('password'));
-    expect(report.checkFor(SetupCheckId.runtime), isNull);
   });
 
   test('LocalSetupService publishes native and controller readiness', () async {

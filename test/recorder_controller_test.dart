@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:afterimage/domain/recorder_contracts.dart';
 import 'package:afterimage/domain/replay_batch.dart';
 import 'package:afterimage/domain/setup_models.dart';
+import 'package:afterimage/presentation/recorder_blocker.dart';
 import 'package:afterimage/presentation/recorder_controller.dart';
 import 'package:afterimage/services/output_directory_preflight.dart';
 import 'package:afterimage/services/replay_batch_engine.dart';
@@ -34,8 +35,10 @@ void main() {
       isFalse,
     );
     expect(backend.inspectedModes, containsAll(InputMode.values));
-    expect(controller.blockers,
-        contains('Choose an output folder before starting a batch.'));
+    expect(
+      controller.blockers.map((blocker) => blocker.id),
+      contains(RecorderBlockerId.outputFolder),
+    );
     controller.dispose();
   });
 
@@ -230,7 +233,6 @@ SetupReport _readyReport() {
     checks: [
       for (final id in [
         SetupCheckId.supportedPlatform,
-        SetupCheckId.runtime,
         SetupCheckId.gameInstall,
         SetupCheckId.gameRunning,
         SetupCheckId.obsWebSocket,

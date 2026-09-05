@@ -83,8 +83,6 @@ class SetupCheckTile extends StatelessWidget {
     switch (check.id) {
       case SetupCheckId.supportedPlatform:
         return 'Your computer';
-      case SetupCheckId.runtime:
-        return 'Afterimage';
       case SetupCheckId.gameInstall:
         return 'Guilty Gear -Strive-';
       case SetupCheckId.gameRunning:
@@ -112,8 +110,6 @@ class SetupCheckTile extends StatelessWidget {
         return check.isReady
             ? 'This computer can run Afterimage.'
             : 'Afterimage runs on Linux and Windows desktop computers.';
-      case SetupCheckId.runtime:
-        return 'Everything Afterimage needs is included with the app.';
       case SetupCheckId.gameInstall:
         return check.isReady
             ? 'Your game installation was found.'

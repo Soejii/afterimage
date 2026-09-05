@@ -6,21 +6,22 @@ import 'package:afterimage/domain/setup_models.dart';
 import 'package:afterimage/services/setup_service.dart';
 
 void main() {
-  testWidgets(
-      'setup screen guides a user while recording requirements are blocked',
+  testWidgets('a blocked computer shows one next step, not a batch form',
       (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final service = _FakeSetupService(_lockedReport());
+
     await tester.pumpWidget(AfterimageApp(setupService: service));
     await tester.pumpAndSettle();
 
     expect(find.text('AFTERIMAGE'), findsOneWidget);
-    expect(find.text('Connect OBS'), findsOneWidget);
-    expect(find.text('Prepare your saved replays'), findsOneWidget);
-    expect(find.text('Recording locked'), findsOneWidget);
+    expect(find.text('SETUP NEEDED'), findsOneWidget);
+    expect(find.byKey(const ValueKey('lead-blocker')), findsOneWidget);
     expect(service.inspectCalls, 1);
   });
 
-  testWidgets('start batch remains disabled while a required check is blocked',
+  testWidgets('recording is unreachable while a required check is blocked',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -29,19 +30,14 @@ void main() {
       AfterimageApp(setupService: _FakeSetupService(_lockedReport())),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('nav-recorder')));
-    await tester.pumpAndSettle();
 
-    expect(find.text('Ready to record'), findsOneWidget);
-    expect(find.textContaining('Native recorder backend'), findsWidgets);
-    final startButton = tester.widget<FilledButton>(
-      find.byKey(const ValueKey('start-batch')),
-    );
-    expect(startButton.onPressed, isNull);
+    // The batch form is not merely disabled while blocked, it is not on
+    // screen at all. Start is reachable only from the ready state.
+    expect(find.byKey(const ValueKey('start-batch')), findsNothing);
+    expect(find.byKey(const ValueKey('replay-count-one')), findsNothing);
   });
 
-  testWidgets('recorder choices update without unlocking the start action',
-      (tester) async {
+  testWidgets('readiness is stated exactly once', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -49,24 +45,11 @@ void main() {
       AfterimageApp(setupService: _FakeSetupService(_lockedReport())),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('nav-recorder')));
-    await tester.pumpAndSettle();
 
-    final one = tester.widget<ChoiceChip>(
-      find.byKey(const ValueKey('replay-count-one')),
-    );
-    expect(one.selected, isTrue);
-    await tester.tap(find.byKey(const ValueKey('replay-count-twenty')));
-    await tester.pump();
-
-    final twenty = tester.widget<ChoiceChip>(
-      find.byKey(const ValueKey('replay-count-twenty')),
-    );
-    expect(twenty.selected, isTrue);
-    final startButton = tester.widget<FilledButton>(
-      find.byKey(const ValueKey('start-batch')),
-    );
-    expect(startButton.onPressed, isNull);
+    // This guards the defect the single-screen rework existed to fix: the
+    // same readiness fact used to be rendered in eight places at once, by
+    // eight separate derivations of it.
+    expect(find.byKey(const ValueKey('phase-indicator')), findsOneWidget);
   });
 }
 
@@ -91,13 +74,6 @@ SetupReport _lockedReport() {
         id: SetupCheckId.supportedPlatform,
         title: 'Supported desktop OS',
         detail: 'Linux is supported.',
-        status: SetupCheckStatus.ready,
-        required: true,
-      ),
-      const SetupCheck(
-        id: SetupCheckId.runtime,
-        title: 'Self-contained runtime',
-        detail: 'No Python install is needed.',
         status: SetupCheckStatus.ready,
         required: true,
       ),

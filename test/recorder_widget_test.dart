@@ -28,20 +28,23 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('nav-recorder')));
-    await tester.pumpAndSettle();
 
     final startButton = tester.widget<FilledButton>(
       find.byKey(const ValueKey('start-batch')),
     );
     expect(startButton.onPressed, isNotNull);
-    expect(find.textContaining('Everything is ready.'), findsOneWidget);
+    expect(find.text('READY'), findsOneWidget);
+    expect(
+      find.textContaining('starts at the replay you have highlighted'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const ValueKey('start-batch')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Batch completed'), findsOneWidget);
-    expect(find.text('Existing files are never overwritten.'), findsOneWidget);
+    expect(find.text('Batch finished'), findsOneWidget);
+    expect(find.text('FINISHED'), findsOneWidget);
+    expect(find.byKey(const ValueKey('record-another-batch')), findsOneWidget);
     expect(engine.startCalls, 1);
   });
 
@@ -60,8 +63,6 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('nav-recorder')));
-    await tester.pumpAndSettle();
 
     await tester.ensureVisible(
       find.byKey(const ValueKey('browse-output-folder')),
@@ -73,7 +74,7 @@ void main() {
       find.byKey(const ValueKey('output-folder')),
     );
     expect(field.controller?.text, '/home/tester/captures');
-    expect(find.textContaining('Everything is ready.'), findsOneWidget);
+    expect(find.text('READY'), findsOneWidget);
   });
 
   testWidgets('unsupported controller remains disabled and is not advertised',
@@ -94,7 +95,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('nav-recorder')));
+
+    await tester.ensureVisible(find.byKey(const ValueKey('advanced-options')));
+    await tester.tap(find.byKey(const ValueKey('advanced-options')));
     await tester.pumpAndSettle();
 
     final controllerTile = tester.widget<RadioListTile<InputMode>>(
@@ -111,7 +114,7 @@ void main() {
     );
   });
 
-  testWidgets('sidebar follows selected input readiness changes',
+  testWidgets('the phase indicator follows selected input readiness changes',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -129,13 +132,25 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Ready to record'), findsOneWidget);
+    expect(find.text('READY'), findsOneWidget);
 
     await controller.setInputMode(InputMode.virtualController);
     await tester.pump();
 
-    expect(find.text('Recording locked'), findsOneWidget);
-    expect(find.text('Ready to record'), findsNothing);
+    // Selecting a control method that is not available must lock recording and
+    // say so. It must never quietly fall back to the other method.
+    expect(find.text('ACTION NEEDED'), findsOneWidget);
+    expect(find.text('READY'), findsNothing);
+
+    // The batch form must stay on screen, because the control that fixes this
+    // lives in it. Replacing the form with a blocked screen would trap the
+    // user with no way back.
+    expect(find.byKey(const ValueKey('advanced-options')), findsOneWidget);
+    expect(find.byKey(const ValueKey('option-blockers')), findsOneWidget);
+    final start = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('start-batch')),
+    );
+    expect(start.onPressed, isNull);
   });
 
   testWidgets('terminal counts a complete capture saved before a later failure',
@@ -170,15 +185,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('nav-recorder')));
-    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('start-batch')));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('1 replay saved.'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('1 replay saved'), findsOneWidget);
   });
 }
 
@@ -227,7 +237,6 @@ SetupReport _readyReport() {
     checks: [
       for (final id in [
         SetupCheckId.supportedPlatform,
-        SetupCheckId.runtime,
         SetupCheckId.gameInstall,
         SetupCheckId.gameRunning,
         SetupCheckId.obsWebSocket,

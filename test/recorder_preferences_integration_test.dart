@@ -51,7 +51,10 @@ void main() {
     expect(controller.options.replayCount, ReplayCountOption.one);
     expect(controller.options.customReplayCount, 1);
     expect(controller.options.inputMode, InputMode.keyboard);
-    expect(controller.options.videoMode, VideoMode.separate);
+    // The stored video mode is deliberately ignored now. Every batch records
+    // one combined video, so a preferences file written by an older build must
+    // not be able to put the engine back into per-replay mode.
+    expect(controller.options.videoMode, VideoMode.combined);
     expect(controller.options.outputDirectory, isEmpty);
     controller.dispose();
   });

@@ -18,7 +18,6 @@ Future<void> main() async {
   final controller = RecorderController(
     backend: backend,
     obsConnection: obs,
-    enforceGuidedChecks: true,
     preferences: RecorderPreferences.appLocal(),
   );
   await controller.initialize();

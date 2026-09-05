@@ -1,6 +1,5 @@
 enum SetupCheckId {
   supportedPlatform,
-  runtime,
   gameInstall,
   gameRunning,
   obsWebSocket,
@@ -164,7 +163,7 @@ class RecordingOptions {
   const RecordingOptions({
     this.replayCount = ReplayCountOption.one,
     this.customReplayCount = 1,
-    this.videoMode = VideoMode.separate,
+    this.videoMode = VideoMode.combined,
     this.inputMode = InputMode.keyboard,
     this.outputDirectory = '',
   });

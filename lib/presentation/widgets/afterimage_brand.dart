@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 
+/// The application wordmark, using the real icon.
+///
+/// This used to draw `Icons.blur_on_rounded` inside a gradient square while the
+/// actual icon sat unreferenced in `assets/branding/`, so the application never
+/// showed its own logo. The asset is now bundled and used, with the old drawn
+/// mark kept only as a fallback if the image cannot load.
 class AfterimageBrand extends StatelessWidget {
   const AfterimageBrand({
     super.key,
@@ -12,28 +18,25 @@ class AfterimageBrand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final markSize = compact ? 32.0 : 40.0;
+    final markSize = compact ? 30.0 : 38.0;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
+        SizedBox(
           width: markSize,
           height: markSize,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(compact ? 9 : 12),
-            gradient: const LinearGradient(
-              colors: [AfterimageTheme.accent, AfterimageTheme.accentStrong],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+          child: Image.asset(
+            'assets/branding/afterimage-icon.png',
+            width: markSize,
+            height: markSize,
+            filterQuality: FilterQuality.medium,
+            errorBuilder: (context, error, stackTrace) => _FallbackMark(
+              size: markSize,
+              compact: compact,
             ),
           ),
-          child: Icon(
-            Icons.blur_on_rounded,
-            color: const Color(0xFF0B1A13),
-            size: compact ? 21 : 26,
-          ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 11),
         Text(
           'AFTERIMAGE',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -47,59 +50,29 @@ class AfterimageBrand extends StatelessWidget {
   }
 }
 
-class StatusPill extends StatelessWidget {
-  const StatusPill({
-    super.key,
-    required this.ready,
-    this.checking = false,
-  });
+class _FallbackMark extends StatelessWidget {
+  const _FallbackMark({required this.size, required this.compact});
 
-  final bool ready;
-  final bool checking;
+  final double size;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final color = ready ? AfterimageTheme.accent : const Color(0xFFFFC67A);
-    final label = checking
-        ? 'CHECKING'
-        : ready
-            ? 'READY TO RECORD'
-            : 'SETUP REQUIRED';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+      width: size,
+      height: size,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.42)),
+        borderRadius: BorderRadius.circular(compact ? 9 : 12),
+        gradient: const LinearGradient(
+          colors: [AfterimageTheme.accent, AfterimageTheme.accentStrong],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (checking)
-            SizedBox(
-              width: 12,
-              height: 12,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.8,
-                color: color,
-              ),
-            )
-          else
-            Icon(
-              ready ? Icons.check_circle_outline : Icons.lock_outline,
-              size: 14,
-              color: color,
-            ),
-          const SizedBox(width: 7),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.7,
-                ),
-          ),
-        ],
+      child: Icon(
+        Icons.blur_on_rounded,
+        color: const Color(0xFF0B1A13),
+        size: compact ? 20 : 25,
       ),
     );
   }

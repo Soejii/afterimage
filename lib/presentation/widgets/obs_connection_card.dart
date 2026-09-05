@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../services/obs_connection_service.dart';
 
 typedef ObsConnectCallback = Future<void> Function({
   String? password,
@@ -23,6 +24,7 @@ class ObsConnectionCard extends StatefulWidget {
     this.error,
     this.host,
     this.port,
+    this.stage = ObsSetupStage.configNotFound,
     this.onConnect,
     this.onUseAutomatic,
     this.previewBytes,
@@ -38,6 +40,13 @@ class ObsConnectionCard extends StatefulWidget {
   final String? error;
   final String? host;
   final int? port;
+
+  /// Why the connection is not usable, so the manual fields can reveal
+  /// themselves exactly when they are the answer and stay out of the way
+  /// otherwise. Afterimage reads the port and password out of OBS's own
+  /// configuration in the normal case, so a stranger should never be shown an
+  /// empty password box that implies they have done something wrong.
+  final ObsSetupStage stage;
   final ObsConnectCallback? onConnect;
   final Future<void> Function()? onUseAutomatic;
   final Uint8List? previewBytes;
@@ -56,6 +65,11 @@ class _ObsConnectionCardState extends State<ObsConnectionCard> {
   late final TextEditingController _portController = TextEditingController();
   bool _showAdvanced = false;
   bool _advancedEdited = false;
+
+  /// Open the manual fields unprompted only when they are genuinely the fix:
+  /// OBS rejected the credentials Afterimage found. Every other failure has a
+  /// better instruction than "type a port number".
+  bool get _revealAdvanced => widget.stage == ObsSetupStage.authRequired;
 
   @override
   void initState() {
@@ -195,8 +209,14 @@ class _ObsConnectionCardState extends State<ObsConnectionCard> {
           Material(
             color: Colors.transparent,
             child: ExpansionTile(
-              key: const ValueKey('obs-advanced'),
-              initiallyExpanded: _showAdvanced,
+              // ExpansionTile reads `initiallyExpanded` only when its state is
+              // first created, so a card that was already on screen as
+              // `unreachable` would stay collapsed when the stage later became
+              // `authRequired`. Folding the reveal into the key forces a fresh
+              // state at that transition, which is the moment the password
+              // field is the whole point.
+              key: ValueKey('obs-advanced-$_revealAdvanced'),
+              initiallyExpanded: _showAdvanced || _revealAdvanced,
               onExpansionChanged: (value) => setState(() {
                 _showAdvanced = value;
               }),

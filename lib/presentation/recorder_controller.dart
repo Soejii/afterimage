@@ -15,6 +15,8 @@ import '../services/setup_locations.dart';
 import '../services/output_directory_preflight.dart';
 import '../services/replay_batch_engine.dart';
 import '../services/summary_writer.dart';
+import 'recorder_blocker.dart';
+import 'replay_timeline.dart';
 
 typedef ReplayBatchEngineFactory = RecordingEngine Function({
   required ReplayMonitorPort monitor,
@@ -35,7 +37,6 @@ class RecorderController extends ChangeNotifier {
   RecorderController({
     required this.backend,
     this.obsConnection,
-    this.enforceGuidedChecks = false,
     this.setupInspector,
     this.preferences,
     BatchOutputDirectory? batchDirectories,
@@ -52,7 +53,6 @@ class RecorderController extends ChangeNotifier {
 
   final NativeRecorderBackend backend;
   final ObsConnectionService? obsConnection;
-  final bool enforceGuidedChecks;
   final RecorderPreferences? preferences;
   final BatchOutputDirectory batchDirectories;
   final OutputLauncher outputLauncher;
@@ -64,24 +64,10 @@ class RecorderController extends ChangeNotifier {
   String? preferenceNotice;
 
   Future<SetupReport> Function()? setupInspector;
-  bool pictureAndSoundConfirmed = false;
-  bool replayListPrepared = false;
   Future<void>? _allReadinessFuture;
   bool _isRefreshingSetup = false;
   Completer<void>? _batchDone;
   String? batchOutputDirectory;
-
-  void confirmPictureAndSound(bool value) {
-    if (_isBusy) return;
-    pictureAndSoundConfirmed = value;
-    notifyListeners();
-  }
-
-  void setReplayListPrepared(bool value) {
-    if (_isBusy) return;
-    replayListPrepared = value;
-    notifyListeners();
-  }
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -102,7 +88,6 @@ class RecorderController extends ChangeNotifier {
       _options = _options.copyWith(
         replayCount: readEnum(
             ReplayCountOption.values, 'replayCount', _options.replayCount),
-        videoMode: readEnum(VideoMode.values, 'videoMode', _options.videoMode),
         inputMode: readEnum(InputMode.values, 'inputMode', _options.inputMode),
         customReplayCount:
             count is int && count > 0 && count <= 1000 ? count : 1,
@@ -322,6 +307,11 @@ class RecorderController extends ChangeNotifier {
   );
   final List<ReplayBatchEvent> _events = [];
   final List<String> _outputPaths = [];
+  // Per-replay outcomes are kept here rather than derived from `_events`,
+  // which is a bounded buffer that drops the earliest entries on a long batch.
+  final Map<int, ReplayOutcome> _replayOutcomes = {};
+  DateTime? _batchStartedAt;
+  DateTime? _batchEndedAt;
   ReplayBatchResult? _result;
   Object? _error;
   RecordingEngine? _activeEngine;
@@ -369,7 +359,23 @@ class RecorderController extends ChangeNotifier {
 
   ReplayBatchProgress get progress => _progress;
 
+  /// How long the current or most recent batch has been running.
+  ///
+  /// A batch can run for hours, so the interface shows elapsed time rather than
+  /// leaving the user to guess whether anything is still happening.
+  Duration? get elapsed {
+    final startedAt = _batchStartedAt;
+    if (startedAt == null) return null;
+    // Freeze at the moment the batch ended, otherwise a finished batch left on
+    // screen keeps inflating its own duration on every rebuild.
+    return (_batchEndedAt ?? DateTime.now()).difference(startedAt);
+  }
+
   List<ReplayBatchEvent> get events => List.unmodifiable(_events);
+
+  /// What the engine has reported about each replay so far, by replay number.
+  Map<int, ReplayOutcome> get replayOutcomes =>
+      Map.unmodifiable(_replayOutcomes);
 
   List<String> get outputPaths => List.unmodifiable(_outputPaths);
 
@@ -387,55 +393,150 @@ class RecorderController extends ChangeNotifier {
     return _progress.detail;
   }
 
-  /// Returns the actionable reasons the Start action is currently blocked.
-  List<String> get blockers {
-    final reasons = <String>[];
+  /// Every reason the Start action is currently locked, most important first.
+  ///
+  /// The engine's own preconditions live here rather than in a widget, so the
+  /// interface renders reasons and never invents them. Ordering comes from
+  /// [RecorderBlockerId], which is declared in the sequence a new user has to
+  /// resolve them in.
+  List<RecorderBlocker> get blockers {
+    final found = <RecorderBlockerId, RecorderBlocker>{};
+    void add(RecorderBlocker blocker) =>
+        found.putIfAbsent(blocker.id, () => blocker);
+
     final report = _setupReport;
     if (report == null) {
-      reasons.add('Local checks are still running.');
+      add(const RecorderBlocker(
+        id: RecorderBlockerId.checksRunning,
+        label: 'Checks',
+        message: 'Afterimage is still checking this computer.',
+      ));
     } else {
-      reasons.addAll(
-        report.blockingChecks.map(
-          (check) => '${check.title}: ${check.detail}',
-        ),
-      );
+      for (final check in report.blockingChecks) {
+        final blocker = blockerForCheck(check);
+        if (blocker != null) {
+          add(blocker);
+        }
+      }
     }
 
     if (obsConnection != null && obsConnection!.result?.ready != true) {
-      reasons.add(obsConnection!.result?.detail ??
-          'Connect OBS in Setup before recording.');
+      add(RecorderBlocker(
+        id: RecorderBlockerId.obsConnection,
+        label: 'OBS',
+        message:
+            obsConnection!.result?.detail ?? 'Connect OBS before recording.',
+        action: RecorderBlockerAction.connectObs,
+      ));
     }
+
     final readiness = readinessFor(_options.inputMode);
     if (readiness == null) {
-      reasons.add('Recorder readiness is still being checked.');
+      add(const RecorderBlocker(
+        id: RecorderBlockerId.inputChecking,
+        label: 'Replay controls',
+        message: 'Afterimage is still checking the selected replay controls.',
+        source: RecorderBlockerSource.options,
+      ));
     } else if (!readiness.available) {
-      reasons.add(readiness.detail);
+      // An unavailable input mode never falls back to another one. The batch
+      // stays locked and says why, per the input-safety boundary.
+      add(RecorderBlocker(
+        id: RecorderBlockerId.inputUnavailable,
+        label: 'Replay controls',
+        message: readiness.detail,
+        source: RecorderBlockerSource.options,
+        action: RecorderBlockerAction.openAdvancedOptions,
+      ));
     }
 
     if (_options.outputDirectory.trim().isEmpty) {
-      reasons.add('Choose an output folder before starting a batch.');
+      add(const RecorderBlocker(
+        id: RecorderBlockerId.outputFolder,
+        label: 'Output folder',
+        message: 'Choose where Afterimage should save the recordings.',
+        source: RecorderBlockerSource.options,
+        action: RecorderBlockerAction.chooseOutputFolder,
+      ));
     }
     if (_options.replayCount == ReplayCountOption.all &&
         replayCountFromReport() == null) {
-      reasons.add(
-        'The replay library count is not available. Refresh setup checks before choosing All.',
-      );
+      add(const RecorderBlocker(
+        id: RecorderBlockerId.replayCountUnavailable,
+        label: 'Batch size',
+        message:
+            'Afterimage does not know how many replays you have. Check again, '
+            'or choose a fixed number instead of All.',
+        source: RecorderBlockerSource.options,
+        action: RecorderBlockerAction.refreshChecks,
+      ));
     }
     if (_options.replayCount == ReplayCountOption.custom &&
         (_options.customReplayCount < 1 || _options.customReplayCount > 1000)) {
-      reasons.add('Choose a replay count from 1 to 1000.');
+      add(const RecorderBlocker(
+        id: RecorderBlockerId.replayCountInvalid,
+        label: 'Batch size',
+        message: 'Choose a replay count from 1 to 1000.',
+        source: RecorderBlockerSource.options,
+      ));
     }
-    if (enforceGuidedChecks) {
-      if (!replayListPrepared) {
-        reasons.add(
-            'Open Saved Replays and highlight the bottom replay, then confirm below.');
-      }
-      if ((replayCountFromReport() ?? 1) > 1 && !pictureAndSoundConfirmed) {
-        reasons.add(
-            'Record one replay and confirm its picture and sound before recording more.');
-      }
-    }
-    return _uniqueNonEmpty(reasons);
+
+    final ordered = found.values.toList()..sort();
+    return List.unmodifiable(ordered);
+  }
+
+  /// Blockers the batch form cannot resolve, which belong on the blocked view.
+  List<RecorderBlocker> get environmentBlockers => List.unmodifiable(
+        blockers.where(
+          (blocker) => blocker.source == RecorderBlockerSource.environment,
+        ),
+      );
+
+  /// Blockers the user resolves by editing the batch form, shown beside it.
+  List<RecorderBlocker> get optionBlockers => List.unmodifiable(
+        blockers.where(
+          (blocker) => blocker.source == RecorderBlockerSource.options,
+        ),
+      );
+
+  /// The environment blocker the blocked view should lead with.
+  RecorderBlocker? get leadBlocker {
+    final all = environmentBlockers;
+    return all.isEmpty ? null : all.first;
+  }
+
+  /// Which of the interface's states should be on screen.
+  RecorderPhase get phase {
+    if (_isBusy) return RecorderPhase.running;
+    if (_result != null) return RecorderPhase.done;
+    if (_setupReport == null && isChecking) return RecorderPhase.checking;
+    // Only an environment blocker replaces the batch form. An invalid replay
+    // count or an unavailable input mode must keep the form on screen, because
+    // the form is the only place those can be corrected.
+    return environmentBlockers.isEmpty
+        ? RecorderPhase.ready
+        : RecorderPhase.blocked;
+  }
+
+  /// Clears a finished batch so the interface returns to [RecorderPhase.ready]
+  /// with the user's settings intact.
+  void clearResult() {
+    if (_isBusy) return;
+    _result = null;
+    _error = null;
+    _outputPaths.clear();
+    _events.clear();
+    _replayOutcomes.clear();
+    _batchStartedAt = null;
+    _batchEndedAt = null;
+    _state = ReplayBatchState.idle;
+    _progress = const ReplayBatchProgress(
+      state: ReplayBatchState.idle,
+      totalReplays: 0,
+      currentReplay: 0,
+      completedReplays: 0,
+    );
+    notifyListeners();
   }
 
   bool get canStart => !_isBusy && !isChecking && blockers.isEmpty;
@@ -611,7 +712,7 @@ class RecorderController extends ChangeNotifier {
     }
     final currentBlockers = blockers;
     if (currentBlockers.isNotEmpty) {
-      _error = StateError(currentBlockers.first);
+      _error = StateError(currentBlockers.first.message);
       notifyListeners();
       return null;
     }
@@ -626,6 +727,9 @@ class RecorderController extends ChangeNotifier {
     }
 
     _isBusy = true;
+    _batchStartedAt = DateTime.now();
+    _batchEndedAt = null;
+    _replayOutcomes.clear();
     _batchDone = Completer<void>();
     _stopRequested = false;
     _state = ReplayBatchState.preparing;
@@ -651,7 +755,8 @@ class RecorderController extends ChangeNotifier {
       if (setupInspector != null) {
         await refreshAllReadiness();
         _throwIfCancelled();
-        if (blockers.isNotEmpty) throw StateError(blockers.first);
+        final recheck = blockers;
+        if (recheck.isNotEmpty) throw StateError(recheck.first.message);
         replayCount = replayCountFromReport();
         if (replayCount == null || replayCount <= 0) {
           throw StateError(
@@ -694,7 +799,10 @@ class RecorderController extends ChangeNotifier {
       final result = await engine.startBatch(
         ReplayBatchRequest(
           replayCount: replayCount,
-          options: _options.copyWith(outputDirectory: batchOutputDirectory),
+          options: _options.copyWith(
+            outputDirectory: batchOutputDirectory,
+            videoMode: VideoMode.combined,
+          ),
         ),
       );
       _result = result;
@@ -752,8 +860,8 @@ class RecorderController extends ChangeNotifier {
       }
       _activeEngine = null;
       _isBusy = false;
+      _batchEndedAt = DateTime.now();
       _stopRequested = false;
-      replayListPrepared = false;
       _batchDone?.complete();
       notifyListeners();
     }
@@ -830,6 +938,13 @@ class RecorderController extends ChangeNotifier {
 
   void _onEngineEvent(ReplayBatchEvent event) {
     _progress = event.progress;
+    final index = event.replayIndex;
+    if (index != null) {
+      final outcome = outcomeFromEvent(event);
+      if (outcome != null) {
+        _replayOutcomes[index] = outcome;
+      }
+    }
     _state = event.progress.state;
     if (_events.length >= 200) {
       _events.removeAt(0);
@@ -901,17 +1016,6 @@ class RecorderController extends ChangeNotifier {
       return fallback;
     }
     return text;
-  }
-
-  List<String> _uniqueNonEmpty(Iterable<String> values) {
-    final result = <String>[];
-    for (final value in values) {
-      final trimmed = value.trim();
-      if (trimmed.isNotEmpty && !result.contains(trimmed)) {
-        result.add(trimmed);
-      }
-    }
-    return result;
   }
 }
 
