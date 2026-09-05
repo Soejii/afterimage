@@ -1,11 +1,45 @@
 import 'package:flutter/material.dart';
 
 class AfterimageTheme {
+  // Palette taken from the application icon: neon mint on near-black, with the
+  // icon's orange dot reserved for recording.
   static const accent = Color(0xFFB8F1D3);
   static const accentStrong = Color(0xFF6FD6A1);
   static const canvas = Color(0xFF0C1011);
   static const panel = Color(0xFF151B1C);
   static const panelRaised = Color(0xFF1B2324);
+  static const hairline = Color(0xFF26302F);
+  static const hairlineStrong = Color(0xFF465352);
+
+  // Semantic status colours. These were previously written as raw hex in eight
+  // widget files, which is how the same status ended up rendered three
+  // different ways. Read them from here.
+
+  /// A check passed, or a batch finished cleanly.
+  static const ready = accent;
+
+  /// Something is locked, incomplete, or was stopped by the user.
+  static const blocked = Color(0xFFFFC67A);
+
+  /// Text tint for a blocked surface, legible against [blocked] at low alpha.
+  static const blockedText = Color(0xFFFFD9A8);
+
+  /// A batch failed, or output needs attention.
+  static const failed = Color(0xFFFF9E9E);
+
+  /// Text tint for a failed surface.
+  static const failedText = Color(0xFFFFCACA);
+
+  /// Text tint for a ready surface.
+  static const readyText = Color(0xFFD1F7DF);
+
+  /// OBS is capturing right now. This is the icon's record dot.
+  static const recording = Color(0xFFFFA31F);
+
+  /// Fill and border alphas for a status surface, so every tinted panel in the
+  /// application has the same weight.
+  static const statusFillAlpha = 0.08;
+  static const statusBorderAlpha = 0.24;
 
   static ThemeData dark() {
     final scheme = ColorScheme.fromSeed(
@@ -18,7 +52,7 @@ class AfterimageTheme {
       onSecondary: const Color(0xFF082016),
       surface: canvas,
       surfaceContainerHighest: panel,
-      outline: const Color(0xFF465352),
+      outline: hairlineStrong,
       outlineVariant: const Color(0xFF2B3434),
     );
 
@@ -33,7 +67,7 @@ class AfterimageTheme {
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
-          side: const BorderSide(color: Color(0xFF26302F)),
+          side: const BorderSide(color: hairline),
         ),
       ),
       appBarTheme: const AppBarTheme(
@@ -71,7 +105,7 @@ class AfterimageTheme {
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(0, 48),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-          side: const BorderSide(color: Color(0xFF465352)),
+          side: const BorderSide(color: hairlineStrong),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -88,7 +122,7 @@ class AfterimageTheme {
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 9),
       ),
       dividerTheme: const DividerThemeData(
-        color: Color(0xFF26302F),
+        color: hairline,
         space: 1,
         thickness: 1,
       ),
