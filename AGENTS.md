@@ -9,6 +9,9 @@ saved replays through OBS. It targets 64-bit Linux and Windows. The separate
 `ggst-replay-recorder` repository is a behavioral reference, not part of this
 project.
 
+The ports-and-adapters map and recording safety invariants are documented in
+[`docs/architecture.md`](docs/architecture.md).
+
 ## Toolchain
 
 - Use the Flutter version pinned in `.fvmrc`, currently Flutter `3.47.2`.
@@ -72,6 +75,8 @@ with the fix restored.
 
 - Keep `README.md` and the matching file under `docs/` aligned with runtime,
   installation, controller, or packaging changes.
+- Put architecture changes in `docs/architecture.md`, not `README.md`.
+- Put release-status changes in `docs/status.md`, not `README.md`.
 - Release archives are portable bundles. The executable must remain beside its
   bundled `data` and `lib` directories.
 - Treat live GGST automation as unverified unless it was exercised end to end
