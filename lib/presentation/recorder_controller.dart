@@ -8,6 +8,8 @@ import '../domain/replay_batch.dart';
 import '../domain/setup_models.dart';
 import '../services/obs_connection_service.dart';
 import '../services/batch_output_directory.dart';
+import '../services/recorder_preferences.dart';
+import '../services/setup_locations.dart';
 import '../services/output_directory_picker.dart';
 import '../services/output_directory_preflight.dart';
 import '../services/replay_batch_engine.dart';
@@ -32,6 +34,7 @@ class RecorderController extends ChangeNotifier {
   RecorderController({
     this.obsConnection,
     BatchOutputDirectory? batchDirectories,
+    this.preferences,
     required this.backend,
     this.engineFactory = _createReplayBatchEngine,
     this.directoryPicker = pickOutputDirectory,
@@ -45,6 +48,14 @@ class RecorderController extends ChangeNotifier {
   final ObsConnectionService? obsConnection;
   final BatchOutputDirectory batchDirectories;
   String? batchOutputDirectory;
+  final RecorderPreferences? preferences;
+  LocalSetupLocations setupLocations = const LocalSetupLocations();
+  final List<String> _recentOutputPaths = [];
+  List<String> get recentOutputPaths => List.unmodifiable(_recentOutputPaths);
+  String? _recentOutputDirectory;
+  bool _initialized = false;
+  String? preferenceNotice;
+
   final NativeRecorderBackend backend;
   Completer<void>? _batchDone;
 
@@ -52,6 +63,76 @@ class RecorderController extends ChangeNotifier {
     final done = _batchDone;
     await requestStop();
     await done?.future;
+  }
+
+  Future<void> initialize() async {
+    if (_initialized) return;
+    _initialized = true;
+    final before = _options;
+    final saved = await preferences?.load();
+    if (_disposed || saved == null) return;
+    if (identical(before, _options)) {
+      T readEnum<T extends Enum>(List<T> values, String key, T fallback) {
+        for (final value in values) {
+          if (value.name == saved[key]) return value;
+        }
+        return fallback;
+      }
+
+      final path = saved['outputDirectory'];
+      final count = saved['customReplayCount'];
+      _options = _options.copyWith(
+        replayCount: readEnum(
+            ReplayCountOption.values, 'replayCount', _options.replayCount),
+        videoMode: readEnum(VideoMode.values, 'videoMode', _options.videoMode),
+        inputMode: readEnum(InputMode.values, 'inputMode', _options.inputMode),
+        customReplayCount:
+            count is int && count > 0 && count <= 1000 ? count : 1,
+        outputDirectory: _storedPath(path) ?? _options.outputDirectory,
+      );
+      setupLocations = LocalSetupLocations(
+        gameDirectory: _storedPath(saved['gameDirectory']),
+        replayDirectory: _storedPath(saved['replayDirectory']),
+      );
+      final recent = saved['recentOutputs'];
+      if (recent is List) {
+        _recentOutputPaths
+            .addAll(recent.map(_storedPath).whereType<String>().take(20));
+      }
+      _recentOutputDirectory = _storedPath(saved['recentOutputDirectory']);
+    }
+    notifyListeners();
+  }
+
+  String? _storedPath(Object? value) {
+    if (value is! String ||
+        value.isEmpty ||
+        value.length > 32767 ||
+        value.contains('\u0000')) {
+      return null;
+    }
+    if (!File(value).isAbsolute) return null;
+    return value;
+  }
+
+  void _savePreferences() {
+    final store = preferences;
+    if (store == null) return;
+    unawaited(store.save({
+      'outputDirectory': _options.outputDirectory,
+      'inputMode': _options.inputMode.name,
+      'replayCount': _options.replayCount.name,
+      'customReplayCount': _options.customReplayCount,
+      'videoMode': _options.videoMode.name,
+      'gameDirectory': setupLocations.gameDirectory,
+      'replayDirectory': setupLocations.replayDirectory,
+      'recentOutputs': List<String>.of(_recentOutputPaths),
+      'recentOutputDirectory': _recentOutputDirectory,
+    }).catchError((Object _) {
+      preferenceNotice =
+          'Your choices could not be remembered. You can still record in this session.';
+      notifyListeners();
+    }));
   }
 
   final ReplayBatchEngineFactory engineFactory;
@@ -199,6 +280,7 @@ class RecorderController extends ChangeNotifier {
     }
     final inputModeChanged = options.inputMode != _options.inputMode;
     _options = options;
+    _savePreferences();
     _error = null;
     notifyListeners();
     if (inputModeChanged) {
@@ -214,6 +296,7 @@ class RecorderController extends ChangeNotifier {
     }
     if (_options.inputMode != inputMode) {
       _options = _options.copyWith(inputMode: inputMode);
+      _savePreferences();
       _error = null;
       notifyListeners();
     }
@@ -329,6 +412,7 @@ class RecorderController extends ChangeNotifier {
           !_isBusy &&
           _options.outputDirectory == pathBeforePicker) {
         _options = _options.copyWith(outputDirectory: directory.trim());
+        _savePreferences();
       }
     } catch (error) {
       _error = StateError(
@@ -391,6 +475,7 @@ class RecorderController extends ChangeNotifier {
         outputDirectory:
             Directory(_options.outputDirectory.trim()).absolute.path,
       );
+      _savePreferences();
       final outputReadiness =
           await outputPreflight.check(_options.outputDirectory);
       if (!outputReadiness.ready) {
@@ -435,6 +520,16 @@ class RecorderController extends ChangeNotifier {
         _error = result.error;
       }
       _collectResultOutputs(result);
+      if (_outputPaths.isNotEmpty) {
+        _recentOutputPaths
+          ..removeWhere(_outputPaths.contains)
+          ..insertAll(0, _outputPaths);
+        if (_recentOutputPaths.length > 20) {
+          _recentOutputPaths.removeRange(20, _recentOutputPaths.length);
+        }
+        _recentOutputDirectory = batchOutputDirectory;
+        _savePreferences();
+      }
       return result;
     } on _PreparationCancelled {
       _state = ReplayBatchState.stopped;

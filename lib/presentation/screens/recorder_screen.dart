@@ -75,6 +75,10 @@ class _RecorderBody extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _RecorderHeading(controller: controller),
+              if (controller?.preferenceNotice != null) ...[
+                const SizedBox(height: 12),
+                Text(controller!.preferenceNotice!),
+              ],
               const SizedBox(height: 26),
               LayoutBuilder(
                 builder: (context, constraints) {

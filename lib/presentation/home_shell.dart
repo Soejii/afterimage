@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app/theme.dart';
@@ -43,6 +45,8 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell> {
           backend: widget.recorderBackend ??
               const UnavailableNativeRecorderBackend(),
         );
+    _selectedIndex = _recorderController.recentOutputPaths.isNotEmpty ? 1 : 0;
+    unawaited(_recorderController.initialize());
     _refreshChecks();
     _recorderController.refreshReadiness();
   }
