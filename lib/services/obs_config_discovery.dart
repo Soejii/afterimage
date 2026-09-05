@@ -111,6 +111,29 @@ class ObsWebSocketConfigDiscovery {
     );
   }
 
+  /// Whether OBS has written a WebSocket configuration file at all.
+  ///
+  /// [discoverAll] deliberately returns nothing when the server is switched
+  /// off, which makes "OBS is not installed" and "OBS is installed but its
+  /// server is off" look identical to the caller. They need completely
+  /// different instructions, so this distinguishes them without inspecting
+  /// diagnostic strings.
+  Future<bool> configExists() async {
+    for (final path in paths) {
+      if (path.isEmpty) {
+        continue;
+      }
+      try {
+        if (await File(path).exists()) {
+          return true;
+        }
+      } on FileSystemException {
+        // An unreadable path tells us nothing either way; keep looking.
+      }
+    }
+    return false;
+  }
+
   Future<List<ObsWebSocketConfig>> discoverAll() async {
     final configs = <ObsWebSocketConfig>[];
     final diagnostics = <String>[];

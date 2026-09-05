@@ -6,6 +6,34 @@ import '../domain/obs_models.dart';
 import 'obs_config_discovery.dart';
 import 'obs_websocket_recorder.dart';
 
+/// Why Afterimage cannot currently drive OBS.
+///
+/// The interface used to receive one sentence covering every OBS problem, so a
+/// user with OBS uninstalled and a user whose WebSocket server was merely
+/// switched off were told exactly the same thing. Discovery already knows the
+/// difference; this reports it.
+enum ObsSetupStage {
+  /// Connected and idle.
+  ready,
+
+  /// No OBS WebSocket configuration was found. OBS is probably not installed,
+  /// or has never been run on this account.
+  configNotFound,
+
+  /// OBS is installed but its WebSocket server is switched off. This is the
+  /// one-time setup step, and the only OBS change Afterimage asks a user for.
+  serverDisabled,
+
+  /// The server is on but rejected the password Afterimage has.
+  authRequired,
+
+  /// OBS is already recording, so a batch must not start.
+  alreadyRecording,
+
+  /// The server should be reachable but the connection failed.
+  unreachable,
+}
+
 /// One in-memory connection choice shared by setup, preview and recording.
 /// Credentials are never included in preferences, diagnostics or history.
 class ObsConnectionService extends ChangeNotifier implements ObsReadinessProbe {
@@ -25,6 +53,7 @@ class ObsConnectionService extends ChangeNotifier implements ObsReadinessProbe {
   bool _disposed = false;
   bool isChecking = false;
   ObsProbeResult? result;
+  ObsSetupStage stage = ObsSetupStage.configNotFound;
   Uint8List? previewBytes;
   String? previewSceneName;
   String? previewError;
@@ -94,18 +123,30 @@ class ObsConnectionService extends ChangeNotifier implements ObsReadinessProbe {
         result = _manualError;
         return result!;
       }
+      final discovered = _manual != null
+          ? const <ObsWebSocketConfig>[]
+          : await discovery.discoverAll();
+      // Establish the baseline explanation from discovery before trying to
+      // connect. Specific outcomes below refine it; a generic connection
+      // failure must not replace it, because "OBS did not answer" is useless
+      // to someone whose OBS server is simply switched off.
+      if (_manual != null || discovered.isNotEmpty) {
+        stage = ObsSetupStage.unreachable;
+      } else {
+        stage = await discovery.configExists()
+            ? ObsSetupStage.serverDisabled
+            : ObsSetupStage.configNotFound;
+      }
       final candidates = _manual != null
           ? [_manual!]
-          : [
-              ...await discovery.discoverAll(),
-              if (fallbackConfig != null) fallbackConfig!
-            ];
+          : [...discovered, if (fallbackConfig != null) fallbackConfig!];
       for (final config in candidates) {
         final client = recorderFactory(config);
         try {
           await client.connect();
           await client.assertIdle();
           _selected = config;
+          stage = ObsSetupStage.ready;
           result = ObsProbeResult.ready(
             config: config,
             detail: 'Connected to OBS. Check your picture and sound next.',
@@ -113,20 +154,24 @@ class ObsConnectionService extends ChangeNotifier implements ObsReadinessProbe {
           return result!;
         } on ObsAlreadyRecordingException {
           // Do not bypass an active OBS session by trying another installation.
+          stage = ObsSetupStage.alreadyRecording;
           result = ObsProbeResult.blocked(
               config: config,
               detail:
                   'OBS is already recording. Finish that recording in OBS before starting here.');
           return result!;
         } on ObsAuthenticationException {
+          stage = ObsSetupStage.authRequired;
           failure = ObsProbeResult.blocked(
               config: config,
               detail:
                   'OBS needs its server password. Open Connection options below and paste the password from OBS.');
         } on Object {
+          // Leave `stage` alone: the baseline set above is more specific than
+          // anything this catch could infer.
           failure ??= const ObsProbeResult.blocked(
               detail:
-                  'Open OBS, then enable Tools > WebSocket Server Settings > Enable WebSocket server. Return here and select Connect OBS.');
+                  'OBS did not answer. Check that OBS is open, then connect again.');
         } finally {
           await client.close();
         }
