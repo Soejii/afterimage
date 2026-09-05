@@ -31,8 +31,10 @@ class ObsSetupGuide extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // Only the "switch it on" instruction is worth a picture of the dialog.
-    final showsDialogImage = stage == ObsSetupStage.serverDisabled;
+    // Only the "switch it on" instruction is worth pictures. Every other
+    // stage is either about a different application or about a value the user
+    // types, and a picture of the same dialog would not help.
+    final showsPictures = stage == ObsSetupStage.serverDisabled;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -77,9 +79,11 @@ class ObsSetupGuide extends StatelessWidget {
               ),
             ),
         ],
-        if (showsDialogImage) ...[
+        if (showsPictures) ...[
           const SizedBox(height: 14),
-          _DialogImage(),
+          const _HelpImage(asset: 'assets/help/obs-tools-menu.png'),
+          const SizedBox(height: 10),
+          const _HelpImage(asset: 'assets/help/obs-websocket-settings.png'),
         ],
         const SizedBox(height: 16),
         Wrap(
@@ -179,18 +183,24 @@ class ObsSetupGuide extends StatelessWidget {
   }
 }
 
-/// The annotated OBS dialog screenshot.
+/// One picture of the OBS interface.
 ///
-/// Absent from the repository until someone captures it, so this degrades to
-/// nothing at all rather than to a broken image box. The written steps above
-/// carry the instruction on their own.
-class _DialogImage extends StatelessWidget {
+/// Deliberately uncaptioned. The numbered steps above already name the menu and
+/// the checkbox, so a caption would repeat them, and it would survive an
+/// `errorBuilder` that only replaces the image, leaving a label pointing at a
+/// picture that is not there. With no caption, a missing or undecodable asset
+/// collapses to nothing and the written steps carry the instruction alone.
+class _HelpImage extends StatelessWidget {
+  const _HelpImage({required this.asset});
+
+  final String asset;
+
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
       child: Image.asset(
-        'assets/help/obs-websocket-settings.png',
+        asset,
         fit: BoxFit.contain,
         errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
       ),

@@ -21,6 +21,9 @@ void main() {
 
       expect(
           find.textContaining('Tick Enable WebSocket server'), findsOneWidget);
+
+      // The pictures of the OBS menu and dialog belong to this stage only.
+      expect(find.byType(Image), findsNWidgets(2));
     });
 
     testWidgets(
@@ -36,6 +39,7 @@ void main() {
       // application is broken.
       expect(find.textContaining('Tick Enable WebSocket server'), findsNothing);
       expect(find.textContaining('Check that OBS is open'), findsWidgets);
+      expect(find.byType(Image), findsNothing);
     });
 
     testWidgets('a missing OBS is offered the download, others are not',
