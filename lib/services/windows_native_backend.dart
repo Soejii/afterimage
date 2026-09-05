@@ -7,6 +7,7 @@ import 'obs_config_discovery.dart';
 import 'obs_websocket_recorder.dart';
 import 'output_organizer.dart';
 import 'windows_menu_input.dart';
+import 'windows_foreground_guard.dart';
 import 'windows_native_errors.dart';
 import 'windows_process_memory.dart';
 import 'windows_replay_monitor.dart';
@@ -149,7 +150,10 @@ class WindowsNativeRecorderBackend
         driver: controllerDriverFactory(),
       );
     }
-    return WindowsKeyboardMenuInput(driver: keyboardDriverFactory());
+    return WindowsKeyboardMenuInput(
+      driver: keyboardDriverFactory(),
+      safetyCheck: WindowsForegroundGuard().assertGameForeground,
+    );
   }
 
   @override

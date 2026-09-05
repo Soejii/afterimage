@@ -30,6 +30,10 @@ enum ReplayMenuAction {
   selectNextReplay,
 }
 
+abstract interface class InputSafetyPort {
+  void assertInputSafe();
+}
+
 abstract interface class MenuInputPort {
   Future<void> perform(ReplayMenuAction action);
 }

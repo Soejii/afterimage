@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../domain/recorder_contracts.dart';
 import 'windows_native_errors.dart';
+import 'windows_foreground_guard.dart';
 
 /// The semantic-to-key mapping used by the replay batch engine.
 class WindowsMenuInputMapping {
@@ -241,12 +242,14 @@ class WindowsSendInputDriver implements WindowsKeyboardDriver {
 }
 
 /// Maps semantic actions to SendInput key presses.
-class WindowsKeyboardMenuInput implements MenuInputPort, ClosableMenuInputPort {
+class WindowsKeyboardMenuInput
+    implements MenuInputPort, ClosableMenuInputPort, InputSafetyPort {
   WindowsKeyboardMenuInput({
     WindowsKeyboardDriver? driver,
     WindowsMenuInputMapping? mapping,
     this.keyDelay = const Duration(milliseconds: 800),
     WindowsInputDelay? delay,
+    this.safetyCheck,
   })  : driver = driver ?? WindowsSendInputDriver(),
         mapping = mapping ?? WindowsMenuInputMapping(),
         delay = delay ?? Future<void>.delayed {
@@ -263,6 +266,10 @@ class WindowsKeyboardMenuInput implements MenuInputPort, ClosableMenuInputPort {
   final WindowsMenuInputMapping mapping;
   final Duration keyDelay;
   final WindowsInputDelay delay;
+  final void Function()? safetyCheck;
+
+  @override
+  void assertInputSafe() => safetyCheck?.call();
   bool _driverOpened = false;
   bool _closed = false;
 
@@ -281,6 +288,7 @@ class WindowsKeyboardMenuInput implements MenuInputPort, ClosableMenuInputPort {
       }
       final sequence = mapping.sequenceFor(action);
       for (var index = 0; index < sequence.length; index++) {
+        assertInputSafe();
         await driver.press(sequence[index]);
         if (index + 1 < sequence.length) {
           await delay(keyDelay);
@@ -312,6 +320,8 @@ class WindowsKeyboardMenuInput implements MenuInputPort, ClosableMenuInputPort {
 }
 
 class SystemWindowsKeyboardNativeApi implements WindowsKeyboardNativeApi {
+  final WindowsForegroundGuard _foregroundGuard =
+      WindowsForegroundGuard(checkInterval: Duration.zero);
   SystemWindowsKeyboardNativeApi();
 
   bool _bound = false;
@@ -344,6 +354,9 @@ class SystemWindowsKeyboardNativeApi implements WindowsKeyboardNativeApi {
         WindowsNativeErrorCode.inputUnavailable,
         'The Windows keyboard event has an invalid INPUT size ($inputSize).',
       );
+    }
+    if (keyDown) {
+      _foregroundGuard.assertGameForeground();
     }
     final heap = _getProcessHeap();
     if (heap.address == 0) {

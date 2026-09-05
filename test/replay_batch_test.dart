@@ -316,6 +316,45 @@ void main() {
       );
     });
 
+    test('wrong foreground window prevents recording and menu input', () async {
+      final monitor = _FakeMonitor(_successfulReplaySnapshots());
+      final menu = _GuardedMenu()..safe = false;
+      final obs = _FakeObs();
+      final engine = _engine(
+          monitor: monitor, menu: menu, obs: obs, organizer: _FakeOrganizer());
+      final result = await engine.startBatch(_request());
+      expect(obs.startCalls, 0,
+          reason:
+              'An unsafe foreground window must prevent starting OBS recording');
+      expect(menu.actions, isEmpty);
+      expect(result.outcome, ReplayBatchOutcome.failed);
+    });
+
+    test(
+        'focus lost during playback preserves partial output without menu input',
+        () async {
+      final monitor = _FakeMonitor(_successfulReplaySnapshots());
+      final menu = _GuardedMenu();
+      final obs = _FakeObs();
+      final engine = _engine(
+          monitor: monitor,
+          menu: menu,
+          obs: obs,
+          organizer: _FakeOrganizer(),
+          onEvent: (event) {
+            if (event.progress.state == ReplayBatchState.waitingForReplayEnd) {
+              menu.safe = false;
+            }
+          });
+      final result = await engine.startBatch(_request());
+      expect(result.outcome, ReplayBatchOutcome.failed,
+          reason:
+              'Losing game focus must fail safely instead of continuing the batch');
+      expect(result.replays.single.output?.partial, isTrue);
+      expect(obs.stopCalls, 1);
+      expect(menu.actions, [ReplayMenuAction.openReplay]);
+    });
+
     test('a stop request preserves the active replay as partial output',
         () async {
       final monitor = _FakeMonitor([
@@ -328,17 +367,17 @@ void main() {
       final organizer = _FakeOrganizer();
       final clock = _FakeClock();
       late ReplayBatchEngine engine;
-      clock.onDelay = (call) {
-        if (call == 4) {
-          unawaited(engine.requestStop());
-        }
-      };
       engine = _engine(
         monitor: monitor,
         menu: menu,
         obs: obs,
         organizer: organizer,
         clock: clock,
+        onEvent: (event) {
+          if (event.progress.state == ReplayBatchState.waitingForReplayEnd) {
+            unawaited(engine.requestStop());
+          }
+        },
       );
 
       final result = await engine.startBatch(_request());
@@ -813,4 +852,12 @@ class _CombinedOrganization {
   final RecordedOutput source;
   final String outputDirectory;
   final bool partial;
+}
+
+class _GuardedMenu extends _FakeMenu implements InputSafetyPort {
+  bool safe = true;
+  @override
+  void assertInputSafe() {
+    if (!safe) throw StateError('GGST is no longer the active window.');
+  }
 }

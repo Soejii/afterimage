@@ -105,7 +105,20 @@ class ReplayBatchEngine implements RecordingEngine {
         );
       }
 
-      await clock.delay(request.timing.startupDelay);
+      var remaining = request.timing.startupDelay;
+      while (remaining > Duration.zero && !_stopRequested) {
+        final seconds = (remaining.inMilliseconds / 1000).ceil();
+        _setState(
+            ReplayBatchState.preparing,
+            menuInput is InputSafetyPort
+                ? 'Switch to GGST now. Starting in $seconds… Keep the game active while recording.'
+                : 'Starting in $seconds… Leave Saved Replays selected and do not use the game controls.');
+        final step = remaining > const Duration(seconds: 1)
+            ? const Duration(seconds: 1)
+            : remaining;
+        await clock.delay(step);
+        remaining -= step;
+      }
       if (_stopRequested) {
         return await _finishStopped(
           request,
@@ -115,6 +128,7 @@ class ReplayBatchEngine implements RecordingEngine {
         );
       }
 
+      _assertInputSafe();
       if (request.options.videoMode == VideoMode.combined) {
         _setState(
           ReplayBatchState.startingRecording,
@@ -654,12 +668,21 @@ class ReplayBatchEngine implements RecordingEngine {
     return result;
   }
 
+  void _assertInputSafe() {
+    if (!_stopRequested) {
+      if (menuInput case final InputSafetyPort guarded) {
+        guarded.assertInputSafe();
+      }
+    }
+  }
+
   Future<_WaitStatus> _waitForBattleStart(
     ReplayCompletionDetector detector,
     ReplayBatchTiming timing,
   ) async {
     final deadline = clock.elapsed + timing.startTimeout;
     while (clock.elapsed < deadline) {
+      _assertInputSafe();
       final snapshot = await monitor.snapshot();
       if (_stopRequested) {
         return _WaitStatus.stopped;
@@ -679,6 +702,7 @@ class ReplayBatchEngine implements RecordingEngine {
   ) async {
     final deadline = clock.elapsed + timing.replayTimeout;
     while (clock.elapsed < deadline) {
+      _assertInputSafe();
       final snapshot = await monitor.snapshot();
       if (_stopRequested) {
         return _WaitStatus.stopped;
@@ -695,6 +719,7 @@ class ReplayBatchEngine implements RecordingEngine {
     final deadline = clock.elapsed + timing.returnToListTimeout;
     var listPolls = 0;
     while (clock.elapsed < deadline) {
+      _assertInputSafe();
       final snapshot = await monitor.snapshot();
       if (_stopRequested) {
         return _WaitStatus.stopped;
