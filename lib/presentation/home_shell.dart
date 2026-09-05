@@ -6,10 +6,12 @@ import '../app/theme.dart';
 import '../domain/recorder_contracts.dart';
 import '../domain/setup_models.dart';
 import '../presentation/recorder_controller.dart';
+import '../services/obs_connection_service.dart';
 import '../services/setup_service.dart';
 import 'screens/recorder_screen.dart';
 import 'screens/setup_screen.dart';
 import 'widgets/afterimage_brand.dart';
+import 'widgets/obs_connection_card.dart';
 
 class AfterimageHomeShell extends StatefulWidget {
   const AfterimageHomeShell({
@@ -27,40 +29,51 @@ class AfterimageHomeShell extends StatefulWidget {
   State<AfterimageHomeShell> createState() => _AfterimageHomeShellState();
 }
 
-class _AfterimageHomeShellState extends State<AfterimageHomeShell> {
+class _AfterimageHomeShellState extends State<AfterimageHomeShell>
+    with WidgetsBindingObserver {
   late final RecorderController _recorderController;
   late final bool _ownsRecorderController;
   int _selectedIndex = 0;
   bool _isChecking = false;
-  SetupReport? _report;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final suppliedController = widget.recorderController;
     _ownsRecorderController = suppliedController == null;
     _recorderController = suppliedController ??
         RecorderController(
           backend: widget.recorderBackend ??
               const UnavailableNativeRecorderBackend(),
+          enforceGuidedChecks: true,
+          setupInspector: widget.setupService.inspect,
         );
+    _recorderController.setupInspector ??= widget.setupService.inspect;
     _selectedIndex = _recorderController.recentOutputPaths.isNotEmpty ? 1 : 0;
     unawaited(_recorderController.initialize());
-    _refreshChecks();
-    _recorderController.refreshReadiness();
+    unawaited(_refreshChecks());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (_ownsRecorderController) {
       _recorderController.dispose();
     }
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_recorderController.isBusy) {
+      unawaited(_refreshChecks());
+    }
+  }
+
   Future<void> _refreshChecks() async {
-    if (_isChecking) {
+    if (_isChecking || _recorderController.isBusy) {
       return;
     }
     setState(() {
@@ -68,15 +81,14 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell> {
       _errorMessage = null;
     });
     try {
-      final report = await widget.setupService.inspect();
+      _recorderController.setupInspector ??= widget.setupService.inspect;
+      await _recorderController.refreshAllReadiness();
       if (!mounted) {
         return;
       }
       setState(() {
-        _report = report;
         _isChecking = false;
       });
-      _recorderController.setSetupReport(report);
     } catch (error) {
       if (!mounted) {
         return;
@@ -106,7 +118,7 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell> {
                 children: [
                   _DesktopSidebar(
                     selectedIndex: _selectedIndex,
-                    report: _report,
+                    report: _recorderController.setupReport,
                     recorderController: _recorderController,
                     onSelected: _selectPage,
                   ),
@@ -131,29 +143,121 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell> {
   }
 
   Widget _content() {
-    final page = _selectedIndex == 0
-        ? SetupScreen(
-            key: const ValueKey('setup-screen'),
-            report: _report,
-            isRefreshing: _isChecking,
-            errorMessage: _errorMessage,
-            recorderController: _recorderController,
-            onRefresh: _refreshChecks,
-            onOpenRecorder: () => _selectPage(1),
-          )
-        : RecorderScreen(
-            key: const ValueKey('recorder-screen'),
-            controller: _recorderController,
-            report: _report,
-            options: _recorderController.options,
-            onOptionsChanged: _recorderController.updateOptions,
-          );
+    final page = _selectedIndex == 0 ? _setupPage() : _recorderPage();
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 180),
       switchInCurve: Curves.easeOut,
       switchOutCurve: Curves.easeIn,
       child: page,
+    );
+  }
+
+  Widget _setupPage() {
+    final connection = _recorderController.obsConnection;
+    return AnimatedBuilder(
+      animation: _recorderController,
+      builder: (context, _) {
+        final page = _buildSetupPage(connection);
+        if (connection == null) {
+          return page;
+        }
+        return AnimatedBuilder(
+          animation: connection,
+          builder: (context, _) => _buildSetupPage(connection),
+        );
+      },
+    );
+  }
+
+  Widget _buildSetupPage(ObsConnectionService? connection) {
+    final currentReport = _recorderController.setupReport;
+    final page = SetupScreen(
+      key: const ValueKey('setup-screen'),
+      report: currentReport,
+      isRefreshing: _isChecking || _recorderController.isBusy,
+      errorMessage: _errorMessage ??
+          _recorderController.preferenceNotice ??
+          _recorderController.error?.toString(),
+      recorderController: _recorderController,
+      isBusy: _recorderController.isBusy,
+      obsConnectionCard:
+          connection == null ? null : _obsConnectionCard(connection),
+      obsConnected: connection?.result?.ready ??
+          (currentReport?.checkFor(SetupCheckId.obsWebSocket)?.isReady ??
+              false),
+      pictureAndSoundConfirmed: _recorderController.pictureAndSoundConfirmed,
+      onPictureAndSoundChanged: _recorderController.confirmPictureAndSound,
+      replayListPrepared: _recorderController.replayListPrepared,
+      onReplayListPreparedChanged: _recorderController.setReplayListPrepared,
+      onBrowseGameDirectory: _recorderController.browseGameDirectory,
+      onBrowseReplayDirectory: _recorderController.browseReplayDirectory,
+      onUseAutomaticLocations: _recorderController.useAutomaticLocations,
+      onOpenTestRecorder: _openTestRecorder,
+      onOpenObsDownload: _recorderController.openObsDownload,
+      onRefresh: _refreshChecks,
+      onOpenRecorder: () => _selectPage(1),
+    );
+    return page;
+  }
+
+  Widget _recorderPage() {
+    return RecorderScreen(
+      key: const ValueKey('recorder-screen'),
+      controller: _recorderController,
+      report: _recorderController.setupReport,
+      options: _recorderController.options,
+      onOptionsChanged: _recorderController.updateOptions,
+    );
+  }
+
+  void _openTestRecorder() {
+    if (!_recorderController.isBusy) {
+      _recorderController.updateOptions(
+        _recorderController.options.copyWith(
+          replayCount: ReplayCountOption.one,
+        ),
+      );
+    }
+    _selectPage(1);
+  }
+
+  Widget _obsConnectionCard(ObsConnectionService connection) {
+    final result = connection.result;
+    final busy = _recorderController.isBusy;
+    return ObsConnectionCard(
+      isChecking: connection.isChecking || busy,
+      connected: result?.ready ?? false,
+      detail: result?.detail,
+      host: result?.config?.host,
+      port: result?.config?.port,
+      onConnect: busy
+          ? null
+          : ({password, port}) async {
+              if (password != null || port != null) {
+                _recorderController.confirmPictureAndSound(false);
+              }
+              await connection.connect(password: password, port: port);
+              if (connection.result?.ready == true &&
+                  !_recorderController.isBusy) {
+                await _refreshChecks();
+              }
+            },
+      onUseAutomatic: busy
+          ? null
+          : () async {
+              _recorderController.confirmPictureAndSound(false);
+              await connection.useAutomaticConnection();
+              if (connection.result?.ready == true &&
+                  !_recorderController.isBusy) {
+                await _refreshChecks();
+              }
+            },
+      previewBytes: connection.previewBytes,
+      previewSceneName: connection.previewSceneName,
+      previewError: connection.previewError,
+      isRefreshingPreview: connection.isChecking || busy,
+      onRefreshPreview: busy ? null : connection.refreshPreview,
     );
   }
 }
@@ -189,7 +293,7 @@ class _DesktopSidebar extends StatelessWidget {
           const AfterimageBrand(),
           const SizedBox(height: 46),
           Text(
-            'WORKSPACE',
+            'YOUR WORKSPACE',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w800,
@@ -217,12 +321,6 @@ class _DesktopSidebar extends StatelessWidget {
             recorderController: recorderController,
           ),
           const SizedBox(height: 2),
-          Text(
-            'v0.1.0  ·  alpha',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
         ],
       ),
     );

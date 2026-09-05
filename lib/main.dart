@@ -15,13 +15,16 @@ Future<void> main() async {
   final controller = RecorderController(
     backend: backend,
     obsConnection: obs,
+    enforceGuidedChecks: true,
     preferences: RecorderPreferences.appLocal(),
   );
   await controller.initialize();
   final setup = LocalSetupService(
     nativeBackend: backend,
     obsProbe: obs,
+    locationProvider: () => controller.setupLocations,
   );
+  controller.setupInspector = setup.inspect;
   runApp(AfterimageApp(
     setupService: setup,
     recorderBackend: backend,

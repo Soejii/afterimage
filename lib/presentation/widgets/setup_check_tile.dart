@@ -7,9 +7,11 @@ class SetupCheckTile extends StatelessWidget {
   const SetupCheckTile({
     super.key,
     required this.check,
+    this.showTechnicalDetail = false,
   });
 
   final SetupCheck check;
+  final bool showTechnicalDetail;
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +44,7 @@ class SetupCheckTile extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        check.title,
+                        _friendlyTitle,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.w700,
                             ),
@@ -50,7 +52,7 @@ class SetupCheckTile extends StatelessWidget {
                     ),
                     if (check.required)
                       Text(
-                        'REQUIRED',
+                        'NEEDED',
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               color: Theme.of(context)
                                   .colorScheme
@@ -63,7 +65,7 @@ class SetupCheckTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  check.detail,
+                  _friendlyDetail,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         height: 1.35,
@@ -75,6 +77,79 @@ class SetupCheckTile extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String get _friendlyTitle {
+    switch (check.id) {
+      case SetupCheckId.supportedPlatform:
+        return 'Your computer';
+      case SetupCheckId.runtime:
+        return 'Afterimage';
+      case SetupCheckId.gameInstall:
+        return 'Guilty Gear -Strive-';
+      case SetupCheckId.gameRunning:
+        return 'Game is open';
+      case SetupCheckId.obsWebSocket:
+        return 'OBS is connected';
+      case SetupCheckId.replayLibrary:
+        return 'Saved replays';
+      case SetupCheckId.keyboardInput:
+        return 'Keyboard controls';
+      case SetupCheckId.controllerInput:
+        return 'Controller support';
+      case SetupCheckId.nativeRecorderBackend:
+        return 'Recording support';
+    }
+  }
+
+  String get _friendlyDetail {
+    if (showTechnicalDetail) {
+      return check.detail;
+    }
+
+    switch (check.id) {
+      case SetupCheckId.supportedPlatform:
+        return check.isReady
+            ? 'This computer can run Afterimage.'
+            : 'Afterimage runs on Linux and Windows desktop computers.';
+      case SetupCheckId.runtime:
+        return 'Everything Afterimage needs is included with the app.';
+      case SetupCheckId.gameInstall:
+        return check.isReady
+            ? 'Your game installation was found.'
+            : 'Install the game through Steam, then check again.';
+      case SetupCheckId.gameRunning:
+        return check.isReady
+            ? 'Afterimage can see the game running.'
+            : 'Open the game before you start recording.';
+      case SetupCheckId.obsWebSocket:
+        return check.isReady
+            ? 'Afterimage can control OBS.'
+            : 'Open OBS and connect it above.';
+      case SetupCheckId.replayLibrary:
+        return check.isReady
+            ? _replayCountLabel
+            : 'Save at least one replay in the game first.';
+      case SetupCheckId.keyboardInput:
+        return check.isReady
+            ? 'Keyboard controls are ready.'
+            : 'Keyboard control is unavailable on this computer.';
+      case SetupCheckId.controllerInput:
+        return check.isReady
+            ? 'Optional controller support is ready.'
+            : 'Optional controller support is unavailable.';
+      case SetupCheckId.nativeRecorderBackend:
+        return check.isReady
+            ? 'The recording engine is ready.'
+            : 'The recording engine needs attention before recording.';
+    }
+  }
+
+  String get _replayCountLabel {
+    final count = RegExp(r'\d+').firstMatch(check.detail)?.group(0);
+    return count == null
+        ? 'Your saved replay list was found.'
+        : '$count saved replay files found.';
   }
 
   Color get _statusColor {

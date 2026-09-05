@@ -72,25 +72,17 @@ class LocalSetupService implements SetupService {
       checks: [
         SetupCheck(
           id: SetupCheckId.supportedPlatform,
-          title: 'Supported desktop OS',
+          title: 'Desktop system',
           detail: supported
-              ? 'Running on $platformName. Linux and Windows are supported targets.'
+              ? 'Afterimage is running on $platformName, which is supported.'
               : 'Afterimage currently supports Linux and Windows desktop builds.',
           status: supported ? SetupCheckStatus.ready : SetupCheckStatus.blocked,
           required: true,
           value: platformName,
         ),
-        const SetupCheck(
-          id: SetupCheckId.runtime,
-          title: 'Self-contained runtime',
-          detail:
-              'No Python install is needed. Release builds will include the runtime dependencies they need.',
-          status: SetupCheckStatus.ready,
-          required: true,
-        ),
         SetupCheck(
           id: SetupCheckId.gameInstall,
-          title: 'GGST installation',
+          title: 'Game',
           detail: gamePath == null
               ? _missingGameDetail(selectedLocations)
               : 'Guilty Gear -Strive- was found${_hasGameOverride(selectedLocations) ? ' in the selected folder' : ''}.',
@@ -102,17 +94,17 @@ class LocalSetupService implements SetupService {
         ),
         SetupCheck(
           id: SetupCheckId.gameRunning,
-          title: 'GGST process',
+          title: 'Game running',
           detail: gameRunning
-              ? '$_gameExecutable is running.'
-              : 'Start GGST before recording. Afterimage looks for $_gameExecutable.',
+              ? 'Guilty Gear -Strive- is open.'
+              : 'Open Guilty Gear -Strive- before recording, then refresh checks.',
           status:
               gameRunning ? SetupCheckStatus.ready : SetupCheckStatus.blocked,
           required: true,
         ),
         SetupCheck(
           id: SetupCheckId.obsWebSocket,
-          title: 'OBS WebSocket protocol',
+          title: 'OBS connection',
           detail: obsResult.detail,
           status: obsResult.ready
               ? SetupCheckStatus.ready
@@ -125,7 +117,7 @@ class LocalSetupService implements SetupService {
         ),
         SetupCheck(
           id: SetupCheckId.replayLibrary,
-          title: 'Replay library',
+          title: 'Saved replays',
           detail: _replayDetail(replayInventory, selectedLocations),
           status: replayInventory.count > 0
               ? SetupCheckStatus.ready
@@ -153,7 +145,7 @@ class LocalSetupService implements SetupService {
         ),
         SetupCheck(
           id: SetupCheckId.nativeRecorderBackend,
-          title: 'Native recorder backend',
+          title: 'Recording support',
           detail: nativeReadiness.detail,
           status: nativeReadiness.available
               ? SetupCheckStatus.ready
@@ -575,7 +567,7 @@ class LocalSetupService implements SetupService {
       return 'The saved-replay folder is empty. Save at least one replay in GGST, then refresh checks.';
     }
     final noun = inventory.count == 1 ? 'file' : 'files';
-    return '${inventory.count} REP###.sav $noun found at ${inventory.root}${_hasReplayOverride(selectedLocations) ? ' (selected folder)' : ''}.';
+    return '${inventory.count} saved replay $noun found${_hasReplayOverride(selectedLocations) ? ' in the selected folder' : ''}.';
   }
 
   String? _explicitGameDirectory(LocalSetupLocations? selectedLocations) {

@@ -150,6 +150,7 @@ void main() {
 
     expect(obsCheck?.status, SetupCheckStatus.blocked);
     expect(obsCheck?.detail, contains('password'));
+    expect(report.checkFor(SetupCheckId.runtime), isNull);
   });
 
   test('LocalSetupService publishes native and controller readiness', () async {
@@ -200,7 +201,7 @@ void main() {
     expect(report.replayCount, 1);
     expect(replayCheck?.status, SetupCheckStatus.ready);
     expect(replayCheck?.value, populatedRoot.path);
-    expect(replayCheck?.detail, contains('1 REP###.sav file found'));
+    expect(replayCheck?.detail, contains('1 saved replay file found'));
   });
 
   test('LocalSetupService uses the Steam manifest install directory', () async {

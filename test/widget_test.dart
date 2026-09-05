@@ -6,16 +6,16 @@ import 'package:afterimage/domain/setup_models.dart';
 import 'package:afterimage/services/setup_service.dart';
 
 void main() {
-  testWidgets('setup screen explains the self-contained locked preview',
+  testWidgets(
+      'setup screen guides a user while recording requirements are blocked',
       (tester) async {
     final service = _FakeSetupService(_lockedReport());
     await tester.pumpWidget(AfterimageApp(setupService: service));
     await tester.pumpAndSettle();
 
     expect(find.text('AFTERIMAGE'), findsOneWidget);
-    expect(find.text('Workspace setup'), findsOneWidget);
-    expect(find.text('Native recorder backend'), findsOneWidget);
-    expect(find.textContaining('No Python install is needed'), findsWidgets);
+    expect(find.text('Connect OBS'), findsOneWidget);
+    expect(find.text('Prepare your saved replays'), findsOneWidget);
     expect(find.text('Recording locked'), findsOneWidget);
     expect(service.inspectCalls, 1);
   });
@@ -32,7 +32,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('nav-recorder')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Safe preflight'), findsOneWidget);
+    expect(find.text('Ready to record'), findsOneWidget);
     expect(find.textContaining('Native recorder backend'), findsWidgets);
     final startButton = tester.widget<FilledButton>(
       find.byKey(const ValueKey('start-batch')),

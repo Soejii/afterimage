@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../domain/replay_batch.dart';
 import '../../domain/setup_models.dart';
@@ -32,6 +32,7 @@ class RecorderScreen extends StatelessWidget {
         report: report,
         options: options,
         onOptionsChanged: onOptionsChanged,
+        onBrowseOutputDirectory: onBrowseOutputDirectory,
       );
     }
 
@@ -156,7 +157,7 @@ class _RecorderHeading extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Recorder',
+                'Record saved replays',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.5,
@@ -166,7 +167,7 @@ class _RecorderHeading extends StatelessWidget {
               Text(
                 busy
                     ? 'Afterimage is working through the batch. You can stop safely at any time.'
-                    : 'Configure a replay batch. Afterimage checks the game, OBS, input, and output folder before it starts.',
+                    : 'Start with one replay to check the picture and sound. Choose more after the test works.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                       height: 1.35,
@@ -353,8 +354,9 @@ class _OptionsPanel extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         SectionCard(
-          title: 'Input source',
-          subtitle: 'Choose the controls Afterimage will use for replay menus.',
+          title: 'Replay controls',
+          subtitle:
+              'Choose how Afterimage should move through the saved replay list.',
           child: RadioGroup<InputMode>(
             groupValue: options.inputMode,
             onChanged: (value) {
@@ -494,11 +496,23 @@ class _InputModeTile extends StatelessWidget {
       key: tileKey,
       value: mode,
       enabled: enabled,
-      title: Text(mode.label),
-      subtitle: Text('${mode.description} $availability'),
+      title: Text(_friendlyInputTitle(mode)),
+      subtitle: Text('${_friendlyInputDescription(mode)} $availability'),
       contentPadding: EdgeInsets.zero,
       dense: true,
     );
+  }
+
+  String _friendlyInputTitle(InputMode mode) {
+    return mode == InputMode.keyboard
+        ? 'Use keyboard controls'
+        : 'Use a virtual gamepad';
+  }
+
+  String _friendlyInputDescription(InputMode mode) {
+    return mode == InputMode.keyboard
+        ? 'Afterimage sends the replay menu keys for you.'
+        : 'Afterimage uses a separate gamepad for the replay menu.';
   }
 }
 
@@ -598,10 +612,10 @@ class _PreflightPanel extends StatelessWidget {
         busy || isReady ? const Color(0xFFB8F1D3) : const Color(0xFFFFC67A);
 
     return SectionCard(
-      title: busy ? 'Recording progress' : 'Safe preflight',
+      title: busy ? 'Recording progress' : 'Ready to record',
       subtitle: busy
           ? 'Afterimage is waiting for each replay to finish before it moves on.'
-          : 'A clear start action protects the game, OBS, and your existing files.',
+          : 'You can see exactly what is ready before the start button unlocks.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -620,6 +634,10 @@ class _PreflightPanel extends StatelessWidget {
           ],
           if (controller?.error != null) ...[
             _ErrorNotice(message: controller!.error.toString()),
+            const SizedBox(height: 14),
+          ],
+          if (controller?.enforceGuidedChecks == true) ...[
+            _GuidedRecorderChecks(controller: controller!),
             const SizedBox(height: 14),
           ],
           if (!busy) ...[
@@ -658,7 +676,7 @@ class _PreflightPanel extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              blockers.isEmpty ? 'READY CHECK' : 'CURRENT BLOCKERS',
+              blockers.isEmpty ? 'READY' : 'NEXT ACTION',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w800,
@@ -668,7 +686,7 @@ class _PreflightPanel extends StatelessWidget {
             const SizedBox(height: 9),
             if (blockers.isEmpty)
               Text(
-                'The selected input mode and all required local services passed their checks.',
+                'The selected controls and required services passed their checks.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                       height: 1.35,
@@ -779,9 +797,62 @@ class _PreflightPanel extends StatelessWidget {
       reasons.add('Choose an output folder before starting a batch.');
     }
     if (reasons.isEmpty) {
-      reasons.add('The native recorder engine is not available in this build.');
+      reasons.add('The recording engine is not available in this build.');
     }
     return reasons;
+  }
+}
+
+class _GuidedRecorderChecks extends StatelessWidget {
+  const _GuidedRecorderChecks({required this.controller});
+
+  final RecorderController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(13, 8, 13, 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: Column(
+          children: [
+            CheckboxListTile(
+              key: const ValueKey('recorder-replay-list-prepared'),
+              value: controller.replayListPrepared,
+              onChanged: controller.isBusy
+                  ? null
+                  : (value) => controller.setReplayListPrepared(value ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('The bottom replay is highlighted in GGST.'),
+              subtitle: const Text(
+                'Afterimage will move upward from the replay you selected.',
+              ),
+            ),
+            CheckboxListTile(
+              key: const ValueKey('recorder-picture-and-sound-confirmed'),
+              value: controller.pictureAndSoundConfirmed,
+              onChanged: controller.isBusy
+                  ? null
+                  : (value) =>
+                      controller.confirmPictureAndSound(value ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('The one replay test has picture and sound.'),
+              subtitle: const Text(
+                'Check the saved test before choosing more than one replay.',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

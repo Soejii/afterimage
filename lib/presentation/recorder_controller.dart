@@ -1,17 +1,17 @@
-import 'dart:io';
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
 import '../domain/recorder_contracts.dart';
 import '../domain/replay_batch.dart';
 import '../domain/setup_models.dart';
+import '../services/output_directory_picker.dart';
 import '../services/obs_connection_service.dart';
 import '../services/batch_output_directory.dart';
 import '../services/recorder_preferences.dart';
-import '../services/setup_locations.dart';
 import '../services/output_launcher.dart';
-import '../services/output_directory_picker.dart';
+import '../services/setup_locations.dart';
 import '../services/output_directory_preflight.dart';
 import '../services/replay_batch_engine.dart';
 import '../services/summary_writer.dart';
@@ -33,25 +33,29 @@ typedef OutputDirectoryPicker = Future<String?> Function();
 /// to the UI, and keeps all start/stop lifecycle guards in one place.
 class RecorderController extends ChangeNotifier {
   RecorderController({
-    this.obsConnection,
-    BatchOutputDirectory? batchDirectories,
-    this.preferences,
-    OutputLauncher? outputLauncher,
     required this.backend,
+    this.obsConnection,
+    this.enforceGuidedChecks = false,
+    this.setupInspector,
+    this.preferences,
+    BatchOutputDirectory? batchDirectories,
+    OutputLauncher? outputLauncher,
     this.engineFactory = _createReplayBatchEngine,
     this.directoryPicker = pickOutputDirectory,
     this.outputPreflight = const FileOutputDirectoryPreflight(),
     RecordingOptions options = const RecordingOptions(),
-  }) : _options = options,
+  })  : _options = options,
         batchDirectories = batchDirectories ?? BatchOutputDirectory(),
         outputLauncher = outputLauncher ?? OutputLauncher() {
     obsConnection?.addListener(_onObsChanged);
   }
 
+  final NativeRecorderBackend backend;
   final ObsConnectionService? obsConnection;
-  final BatchOutputDirectory batchDirectories;
-  String? batchOutputDirectory;
+  final bool enforceGuidedChecks;
   final RecorderPreferences? preferences;
+  final BatchOutputDirectory batchDirectories;
+  final OutputLauncher outputLauncher;
   LocalSetupLocations setupLocations = const LocalSetupLocations();
   final List<String> _recentOutputPaths = [];
   List<String> get recentOutputPaths => List.unmodifiable(_recentOutputPaths);
@@ -59,14 +63,24 @@ class RecorderController extends ChangeNotifier {
   bool _initialized = false;
   String? preferenceNotice;
 
-  final OutputLauncher outputLauncher;
-  final NativeRecorderBackend backend;
+  Future<SetupReport> Function()? setupInspector;
+  bool pictureAndSoundConfirmed = false;
+  bool replayListPrepared = false;
+  Future<void>? _allReadinessFuture;
+  bool _isRefreshingSetup = false;
   Completer<void>? _batchDone;
+  String? batchOutputDirectory;
 
-  Future<void> stopAndWait() async {
-    final done = _batchDone;
-    await requestStop();
-    await done?.future;
+  void confirmPictureAndSound(bool value) {
+    if (_isBusy) return;
+    pictureAndSoundConfirmed = value;
+    notifyListeners();
+  }
+
+  void setReplayListPrepared(bool value) {
+    if (_isBusy) return;
+    replayListPrepared = value;
+    notifyListeners();
   }
 
   Future<void> initialize() async {
@@ -139,6 +153,41 @@ class RecorderController extends ChangeNotifier {
     }));
   }
 
+  Future<void> browseGameDirectory() => _browseSetupDirectory(game: true);
+  Future<void> browseReplayDirectory() => _browseSetupDirectory(game: false);
+
+  Future<void> _browseSetupDirectory({required bool game}) async {
+    if (_isBusy || _isPickingDirectory) return;
+    _isPickingDirectory = true;
+    notifyListeners();
+    try {
+      final selected = await directoryPicker();
+      if (_disposed || _isBusy || selected == null) return;
+      final path = _storedPath(selected);
+      if (path == null || !await Directory(path).exists()) {
+        throw StateError('Choose an existing folder on this computer.');
+      }
+      setupLocations = LocalSetupLocations(
+        gameDirectory: game ? path : setupLocations.gameDirectory,
+        replayDirectory: game ? setupLocations.replayDirectory : path,
+      );
+      _savePreferences();
+      await refreshAllReadiness();
+    } catch (error) {
+      _error = StateError(_friendlyError(error));
+    } finally {
+      _isPickingDirectory = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> useAutomaticLocations() async {
+    if (_isBusy) return;
+    setupLocations = const LocalSetupLocations();
+    _savePreferences();
+    await refreshAllReadiness();
+  }
+
   Future<void> openObsDownload() async {
     try {
       await outputLauncher.openObsDownload();
@@ -197,6 +246,61 @@ class RecorderController extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshAllReadiness() {
+    final current = _allReadinessFuture;
+    if (current != null) return current;
+    final future = _refreshAllReadiness();
+    _allReadinessFuture = future;
+    return future.whenComplete(() {
+      if (identical(_allReadinessFuture, future)) _allReadinessFuture = null;
+    });
+  }
+
+  Future<void> _refreshAllReadiness() async {
+    _isRefreshingSetup = true;
+    notifyListeners();
+    try {
+      await _readinessFuture;
+      final inspect = setupInspector;
+      if (inspect == null) {
+        await refreshReadiness();
+        return;
+      }
+      final report = await inspect();
+      setSetupReport(report);
+      final native = report.checkFor(SetupCheckId.nativeRecorderBackend);
+      final keyboard = report.checkFor(SetupCheckId.keyboardInput);
+      final controller = report.checkFor(SetupCheckId.controllerInput);
+      if (native != null && keyboard != null && controller != null) {
+        _backendReadiness = NativeBackendReadiness(
+            available: native.isReady, detail: native.detail);
+        _inputReadiness
+          ..clear()
+          ..addAll({
+            InputMode.keyboard: NativeBackendReadiness(
+                available: keyboard.isReady, detail: keyboard.detail),
+            InputMode.virtualController: NativeBackendReadiness(
+                available: controller.isReady, detail: controller.detail),
+          });
+      } else {
+        await refreshReadiness();
+      }
+    } catch (error) {
+      setSetupReport(null);
+      _error = StateError('Could not check recording requirements. Try again.');
+      rethrow;
+    } finally {
+      _isRefreshingSetup = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> stopAndWait() async {
+    final done = _batchDone;
+    await requestStop();
+    await done?.future;
+  }
+
   final ReplayBatchEngineFactory engineFactory;
   final OutputDirectoryPicker directoryPicker;
   final OutputDirectoryPreflight outputPreflight;
@@ -250,7 +354,8 @@ class RecorderController extends ChangeNotifier {
   NativeBackendReadiness? readinessFor(InputMode inputMode) =>
       _inputReadiness[inputMode];
 
-  bool get isChecking => _isChecking || (obsConnection?.isChecking ?? false);
+  bool get isChecking =>
+      _isChecking || _isRefreshingSetup || (obsConnection?.isChecking ?? false);
 
   bool get isPickingDirectory => _isPickingDirectory;
 
@@ -320,10 +425,20 @@ class RecorderController extends ChangeNotifier {
         (_options.customReplayCount < 1 || _options.customReplayCount > 1000)) {
       reasons.add('Choose a replay count from 1 to 1000.');
     }
+    if (enforceGuidedChecks) {
+      if (!replayListPrepared) {
+        reasons.add(
+            'Open Saved Replays and highlight the bottom replay, then confirm below.');
+      }
+      if ((replayCountFromReport() ?? 1) > 1 && !pictureAndSoundConfirmed) {
+        reasons.add(
+            'Record one replay and confirm its picture and sound before recording more.');
+      }
+    }
     return _uniqueNonEmpty(reasons);
   }
 
-  bool get canStart => !_isBusy && blockers.isEmpty;
+  bool get canStart => !_isBusy && !isChecking && blockers.isEmpty;
 
   bool isInputModeAvailable(InputMode inputMode) {
     final readiness = readinessFor(inputMode);
@@ -501,7 +616,7 @@ class RecorderController extends ChangeNotifier {
       return null;
     }
 
-    final replayCount = replayCountFromReport();
+    var replayCount = replayCountFromReport();
     if (replayCount == null || replayCount <= 0) {
       _error = StateError(
         'The selected replay count is not available. Refresh setup checks and try again.',
@@ -523,8 +638,8 @@ class RecorderController extends ChangeNotifier {
     );
     _events.clear();
     _outputPaths.clear();
-    batchOutputDirectory = null;
     _result = null;
+    batchOutputDirectory = null;
     _error = null;
     notifyListeners();
 
@@ -533,6 +648,16 @@ class RecorderController extends ChangeNotifier {
     ObsRecorderPort? obs;
     var engineStarted = false;
     try {
+      if (setupInspector != null) {
+        await refreshAllReadiness();
+        _throwIfCancelled();
+        if (blockers.isNotEmpty) throw StateError(blockers.first);
+        replayCount = replayCountFromReport();
+        if (replayCount == null || replayCount <= 0) {
+          throw StateError(
+              'No saved replays are available. Refresh setup and try again.');
+        }
+      }
       _options = _options.copyWith(
         outputDirectory:
             Directory(_options.outputDirectory.trim()).absolute.path,
@@ -599,7 +724,7 @@ class RecorderController extends ChangeNotifier {
           outcome: ReplayBatchOutcome.stopped, replays: []);
       _progress = ReplayBatchProgress(
           state: ReplayBatchState.stopped,
-          totalReplays: replayCount,
+          totalReplays: replayCount ?? 0,
           currentReplay: 0,
           completedReplays: 0,
           detail: 'Stopped before recording started.');
@@ -609,7 +734,7 @@ class RecorderController extends ChangeNotifier {
       _error = error;
       _progress = ReplayBatchProgress(
         state: ReplayBatchState.failed,
-        totalReplays: replayCount,
+        totalReplays: replayCount ?? 0,
         currentReplay: _progress.currentReplay,
         completedReplays: _progress.completedReplays,
         detail: _friendlyError(
@@ -628,6 +753,7 @@ class RecorderController extends ChangeNotifier {
       _activeEngine = null;
       _isBusy = false;
       _stopRequested = false;
+      replayListPrepared = false;
       _batchDone?.complete();
       notifyListeners();
     }

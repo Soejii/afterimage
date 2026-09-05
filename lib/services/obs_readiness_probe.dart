@@ -26,7 +26,7 @@ class LocalObsReadinessProbe implements ObsReadinessProbe {
       return ObsProbeResult.blocked(
         config: config,
         detail:
-            'OBS WebSocket authentication is enabled, but its password is missing. Add the OBS WebSocket password to Afterimage settings.',
+            'OBS WebSocket authentication is enabled, but its password is missing. In Afterimage Setup, open Connection options and paste the password shown in OBS.',
       );
     }
 
@@ -55,7 +55,7 @@ class LocalObsReadinessProbe implements ObsReadinessProbe {
       return ObsProbeResult.blocked(
         config: config,
         detail:
-            'OBS WebSocket authentication failed. Check the server password in Afterimage settings.',
+            'OBS WebSocket authentication failed. In Afterimage Setup, open Connection options and check the password shown in OBS.',
       );
     } on ObsTimeoutException {
       return ObsProbeResult.blocked(

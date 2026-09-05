@@ -153,7 +153,7 @@ extension InputModeLabel on InputMode {
   String get description {
     switch (this) {
       case InputMode.keyboard:
-        return 'Use a mapped keyboard layout during playback.';
+        return 'Uses U to confirm and W to move up in GGST. Keep these menu bindings in the game.';
       case InputMode.virtualController:
         return 'Use a separate virtual gamepad; your physical controller stays connected.';
     }

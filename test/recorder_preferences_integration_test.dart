@@ -96,6 +96,46 @@ void main() {
     controller.dispose();
   });
 
+  test('browsing setup locations persists both paths and refreshes setup',
+      () async {
+    final root =
+        await Directory.systemTemp.createTemp('afterimage-preferences-');
+    addTearDown(() => root.delete(recursive: true));
+    final gameDirectory = await Directory('${root.path}/game').create();
+    final replayDirectory = await Directory('${root.path}/replays').create();
+    final selected = <String>[gameDirectory.path, replayDirectory.path];
+    final preferences = _PreferencesHarness();
+    final backend = _PreferencesBackend();
+    final report = SetupReport(
+      checkedAt: DateTime(2026, 9, 5),
+      checks: const <SetupCheck>[],
+    );
+    var setupChecks = 0;
+    final controller = RecorderController(
+      backend: backend,
+      preferences: preferences.preferences,
+      directoryPicker: () async => selected.removeAt(0),
+      setupInspector: () async {
+        setupChecks++;
+        return report;
+      },
+    );
+
+    await controller.browseGameDirectory();
+    await controller.browseReplayDirectory();
+    await preferences.preferences.flush();
+
+    expect(controller.setupLocations.gameDirectory, gameDirectory.path);
+    expect(controller.setupLocations.replayDirectory, replayDirectory.path);
+    expect(controller.setupReport, same(report));
+    expect(setupChecks, 2);
+    expect(backend.inspectCalls, 2);
+    expect(preferences.writes, hasLength(2));
+    expect(preferences.writes.last['gameDirectory'], gameDirectory.path);
+    expect(preferences.writes.last['replayDirectory'], replayDirectory.path);
+    controller.dispose();
+  });
+
   test('initialization restores at most twenty recent outputs', () async {
     final recent = List<String>.generate(
       25,
