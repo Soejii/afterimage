@@ -10,6 +10,7 @@ import '../services/obs_connection_service.dart';
 import '../services/batch_output_directory.dart';
 import '../services/recorder_preferences.dart';
 import '../services/setup_locations.dart';
+import '../services/output_launcher.dart';
 import '../services/output_directory_picker.dart';
 import '../services/output_directory_preflight.dart';
 import '../services/replay_batch_engine.dart';
@@ -35,13 +36,15 @@ class RecorderController extends ChangeNotifier {
     this.obsConnection,
     BatchOutputDirectory? batchDirectories,
     this.preferences,
+    OutputLauncher? outputLauncher,
     required this.backend,
     this.engineFactory = _createReplayBatchEngine,
     this.directoryPicker = pickOutputDirectory,
     this.outputPreflight = const FileOutputDirectoryPreflight(),
     RecordingOptions options = const RecordingOptions(),
   }) : _options = options,
-        batchDirectories = batchDirectories ?? BatchOutputDirectory() {
+        batchDirectories = batchDirectories ?? BatchOutputDirectory(),
+        outputLauncher = outputLauncher ?? OutputLauncher() {
     obsConnection?.addListener(_onObsChanged);
   }
 
@@ -56,6 +59,7 @@ class RecorderController extends ChangeNotifier {
   bool _initialized = false;
   String? preferenceNotice;
 
+  final OutputLauncher outputLauncher;
   final NativeRecorderBackend backend;
   Completer<void>? _batchDone;
 
@@ -133,6 +137,64 @@ class RecorderController extends ChangeNotifier {
           'Your choices could not be remembered. You can still record in this session.';
       notifyListeners();
     }));
+  }
+
+  Future<void> openObsDownload() async {
+    try {
+      await outputLauncher.openObsDownload();
+    } catch (error) {
+      _error = StateError(
+          'Could not open your browser. Visit obsproject.com/download to get OBS Studio.');
+      notifyListeners();
+    }
+  }
+
+  Future<void> openOutputFolder() async {
+    final path = batchOutputDirectory ??
+        _recentOutputDirectory ??
+        _options.outputDirectory;
+    try {
+      if (!await Directory(path).exists()) {
+        throw StateError(
+            'This folder is no longer available. Choose another output folder.');
+      }
+      await outputLauncher.openFolder(Directory(path).absolute.path);
+    } catch (error) {
+      _error = StateError(_friendlyError(error));
+      notifyListeners();
+    }
+  }
+
+  Future<void> openOutput(String path) async {
+    try {
+      if (!_outputPaths.contains(path) && !_recentOutputPaths.contains(path)) {
+        throw StateError('Choose a recording listed by Afterimage.');
+      }
+      final extension = path.split('.').last.toLowerCase();
+      if (!const {
+        'mp4',
+        'mkv',
+        'mov',
+        'webm',
+        'flv',
+        'avi',
+        'm4v',
+        'ts',
+        'mpeg',
+        'mpg'
+      }.contains(extension)) {
+        throw StateError(
+            'Open the output folder to inspect this recording format.');
+      }
+      if (!await File(path).exists()) {
+        throw StateError(
+            'This recording was moved or deleted. Open the output folder to look for it.');
+      }
+      await outputLauncher.openVideo(File(path).absolute.path);
+    } catch (error) {
+      _error = StateError(_friendlyError(error));
+      notifyListeners();
+    }
   }
 
   final ReplayBatchEngineFactory engineFactory;
@@ -662,10 +724,14 @@ class RecorderController extends ChangeNotifier {
       final output = replay.output;
       if (output != null) {
         _addOutputPath(output.path);
+      } else if (replay.sourceOutput != null) {
+        _addOutputPath(replay.sourceOutput!.path);
       }
     }
     if (result.combinedOutput case final output?) {
       _addOutputPath(output.path);
+    } else if (result.combinedSourceOutput != null) {
+      _addOutputPath(result.combinedSourceOutput!.path);
     }
   }
 

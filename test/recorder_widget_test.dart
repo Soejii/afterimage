@@ -176,7 +176,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text('1 replay saved. 1 output path recorded.'),
+      find.text('1 replay saved.'),
       findsOneWidget,
     );
   });

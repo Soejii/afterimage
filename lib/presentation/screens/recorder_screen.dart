@@ -113,6 +113,15 @@ class _RecorderBody extends StatelessWidget {
                   );
                 },
               ),
+              if (controller != null &&
+                  controller!.recentOutputPaths.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _RecentRecordings(
+                  paths: controller!.recentOutputPaths,
+                  onOpenOutput: controller!.openOutput,
+                  onOpenFolder: controller!.openOutputFolder,
+                ),
+              ],
             ],
           ),
         ),
@@ -196,6 +205,64 @@ class _RecorderHeading extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+class _RecentRecordings extends StatelessWidget {
+  const _RecentRecordings({
+    required this.paths,
+    required this.onOpenOutput,
+    required this.onOpenFolder,
+  });
+
+  final List<String> paths;
+  final Future<void> Function(String path) onOpenOutput;
+  final Future<void> Function() onOpenFolder;
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      title: 'Recent recordings',
+      subtitle: 'Open a video again or open the folder where it was saved.',
+      trailing: OutlinedButton.icon(
+        key: const ValueKey('open-recent-output-folder'),
+        onPressed: () => unawaited(onOpenFolder()),
+        icon: const Icon(Icons.folder_open_outlined),
+        label: const Text('Open folder'),
+      ),
+      child: Column(
+        children: [
+          for (final path in paths.take(5))
+            ListTile(
+              key: ValueKey('recent-output-$path'),
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.movie_outlined),
+              title: Text(
+                _fileName(path),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                path,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: IconButton(
+                key: ValueKey('play-recent-output-$path'),
+                onPressed: () => unawaited(onOpenOutput(path)),
+                tooltip: 'Play recording',
+                icon: const Icon(Icons.play_arrow_rounded),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _fileName(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    final separator = normalized.lastIndexOf('/');
+    return separator < 0 ? normalized : normalized.substring(separator + 1);
   }
 }
 
@@ -545,6 +612,9 @@ class _PreflightPanel extends StatelessWidget {
             _TerminalResult(
               result: controller!.result!,
               outputPaths: controller!.outputPaths,
+              outputDirectory: controller!.batchOutputDirectory,
+              onOpenOutputFolder: controller!.openOutputFolder,
+              onOpenOutput: controller!.openOutput,
             ),
             const SizedBox(height: 16),
           ],
@@ -771,10 +841,16 @@ class _TerminalResult extends StatelessWidget {
   const _TerminalResult({
     required this.result,
     required this.outputPaths,
+    this.outputDirectory,
+    this.onOpenOutputFolder,
+    this.onOpenOutput,
   });
 
   final ReplayBatchResult result;
   final List<String> outputPaths;
+  final String? outputDirectory;
+  final Future<void> Function()? onOpenOutputFolder;
+  final Future<void> Function(String path)? onOpenOutput;
 
   @override
   Widget build(BuildContext context) {
@@ -836,7 +912,7 @@ class _TerminalResult extends StatelessWidget {
           ),
           const SizedBox(height: 7),
           Text(
-            '$saved replay${saved == 1 ? '' : 's'} saved. ${outputPaths.length} output path${outputPaths.length == 1 ? '' : 's'} recorded.',
+            '$saved replay${saved == 1 ? '' : 's'} saved.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                   height: 1.35,
@@ -857,6 +933,41 @@ class _TerminalResult extends StatelessWidget {
                     ),
                   ),
                 ),
+          ],
+          if (outputDirectory != null && outputDirectory!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Saved in $outputDirectory',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: color.withValues(alpha: 0.9),
+                  ),
+            ),
+          ],
+          if (onOpenOutputFolder != null ||
+              (onOpenOutput != null && outputPaths.isNotEmpty)) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 9,
+              runSpacing: 9,
+              children: [
+                if (onOpenOutputFolder != null)
+                  OutlinedButton.icon(
+                    key: const ValueKey('open-output-folder'),
+                    onPressed: () => unawaited(onOpenOutputFolder!()),
+                    icon: const Icon(Icons.folder_open_outlined),
+                    label: const Text('Open folder'),
+                  ),
+                if (onOpenOutput != null && outputPaths.isNotEmpty)
+                  OutlinedButton.icon(
+                    key: const ValueKey('play-latest-output'),
+                    onPressed: () => unawaited(onOpenOutput!(outputPaths.last)),
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Play latest'),
+                  ),
+              ],
+            ),
           ],
         ],
       ),
