@@ -26,6 +26,7 @@ class WindowsNativeRecorderBackend
   WindowsNativeRecorderBackend({
     this.obsDiscovery = const ObsWebSocketConfigDiscovery(),
     this.obsConfig,
+    this.obsConfigProvider,
     WindowsMemorySessionFactory? memoryFactory,
     WindowsKeyboardDriverFactory? keyboardDriverFactory,
     WindowsVirtualControllerReadinessProbe? controllerProbe,
@@ -48,6 +49,7 @@ class WindowsNativeRecorderBackend
 
   final ObsWebSocketConfigDiscovery obsDiscovery;
   final ObsWebSocketConfig? obsConfig;
+  final Future<ObsWebSocketConfig> Function()? obsConfigProvider;
   final WindowsMemorySessionFactory memoryFactory;
   final WindowsKeyboardDriverFactory keyboardDriverFactory;
   final WindowsVirtualControllerReadinessProbe controllerProbe;
@@ -153,7 +155,9 @@ class WindowsNativeRecorderBackend
   @override
   Future<ObsRecorderPort> openObsRecorder() async {
     _ensureWindows();
-    final config = obsConfig ?? (await obsDiscovery.discover()).config;
+    final config = obsConfigProvider != null
+        ? await obsConfigProvider!()
+        : obsConfig ?? (await obsDiscovery.discover()).config;
     // Preserve the existing OBS behavior: when no local config is present,
     // try the documented localhost default and let the recorder's protocol
     // check return the actionable error.

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../domain/recorder_contracts.dart';
 import '../domain/replay_batch.dart';
 import '../domain/setup_models.dart';
+import '../services/obs_connection_service.dart';
 import '../services/output_directory_picker.dart';
 import '../services/output_directory_preflight.dart';
 import '../services/replay_batch_engine.dart';
@@ -27,13 +28,17 @@ typedef OutputDirectoryPicker = Future<String?> Function();
 /// to the UI, and keeps all start/stop lifecycle guards in one place.
 class RecorderController extends ChangeNotifier {
   RecorderController({
+    this.obsConnection,
     required this.backend,
     this.engineFactory = _createReplayBatchEngine,
     this.directoryPicker = pickOutputDirectory,
     this.outputPreflight = const FileOutputDirectoryPreflight(),
     RecordingOptions options = const RecordingOptions(),
-  }) : _options = options;
+  }) : _options = options {
+    obsConnection?.addListener(_onObsChanged);
+  }
 
+  final ObsConnectionService? obsConnection;
   final NativeRecorderBackend backend;
   final ReplayBatchEngineFactory engineFactory;
   final OutputDirectoryPicker directoryPicker;
@@ -63,8 +68,11 @@ class RecorderController extends ChangeNotifier {
   int _readinessGeneration = 0;
   bool _disposed = false;
 
+  void _onObsChanged() => notifyListeners();
+
   @override
   void dispose() {
+    obsConnection?.removeListener(_onObsChanged);
     _disposed = true;
     _readinessGeneration++;
     super.dispose();
@@ -79,7 +87,7 @@ class RecorderController extends ChangeNotifier {
   NativeBackendReadiness? readinessFor(InputMode inputMode) =>
       _inputReadiness[inputMode];
 
-  bool get isChecking => _isChecking;
+  bool get isChecking => _isChecking || (obsConnection?.isChecking ?? false);
 
   bool get isPickingDirectory => _isPickingDirectory;
 
@@ -125,6 +133,10 @@ class RecorderController extends ChangeNotifier {
       );
     }
 
+    if (obsConnection != null && obsConnection!.result?.ready != true) {
+      reasons.add(obsConnection!.result?.detail ??
+          'Connect OBS in Setup before recording.');
+    }
     final readiness = readinessFor(_options.inputMode);
     if (readiness == null) {
       reasons.add('Recorder readiness is still being checked.');

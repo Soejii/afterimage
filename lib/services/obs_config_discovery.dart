@@ -111,6 +111,40 @@ class ObsWebSocketConfigDiscovery {
     );
   }
 
+  Future<List<ObsWebSocketConfig>> discoverAll() async {
+    final configs = <ObsWebSocketConfig>[];
+    final diagnostics = <String>[];
+
+    for (final path in paths) {
+      if (path.isEmpty) {
+        continue;
+      }
+
+      final file = File(path);
+      try {
+        if (!await file.exists()) {
+          continue;
+        }
+        final decoded = jsonDecode(await file.readAsString());
+        if (decoded is! Map) {
+          diagnostics.add('An OBS WebSocket config was not a JSON object.');
+          continue;
+        }
+        final values = Map<String, dynamic>.from(decoded);
+        final config = _parse(values, path, diagnostics);
+        if (config != null) {
+          configs.add(config);
+        }
+      } on FileSystemException {
+        diagnostics.add('An OBS WebSocket config could not be read.');
+      } on FormatException {
+        diagnostics.add('An OBS WebSocket config contained malformed JSON.');
+      }
+    }
+
+    return List.unmodifiable(configs);
+  }
+
   ObsWebSocketConfig? _parse(
     Map<String, dynamic> values,
     String sourcePath,

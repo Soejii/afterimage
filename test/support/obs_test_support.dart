@@ -23,6 +23,7 @@ class FakeObsServer {
     this.disconnectRequest,
     this.ignoreRequest,
     this.protocolFault = FakeObsProtocolFault.none,
+    this.responses = const {},
   }) : _recording = initiallyRecording;
 
   final bool requireAuthentication;
@@ -32,6 +33,7 @@ class FakeObsServer {
   final String? disconnectRequest;
   final String? ignoreRequest;
   final FakeObsProtocolFault protocolFault;
+  final Map<String, Map<String, Object?>> responses;
 
   final List<Map<String, dynamic>> requests = [];
   final String salt = 'afterimage-test-salt';
@@ -153,6 +155,10 @@ class FakeObsServer {
           continue;
         }
 
+        if (responses.containsKey(requestType)) {
+          _respond(socket, data, responseData: responses[requestType]);
+          continue;
+        }
         switch (requestType) {
           case 'GetRecordStatus':
             _respond(

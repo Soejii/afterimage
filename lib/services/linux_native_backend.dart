@@ -51,6 +51,7 @@ class LinuxNativeRecorderBackend
   LinuxNativeRecorderBackend({
     this.obsDiscovery = const ObsWebSocketConfigDiscovery(),
     this.obsConfig,
+    this.obsConfigProvider,
     LinuxMemorySessionFactory? memoryFactory,
     LinuxGamescopeDisplayDiscovery? displayDiscovery,
     LinuxKeyboardDriverFactory? keyboardDriverFactory,
@@ -75,6 +76,7 @@ class LinuxNativeRecorderBackend
 
   final ObsWebSocketConfigDiscovery obsDiscovery;
   final ObsWebSocketConfig? obsConfig;
+  final Future<ObsWebSocketConfig> Function()? obsConfigProvider;
   final LinuxMemorySessionFactory memoryFactory;
   final LinuxGamescopeDisplayDiscovery displayDiscovery;
   final LinuxKeyboardDriverFactory keyboardDriverFactory;
@@ -208,7 +210,9 @@ class LinuxNativeRecorderBackend
   @override
   Future<ObsRecorderPort> openObsRecorder() async {
     _ensureLinux();
-    final config = obsConfig ?? (await obsDiscovery.discover()).config;
+    final config = obsConfigProvider != null
+        ? await obsConfigProvider!()
+        : obsConfig ?? (await obsDiscovery.discover()).config;
     // Preserve the existing OBS behavior: when no local config is present,
     // try the documented localhost default and let the recorder's protocol
     // check return the actionable error.

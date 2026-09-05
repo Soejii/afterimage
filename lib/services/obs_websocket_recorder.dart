@@ -52,6 +52,12 @@ class ObsTimeoutException extends ObsClientException {
   const ObsTimeoutException(super.message);
 }
 
+class ObsCapturePreview {
+  const ObsCapturePreview(this.sceneName, this.imageBase64);
+  final String sceneName;
+  final String imageBase64;
+}
+
 class ObsWebSocketRecorder implements ObsRecorderPort {
   ObsWebSocketRecorder(
     this.config, {
@@ -73,6 +79,36 @@ class ObsWebSocketRecorder implements ObsRecorderPort {
   bool _identified = false;
 
   bool get isConnected => _identified && _socket != null;
+
+  /// Read-only snapshot of the current program scene, never changes OBS scenes.
+  Future<ObsCapturePreview> capturePreview() async {
+    final scene = await _request('GetCurrentProgramScene');
+    final name = scene['currentProgramSceneName'] ?? scene['sceneName'];
+    if (name is! String || name.isEmpty) {
+      throw const ObsProtocolException(
+          'OBS did not provide its current scene.');
+    }
+    final response = await _request('GetSourceScreenshot', {
+      'sourceName': name,
+      'imageFormat': 'png',
+      'imageWidth': 960,
+    });
+    final data = response['imageData'];
+    const prefix = 'data:image/png;base64,';
+    if (data is! String || !data.startsWith(prefix) || data.length > 8000000) {
+      throw const ObsProtocolException(
+          'OBS returned an invalid preview image.');
+    }
+    final encoded = data.substring(prefix.length);
+    final decoded = base64Decode(encoded);
+    const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+    if (decoded.length < 8 ||
+        List.generate(8, (index) => index)
+            .any((index) => decoded[index] != signature[index])) {
+      throw const ObsProtocolException('OBS returned an invalid PNG image.');
+    }
+    return ObsCapturePreview(name, encoded);
+  }
 
   @override
   Future<void> connect() async {
