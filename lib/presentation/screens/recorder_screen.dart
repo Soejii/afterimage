@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 
 import '../../domain/replay_batch.dart';
@@ -215,24 +216,40 @@ class _OptionsPanel extends StatelessWidget {
       children: [
         SectionCard(
           title: 'Batch size',
-          subtitle: 'Pick how many saved replays to process, newest first.',
-          child: Wrap(
-            spacing: 9,
-            runSpacing: 9,
-            children: ReplayCountOption.values
-                .map(
-                  (choice) => ChoiceChip(
-                    key: ValueKey('replay-count-${choice.name}'),
-                    label: Text(choice.label),
-                    selected: options.replayCount == choice,
-                    onSelected: busy
-                        ? null
-                        : (_) => onOptionsChanged(
-                              options.copyWith(replayCount: choice),
-                            ),
+          subtitle:
+              'Afterimage starts at the replay you highlight and moves upward through the list.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 9,
+                runSpacing: 9,
+                children: ReplayCountOption.values
+                    .map(
+                      (choice) => ChoiceChip(
+                        key: ValueKey('replay-count-${choice.name}'),
+                        label: Text(choice.label),
+                        selected: options.replayCount == choice,
+                        onSelected: busy
+                            ? null
+                            : (_) => onOptionsChanged(
+                                  options.copyWith(replayCount: choice),
+                                ),
+                      ),
+                    )
+                    .toList(),
+              ),
+              if (options.replayCount == ReplayCountOption.custom) ...[
+                const SizedBox(height: 14),
+                _CustomReplayCountField(
+                  value: options.customReplayCount,
+                  enabled: !busy,
+                  onChanged: (value) => onOptionsChanged(
+                    options.copyWith(customReplayCount: value),
                   ),
-                )
-                .toList(),
+                ),
+              ],
+            ],
           ),
         ),
         const SizedBox(height: 16),
@@ -309,6 +326,68 @@ class _OptionsPanel extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _CustomReplayCountField extends StatefulWidget {
+  const _CustomReplayCountField({
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final int value;
+  final bool enabled;
+  final ValueChanged<int> onChanged;
+
+  @override
+  State<_CustomReplayCountField> createState() =>
+      _CustomReplayCountFieldState();
+}
+
+class _CustomReplayCountFieldState extends State<_CustomReplayCountField> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.value.toString());
+
+  @override
+  void didUpdateWidget(covariant _CustomReplayCountField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value &&
+        _controller.text != widget.value.toString()) {
+      _controller.value = TextEditingValue(
+        text: widget.value.toString(),
+        selection:
+            TextSelection.collapsed(offset: widget.value.toString().length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      key: const ValueKey('custom-replay-count'),
+      controller: _controller,
+      enabled: widget.enabled,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      onChanged: (value) {
+        final count = int.tryParse(value);
+        if (count != null) {
+          widget.onChanged(count);
+        }
+      },
+      decoration: const InputDecoration(
+        labelText: 'Number of replays',
+        helperText: 'Choose a positive number for a custom batch.',
+        prefixIcon: Icon(Icons.format_list_numbered_rounded),
+      ),
     );
   }
 }

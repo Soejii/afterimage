@@ -52,10 +52,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('nav-recorder')));
     await tester.pumpAndSettle();
 
-    final five = tester.widget<ChoiceChip>(
-      find.byKey(const ValueKey('replay-count-five')),
+    final one = tester.widget<ChoiceChip>(
+      find.byKey(const ValueKey('replay-count-one')),
     );
-    expect(five.selected, isTrue);
+    expect(one.selected, isTrue);
     await tester.tap(find.byKey(const ValueKey('replay-count-twenty')));
     await tester.pump();
 

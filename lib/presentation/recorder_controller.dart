@@ -173,6 +173,10 @@ class RecorderController extends ChangeNotifier {
         'The replay library count is not available. Refresh setup checks before choosing All.',
       );
     }
+    if (_options.replayCount == ReplayCountOption.custom &&
+        (_options.customReplayCount < 1 || _options.customReplayCount > 1000)) {
+      reasons.add('Choose a replay count from 1 to 1000.');
+    }
     return _uniqueNonEmpty(reasons);
   }
 
@@ -505,6 +509,10 @@ class RecorderController extends ChangeNotifier {
   int? replayCountFromReport() {
     final available = _availableReplayCount();
     switch (_options.replayCount) {
+      case ReplayCountOption.one:
+        return _boundedReplayCount(1, available);
+      case ReplayCountOption.custom:
+        return _boundedReplayCount(_options.customReplayCount, available);
       case ReplayCountOption.five:
         return _boundedReplayCount(5, available);
       case ReplayCountOption.ten:

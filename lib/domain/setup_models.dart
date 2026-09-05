@@ -66,6 +66,8 @@ class SetupReport {
 }
 
 enum ReplayCountOption {
+  one,
+  custom,
   five,
   ten,
   twenty,
@@ -75,6 +77,10 @@ enum ReplayCountOption {
 extension ReplayCountOptionLabel on ReplayCountOption {
   String get label {
     switch (this) {
+      case ReplayCountOption.one:
+        return '1';
+      case ReplayCountOption.custom:
+        return 'Custom';
       case ReplayCountOption.five:
         return '5';
       case ReplayCountOption.ten:
@@ -88,12 +94,16 @@ extension ReplayCountOptionLabel on ReplayCountOption {
 
   String get description {
     switch (this) {
+      case ReplayCountOption.one:
+        return 'Try the highlighted replay first.';
+      case ReplayCountOption.custom:
+        return 'Choose how many replays to record, moving upward.';
       case ReplayCountOption.five:
-        return 'Capture the five newest replays.';
+        return 'Record five replays, starting at the highlighted replay.';
       case ReplayCountOption.ten:
-        return 'Capture the ten newest replays.';
+        return 'Record ten replays, starting at the highlighted replay.';
       case ReplayCountOption.twenty:
-        return 'Capture the twenty newest replays.';
+        return 'Record twenty replays, starting at the highlighted replay.';
       case ReplayCountOption.all:
         return 'Capture every replay in the library.';
     }
@@ -152,25 +162,29 @@ extension InputModeLabel on InputMode {
 
 class RecordingOptions {
   const RecordingOptions({
-    this.replayCount = ReplayCountOption.five,
+    this.replayCount = ReplayCountOption.one,
+    this.customReplayCount = 1,
     this.videoMode = VideoMode.separate,
     this.inputMode = InputMode.keyboard,
     this.outputDirectory = '',
   });
 
   final ReplayCountOption replayCount;
+  final int customReplayCount;
   final VideoMode videoMode;
   final InputMode inputMode;
   final String outputDirectory;
 
   RecordingOptions copyWith({
     ReplayCountOption? replayCount,
+    int? customReplayCount,
     VideoMode? videoMode,
     InputMode? inputMode,
     String? outputDirectory,
   }) {
     return RecordingOptions(
       replayCount: replayCount ?? this.replayCount,
+      customReplayCount: customReplayCount ?? this.customReplayCount,
       videoMode: videoMode ?? this.videoMode,
       inputMode: inputMode ?? this.inputMode,
       outputDirectory: outputDirectory ?? this.outputDirectory,
