@@ -7,6 +7,7 @@ import 'package:afterimage/domain/replay_batch.dart';
 import 'package:afterimage/domain/setup_models.dart';
 import 'package:afterimage/presentation/recorder_controller.dart';
 import 'package:afterimage/services/output_directory_preflight.dart';
+import 'package:afterimage/services/batch_output_directory.dart';
 import 'package:afterimage/services/setup_service.dart';
 import 'package:afterimage/services/replay_batch_engine.dart';
 
@@ -194,6 +195,7 @@ RecorderController _controller(
     options: options,
     directoryPicker: picker ?? () async => null,
     outputPreflight: const _ReadyOutputPreflight(),
+    batchDirectories: _MemoryBatchDirectories(),
     engineFactory: ({
       required monitor,
       required menuInput,
@@ -399,4 +401,11 @@ class _FakeOrganizer implements OutputOrganizerPort {
         path: '$outputDirectory/combined.mp4',
         partial: partial,
       );
+}
+
+class _MemoryBatchDirectories extends BatchOutputDirectory {
+  @override
+  Future<BatchOutputReservation> reserve(String outputParent) async =>
+      BatchOutputReservation(
+          path: '$outputParent/batch-test', name: 'batch-test');
 }

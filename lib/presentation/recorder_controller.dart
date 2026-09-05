@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -6,6 +7,7 @@ import '../domain/recorder_contracts.dart';
 import '../domain/replay_batch.dart';
 import '../domain/setup_models.dart';
 import '../services/obs_connection_service.dart';
+import '../services/batch_output_directory.dart';
 import '../services/output_directory_picker.dart';
 import '../services/output_directory_preflight.dart';
 import '../services/replay_batch_engine.dart';
@@ -29,16 +31,20 @@ typedef OutputDirectoryPicker = Future<String?> Function();
 class RecorderController extends ChangeNotifier {
   RecorderController({
     this.obsConnection,
+    BatchOutputDirectory? batchDirectories,
     required this.backend,
     this.engineFactory = _createReplayBatchEngine,
     this.directoryPicker = pickOutputDirectory,
     this.outputPreflight = const FileOutputDirectoryPreflight(),
     RecordingOptions options = const RecordingOptions(),
-  }) : _options = options {
+  }) : _options = options,
+        batchDirectories = batchDirectories ?? BatchOutputDirectory() {
     obsConnection?.addListener(_onObsChanged);
   }
 
   final ObsConnectionService? obsConnection;
+  final BatchOutputDirectory batchDirectories;
+  String? batchOutputDirectory;
   final NativeRecorderBackend backend;
   Completer<void>? _batchDone;
 
@@ -367,6 +373,7 @@ class RecorderController extends ChangeNotifier {
     );
     _events.clear();
     _outputPaths.clear();
+    batchOutputDirectory = null;
     _result = null;
     _error = null;
     notifyListeners();
@@ -376,11 +383,19 @@ class RecorderController extends ChangeNotifier {
     ObsRecorderPort? obs;
     var engineStarted = false;
     try {
+      _options = _options.copyWith(
+        outputDirectory:
+            Directory(_options.outputDirectory.trim()).absolute.path,
+      );
       final outputReadiness =
           await outputPreflight.check(_options.outputDirectory);
       if (!outputReadiness.ready) {
         throw StateError(outputReadiness.detail);
       }
+      _throwIfCancelled();
+      final reservation =
+          await batchDirectories.reserve(_options.outputDirectory);
+      batchOutputDirectory = reservation.path;
       _throwIfCancelled();
       monitor = await backend.openReplayMonitor();
       _throwIfCancelled();
@@ -403,7 +418,7 @@ class RecorderController extends ChangeNotifier {
       final result = await engine.startBatch(
         ReplayBatchRequest(
           replayCount: replayCount,
-          options: _options,
+          options: _options.copyWith(outputDirectory: batchOutputDirectory),
         ),
       );
       _result = result;
