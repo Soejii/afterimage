@@ -2,7 +2,7 @@
 
 This file records what works in the current alpha and what is still unverified.
 
-Version `0.1.1+2` is an alpha desktop release:
+Version `0.2.0+3` is an alpha desktop release:
 
 - One Material 3 dark workspace screen that moves through four states:
   blocked, ready, running, and finished. While blocked it leads with a single
