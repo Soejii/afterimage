@@ -9,6 +9,7 @@ import 'package:afterimage/domain/setup_models.dart';
 import 'package:afterimage/services/obs_config_discovery.dart';
 import 'package:afterimage/services/obs_readiness_probe.dart';
 import 'package:afterimage/services/setup_service.dart';
+import 'package:afterimage/services/setup_locations.dart';
 
 import 'support/obs_test_support.dart';
 
@@ -251,6 +252,78 @@ void main() {
 
     expect(installCheck?.status, SetupCheckStatus.ready);
     expect(installCheck?.value, actualInstall.path);
+  });
+
+  test('LocalSetupService searches replay files in discovered Steam libraries',
+      () async {
+    final root = await createTempDirectory();
+    addTearDown(() => root.delete(recursive: true));
+    final separator = Platform.pathSeparator;
+    final steamRoot = Directory('${root.path}${separator}Steam');
+    final gameLibrary = Directory('${root.path}${separator}Games');
+    final replayDirectory = Directory(
+      '${gameLibrary.path}${separator}steamapps${separator}compatdata'
+      '${separator}1384160${separator}pfx${separator}drive_c'
+      '${separator}users${separator}steamuser${separator}AppData'
+      '${separator}Local${separator}GGST${separator}Saved${separator}SaveGames',
+    );
+    await Directory('${steamRoot.path}${separator}steamapps')
+        .create(recursive: true);
+    await replayDirectory.create(recursive: true);
+    await File('${replayDirectory.path}${separator}REP007.sav')
+        .writeAsBytes([7]);
+    await File(
+      '${steamRoot.path}${separator}steamapps${separator}libraryfolders.vdf',
+    ).writeAsString('''
+"libraryfolders"
+{
+  "1"
+  {
+    "path" "${gameLibrary.path}"
+  }
+}
+''');
+
+    final service = LocalSetupService(
+      obsProbe: const FakeObsProbe(
+        ObsProbeResult.blocked(detail: 'OBS is closed.'),
+      ),
+      steamLibraryRootCandidates: [steamRoot.path],
+    );
+
+    final report = await service.inspect();
+    final replayCheck = report.checkFor(SetupCheckId.replayLibrary);
+
+    expect(replayCheck?.value, replayDirectory.path);
+    expect(report.replayCount, 1);
+    expect(replayCheck?.status, SetupCheckStatus.ready);
+  }, skip: Platform.isWindows ? 'Proton save paths apply to Linux.' : false);
+
+  test('LocalSetupService gives explicit game and replay directories priority',
+      () async {
+    final root = await createTempDirectory();
+    addTearDown(() => root.delete(recursive: true));
+    final gameDirectory = Directory('${root.path}/selected-game');
+    final replayDirectory = Directory('${root.path}/selected-replays');
+    await gameDirectory.create(recursive: true);
+    await replayDirectory.create(recursive: true);
+    await File('${replayDirectory.path}/REP001.sav').writeAsBytes([1]);
+
+    final report = await LocalSetupService(
+      obsProbe: const FakeObsProbe(
+        ObsProbeResult.blocked(detail: 'OBS is closed.'),
+      ),
+      locationProvider: () => LocalSetupLocations(
+        gameDirectory: gameDirectory.path,
+        replayDirectory: replayDirectory.path,
+      ),
+    ).inspect();
+
+    expect(
+        report.checkFor(SetupCheckId.gameInstall)?.value, gameDirectory.path);
+    expect(report.checkFor(SetupCheckId.replayLibrary)?.value,
+        replayDirectory.path);
+    expect(report.replayCount, 1);
   });
 }
 

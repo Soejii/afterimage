@@ -4,6 +4,7 @@ import '../domain/obs_models.dart';
 import '../domain/recorder_contracts.dart';
 import '../domain/setup_models.dart';
 import 'obs_readiness_probe.dart';
+import 'setup_locations.dart';
 
 abstract interface class SetupService {
   Future<SetupReport> inspect();
@@ -16,6 +17,8 @@ class LocalSetupService implements SetupService {
   const LocalSetupService({
     this.obsProbe = const LocalObsReadinessProbe(),
     this.nativeBackend,
+    this.locations,
+    this.locationProvider,
     this.replayRootCandidates,
     this.steamLibraryRootCandidates,
   });
@@ -25,17 +28,30 @@ class LocalSetupService implements SetupService {
   static const _gameInstallFolder = 'GUILTY GEAR STRIVE';
   final ObsReadinessProbe obsProbe;
   final NativeRecorderBackend? nativeBackend;
+  final LocalSetupLocations? locations;
+  final LocalSetupLocations? Function()? locationProvider;
   final Iterable<String>? replayRootCandidates;
   final Iterable<String>? steamLibraryRootCandidates;
 
   @override
   Future<SetupReport> inspect() async {
-    final gamePath = _findGameInstall();
-    final replayInventory = _inspectReplayLibrary();
+    final selectedLocations = locationProvider?.call() ?? locations;
+    // Resolve Steam roots once and share the result between game and replay
+    // discovery. Both scans use asynchronous filesystem APIs so a large Steam
+    // library does not block the Flutter UI isolate while setup is refreshed.
+    final steamLibraryRootsFuture = _steamLibraryRoots();
+    final gamePathFuture = steamLibraryRootsFuture.then(
+      (roots) => _findGameInstall(roots, selectedLocations),
+    );
+    final replayInventoryFuture = steamLibraryRootsFuture.then(
+      (roots) => _inspectReplayLibrary(roots, selectedLocations),
+    );
     final gameRunningFuture = _isGameRunning();
     final obsProbeFuture = _inspectObs();
     final nativeReadinessFuture = _inspectNativeBackend();
 
+    final gamePath = await gamePathFuture;
+    final replayInventory = await replayInventoryFuture;
     final gameRunning = await gameRunningFuture;
     final obsResult = await obsProbeFuture;
     final nativeReadiness = await nativeReadinessFuture;
@@ -76,8 +92,8 @@ class LocalSetupService implements SetupService {
           id: SetupCheckId.gameInstall,
           title: 'GGST installation',
           detail: gamePath == null
-              ? 'No installation was found in common Steam locations. Start by installing Guilty Gear -Strive- through Steam.'
-              : 'Found at $gamePath.',
+              ? _missingGameDetail(selectedLocations)
+              : 'Guilty Gear -Strive- was found${_hasGameOverride(selectedLocations) ? ' in the selected folder' : ''}.',
           status: gamePath == null
               ? SetupCheckStatus.blocked
               : SetupCheckStatus.ready,
@@ -110,7 +126,7 @@ class LocalSetupService implements SetupService {
         SetupCheck(
           id: SetupCheckId.replayLibrary,
           title: 'Replay library',
-          detail: _replayDetail(replayInventory),
+          detail: _replayDetail(replayInventory, selectedLocations),
           status: replayInventory.count > 0
               ? SetupCheckStatus.ready
               : SetupCheckStatus.blocked,
@@ -148,10 +164,23 @@ class LocalSetupService implements SetupService {
     );
   }
 
-  String? _findGameInstall() {
-    final libraryRoots = _steamLibraryRoots();
+  Future<String?> _findGameInstall(
+    List<String> libraryRoots,
+    LocalSetupLocations? selectedLocations,
+  ) async {
+    final explicitDirectory = _explicitGameDirectory(selectedLocations);
+    if (explicitDirectory != null) {
+      try {
+        return await Directory(explicitDirectory).exists()
+            ? explicitDirectory
+            : null;
+      } on FileSystemException {
+        return null;
+      }
+    }
+
     for (final libraryRoot in libraryRoots) {
-      final path = _gameInstallFromManifest(libraryRoot);
+      final path = await _gameInstallFromManifest(libraryRoot);
       if (path != null) {
         return path;
       }
@@ -163,7 +192,7 @@ class LocalSetupService implements SetupService {
         ['steamapps', 'common', _gameInstallFolder],
       );
       try {
-        if (Directory(path).existsSync()) {
+        if (await Directory(path).exists()) {
           return path;
         }
       } on FileSystemException {
@@ -174,10 +203,10 @@ class LocalSetupService implements SetupService {
     return null;
   }
 
-  List<String> _steamLibraryRoots() {
+  Future<List<String>> _steamLibraryRoots() async {
     final suppliedRoots = steamLibraryRootCandidates;
     final roots = suppliedRoots == null
-        ? _defaultSteamLibraryRoots()
+        ? await _defaultSteamLibraryRoots()
         : _unique(suppliedRoots);
     final discoveredRoots = <String>[...roots];
 
@@ -185,13 +214,13 @@ class LocalSetupService implements SetupService {
       final libraryFolders = File(
         _joinParts(root, ['steamapps', 'libraryfolders.vdf']),
       );
-      discoveredRoots.addAll(_readVdfValues(libraryFolders, 'path'));
+      discoveredRoots.addAll(await _readVdfValues(libraryFolders, 'path'));
     }
 
     return _unique(discoveredRoots);
   }
 
-  List<String> _defaultSteamLibraryRoots() {
+  Future<List<String>> _defaultSteamLibraryRoots() async {
     final environment = Platform.environment;
     final home = environment['HOME'] ?? environment['USERPROFILE'] ?? '';
 
@@ -199,27 +228,57 @@ class LocalSetupService implements SetupService {
       final programFiles = environment['ProgramFiles'] ?? r'C:\Program Files';
       final programFilesX86 =
           environment['ProgramFiles(x86)'] ?? r'C:\Program Files (x86)';
-      return _unique([
+      final environmentRoots = [
+        environment['STEAM_ROOT'],
+        environment['STEAM_PATH'],
+        environment['ProgramW6432'] == null
+            ? null
+            : _joinParts(environment['ProgramW6432']!, ['Steam']),
         _joinParts(programFilesX86, ['Steam']),
         _joinParts(programFiles, ['Steam']),
+        environment['LOCALAPPDATA'] == null
+            ? null
+            : _joinParts(environment['LOCALAPPDATA']!, ['Steam']),
+        environment['APPDATA'] == null
+            ? null
+            : _joinParts(environment['APPDATA']!, ['Steam']),
+      ].whereType<String>();
+      return _unique([
+        ...environmentRoots,
+        ...await _readWindowsSteamRegistryRoots(),
       ]);
     }
 
     return _unique([
       _joinParts(home, ['.steam', 'steam']),
       _joinParts(home, ['.local', 'share', 'Steam']),
+      _joinParts(home, [
+        '.var',
+        'app',
+        'com.valvesoftware.Steam',
+        '.local',
+        'share',
+        'Steam',
+      ]),
+      _joinParts(home, [
+        '.var',
+        'app',
+        'com.valvesoftware.Steam',
+        'data',
+        'Steam',
+      ]),
       _joinParts(home, ['Games']),
     ]);
   }
 
-  String? _gameInstallFromManifest(String libraryRoot) {
+  Future<String?> _gameInstallFromManifest(String libraryRoot) async {
     final manifest = File(
       _joinParts(
         libraryRoot,
         ['steamapps', 'appmanifest_$_gameAppId.acf'],
       ),
     );
-    final installDirectories = _readVdfValues(manifest, 'installdir');
+    final installDirectories = await _readVdfValues(manifest, 'installdir');
     if (installDirectories.isEmpty) {
       return null;
     }
@@ -234,20 +293,20 @@ class LocalSetupService implements SetupService {
       ['steamapps', 'common', installDirectory],
     );
     try {
-      return Directory(path).existsSync() ? path : null;
+      return await Directory(path).exists() ? path : null;
     } on FileSystemException {
       return null;
     }
   }
 
-  List<String> _readVdfValues(File file, String requestedKey) {
+  Future<List<String>> _readVdfValues(File file, String requestedKey) async {
     final values = <String>[];
     final entryPattern = RegExp(
       r'^\s*"([^"]+)"\s*"((?:\\.|[^"])*)"\s*$',
     );
 
     try {
-      for (final line in file.readAsLinesSync()) {
+      for (final line in await file.readAsLines()) {
         final match = entryPattern.firstMatch(line);
         if (match == null || match.group(1) != requestedKey) {
           continue;
@@ -263,6 +322,46 @@ class LocalSetupService implements SetupService {
     return values;
   }
 
+  Future<List<String>> _readWindowsSteamRegistryRoots() async {
+    if (!Platform.isWindows) {
+      return const [];
+    }
+
+    // `reg query` only reads the registry. Query both the per-user Steam key
+    // and the machine keys used by 32-bit and 64-bit Steam installations.
+    final keys = [
+      r'HKEY_CURRENT_USER\Software\Valve\Steam',
+      r'HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam',
+      r'HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam',
+    ];
+    final valuePattern = RegExp(
+      r'^\s*(?:SteamPath|InstallPath)\s+REG_\w+\s+(.+?)\s*$',
+      caseSensitive: false,
+    );
+    final roots = <String>[];
+
+    for (final key in keys) {
+      try {
+        final result = await Process.run('reg', ['query', key]);
+        if (result.exitCode != 0) {
+          continue;
+        }
+        final output = '${result.stdout}\n${result.stderr}';
+        for (final line in output.split(RegExp(r'\r?\n'))) {
+          final match = valuePattern.firstMatch(line);
+          if (match != null) {
+            roots.add(match.group(1)!);
+          }
+        }
+      } on ProcessException {
+        // Registry discovery is optional. Environment and standard paths still
+        // provide useful candidates when `reg.exe` is unavailable.
+      }
+    }
+
+    return _unique(roots);
+  }
+
   String _decodeVdfValue(String value) {
     return value.replaceAll(r'\"', '"').replaceAll(r'\\', '\\');
   }
@@ -275,15 +374,19 @@ class LocalSetupService implements SetupService {
         !value.contains('\\');
   }
 
-  _ReplayInventory _inspectReplayLibrary() {
+  Future<_ReplayInventory> _inspectReplayLibrary(
+    List<String> steamLibraryRoots,
+    LocalSetupLocations? selectedLocations,
+  ) async {
     final roots = <String>[];
 
-    final suppliedRoots = replayRootCandidates;
-    if (suppliedRoots != null) {
-      roots.addAll(suppliedRoots);
+    final explicitDirectory = _explicitReplayDirectory(selectedLocations);
+    if (explicitDirectory != null) {
+      roots.add(explicitDirectory);
+    } else if (replayRootCandidates != null) {
+      roots.addAll(replayRootCandidates!);
     } else {
       final environment = Platform.environment;
-      final home = environment['HOME'] ?? environment['USERPROFILE'] ?? '';
 
       if (Platform.isWindows) {
         final localAppData = environment['LOCALAPPDATA'] ?? '';
@@ -298,11 +401,10 @@ class LocalSetupService implements SetupService {
           }
         }
       } else {
-        for (final steamHome in [
-          _joinParts(home, ['.steam', 'steam']),
-          _joinParts(home, ['.local', 'share', 'Steam']),
-          _joinParts(home, ['Games']),
-        ]) {
+        // Steam's configured library roots are the source of truth. This
+        // includes libraries declared by Flatpak Steam's libraryfolders.vdf,
+        // as well as libraries outside the usual home directories.
+        for (final steamHome in steamLibraryRoots) {
           roots.add(_joinParts(steamHome, [
             'steamapps',
             'compatdata',
@@ -325,12 +427,15 @@ class LocalSetupService implements SetupService {
     for (final root in _unique(roots)) {
       final directory = Directory(root);
       try {
-        if (!directory.existsSync()) {
+        if (!await directory.exists()) {
           continue;
         }
 
         var count = 0;
-        for (final entity in directory.listSync(recursive: true)) {
+        await for (final entity in directory.list(
+          recursive: true,
+          followLinks: false,
+        )) {
           if (entity is File &&
               RegExp(r'^REP\d{3}\.sav$', caseSensitive: false)
                   .hasMatch(entity.uri.pathSegments.last)) {
@@ -456,19 +561,59 @@ class LocalSetupService implements SetupService {
     }
   }
 
-  String _replayDetail(_ReplayInventory inventory) {
+  String _replayDetail(
+    _ReplayInventory inventory,
+    LocalSetupLocations? selectedLocations,
+  ) {
     if (inventory.root == null) {
-      return 'No replay save folder was found in common Steam locations. Afterimage looks for REP###.sav files.';
+      if (_explicitReplayDirectory(selectedLocations) != null) {
+        return 'The selected saved-replay folder was not found. Choose the folder containing your saved replays, then refresh checks.';
+      }
+      return 'No saved replays were found. Open GGST, save at least one replay, and refresh checks.';
     }
     if (inventory.count == 0) {
-      return 'Replay folder found at ${inventory.root}, but no REP###.sav files were found.';
+      return 'The saved-replay folder is empty. Save at least one replay in GGST, then refresh checks.';
     }
     final noun = inventory.count == 1 ? 'file' : 'files';
-    return '${inventory.count} REP###.sav $noun found at ${inventory.root}.';
+    return '${inventory.count} REP###.sav $noun found at ${inventory.root}${_hasReplayOverride(selectedLocations) ? ' (selected folder)' : ''}.';
+  }
+
+  String? _explicitGameDirectory(LocalSetupLocations? selectedLocations) {
+    final value = selectedLocations?.gameDirectory;
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  String? _explicitReplayDirectory(LocalSetupLocations? selectedLocations) {
+    final value = selectedLocations?.replayDirectory;
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  bool _hasGameOverride(LocalSetupLocations? selectedLocations) =>
+      _explicitGameDirectory(selectedLocations) != null;
+
+  bool _hasReplayOverride(LocalSetupLocations? selectedLocations) =>
+      _explicitReplayDirectory(selectedLocations) != null;
+
+  String _missingGameDetail(LocalSetupLocations? selectedLocations) {
+    if (_hasGameOverride(selectedLocations)) {
+      return 'The selected game folder was not found. Choose the folder containing Guilty Gear -Strive-, then refresh checks.';
+    }
+    return 'Guilty Gear -Strive- was not found. Install it through Steam, then refresh checks.';
   }
 
   List<String> _unique(Iterable<String> values) {
-    return values.where((value) => value.isNotEmpty).toSet().toList();
+    final unique = <String>[];
+    final seen = <String>{};
+    for (final value in values) {
+      if (value.isEmpty) {
+        continue;
+      }
+      final key = Platform.isWindows ? value.toLowerCase() : value;
+      if (seen.add(key)) {
+        unique.add(value);
+      }
+    }
+    return unique;
   }
 
   String _joinParts(String base, List<String> parts) {
