@@ -17,11 +17,10 @@ Version `0.2.1+4` is an alpha desktop release:
   remains locked until the game, OBS, replay library, selected input mode, and
   output folder all pass their checks.
 - Keyboard automation is implemented on Windows through `SendInput` and on
-  Linux through targeted gamescope XTest events. Linux also supports an
-  optional `uinput` virtual controller. Windows supports an optional
-  Xbox-compatible virtual controller through a separately installed ViGEmBus
-  driver. Neither platform consumes the user's physical controller, and
-  neither silently falls back to keyboard.
+  Linux through targeted gamescope XTest events. Linux controller mode writes
+  into the existing evdev node GGST is already reading. Windows supports an
+  optional Xbox-compatible virtual controller through a separately installed
+  ViGEmBus driver. Neither platform silently falls back to keyboard.
 - The replay batch engine is now ported behind testable Dart contracts. It waits
   for frame movement before starting a battle, requires a result event or a
   duration-derived run of missing reads to finish it, and treats frozen frames

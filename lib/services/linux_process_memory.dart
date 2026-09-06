@@ -155,6 +155,10 @@ abstract interface class LinuxProcFileSystem {
 
   List<int> readFile(int processId, String name);
 
+  Iterable<String> fdTargets(int processId);
+
+  String readInputDevices();
+
   String memoryPath(int processId) => '/proc/$processId/mem';
 }
 
@@ -177,6 +181,22 @@ class SystemLinuxProcFileSystem implements LinuxProcFileSystem {
   List<int> readFile(int processId, String name) {
     return File('$root/$processId/$name').readAsBytesSync();
   }
+
+  @override
+  Iterable<String> fdTargets(int processId) {
+    final directory = Directory('$root/$processId/fd');
+    final targets = <String>[];
+    for (final entry in directory.listSync(followLinks: false)) {
+      if (entry is Link) {
+        targets.add(entry.targetSync());
+      }
+    }
+    return List.unmodifiable(targets);
+  }
+
+  @override
+  String readInputDevices() =>
+      File('$root/bus/input/devices').readAsStringSync();
 
   @override
   String memoryPath(int processId) => '$root/$processId/mem';

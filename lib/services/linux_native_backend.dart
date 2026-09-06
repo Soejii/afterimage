@@ -8,7 +8,7 @@ import 'linux_menu_input.dart';
 import 'linux_native_errors.dart';
 import 'linux_process_memory.dart';
 import 'linux_replay_monitor.dart';
-import 'linux_uinput_controller.dart';
+import 'linux_evdev_controller.dart';
 import 'obs_config_discovery.dart';
 import 'obs_websocket_recorder.dart';
 import 'output_organizer.dart';
@@ -58,8 +58,9 @@ class LinuxNativeRecorderBackend
     LinuxObsRecorderFactory? obsRecorderFactory,
     LinuxOutputOrganizerFactory? outputOrganizerFactory,
     LinuxNativeLibraryProbe? libraryProbe,
-    LinuxUinputReadinessProbe? controllerProbe,
-    LinuxUinputDeviceFactory? controllerFactory,
+    LinuxEvdevControllerDiscovery? controllerDiscovery,
+    LinuxEvdevReadinessProbe? controllerProbe,
+    LinuxEvdevDeviceFactory? controllerFactory,
   })  : memoryFactory = memoryFactory ?? _openLinuxMemorySession,
         displayDiscovery =
             displayDiscovery ?? const LinuxGamescopeDisplayDiscovery(),
@@ -70,9 +71,17 @@ class LinuxNativeRecorderBackend
         outputOrganizerFactory =
             outputOrganizerFactory ?? (() => const FileOutputOrganizer()),
         libraryProbe = libraryProbe ?? const SystemLinuxNativeLibraryProbe(),
-        controllerProbe = controllerProbe ?? LinuxUinputReadinessProbe(),
+        controllerDiscovery =
+            controllerDiscovery ?? const LinuxEvdevControllerDiscovery(),
         controllerFactory =
-            controllerFactory ?? const LinuxUinputNativeDeviceFactory();
+            controllerFactory ?? const LinuxEvdevNativeDeviceFactory(),
+        controllerProbe = controllerProbe ??
+            LinuxEvdevReadinessProbe(
+              discovery:
+                  controllerDiscovery ?? const LinuxEvdevControllerDiscovery(),
+              factory:
+                  controllerFactory ?? const LinuxEvdevNativeDeviceFactory(),
+            );
 
   final ObsWebSocketConfigDiscovery obsDiscovery;
   final ObsWebSocketConfig? obsConfig;
@@ -83,8 +92,9 @@ class LinuxNativeRecorderBackend
   final LinuxObsRecorderFactory obsRecorderFactory;
   final LinuxOutputOrganizerFactory outputOrganizerFactory;
   final LinuxNativeLibraryProbe libraryProbe;
-  final LinuxUinputReadinessProbe controllerProbe;
-  final LinuxUinputDeviceFactory controllerFactory;
+  final LinuxEvdevControllerDiscovery controllerDiscovery;
+  final LinuxEvdevReadinessProbe controllerProbe;
+  final LinuxEvdevDeviceFactory controllerFactory;
 
   @override
   Future<NativeBackendReadiness> inspect() async {
@@ -197,7 +207,8 @@ class LinuxNativeRecorderBackend
   Future<MenuInputPort> openMenuInput(InputMode mode) async {
     _ensureLinux();
     if (mode == InputMode.controller) {
-      return LinuxUinputMenuInput(
+      return LinuxEvdevMenuInput(
+        discovery: controllerDiscovery,
         factory: controllerFactory,
       );
     }

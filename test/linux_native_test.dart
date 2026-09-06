@@ -12,7 +12,7 @@ import 'package:afterimage/services/linux_native_backend.dart';
 import 'package:afterimage/services/linux_native_errors.dart';
 import 'package:afterimage/services/linux_process_memory.dart';
 import 'package:afterimage/services/linux_replay_monitor.dart';
-import 'package:afterimage/services/linux_uinput_controller.dart';
+import 'package:afterimage/services/linux_evdev_controller.dart';
 import 'package:afterimage/services/output_organizer.dart';
 
 void main() {
@@ -360,7 +360,7 @@ void main() {
 
       expect(
         await backend.openMenuInput(InputMode.controller),
-        isA<LinuxUinputMenuInput>(),
+        isA<LinuxEvdevMenuInput>(),
       );
     });
 
@@ -500,6 +500,12 @@ class _FakeProcFileSystem implements LinuxProcFileSystem {
     }
     return file;
   }
+
+  @override
+  Iterable<String> fdTargets(int processId) => const <String>[];
+
+  @override
+  String readInputDevices() => '';
 }
 
 class _FakeMemorySession implements LinuxMemorySession {

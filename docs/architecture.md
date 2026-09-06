@@ -46,13 +46,13 @@ The process-memory adapters use a read-only pattern scan for the `GWorld`
 pointer, then a fixed offset chain to frame and event data.
 
 The Linux adapter lives in `lib/services/linux_process_memory.dart`,
-`linux_replay_monitor.dart`, `linux_menu_input.dart`, and
-`linux_native_backend.dart`. It uses read-only process memory and targeted
-gamescope XTest input, with optional uinput controller support in
-`linux_uinput_controller.dart`. See
+`linux_replay_monitor.dart`, `linux_menu_input.dart`,
+`linux_evdev_controller.dart`, and `linux_native_backend.dart`. It uses
+read-only process memory, targeted gamescope XTest input, and an existing
+controller evdev node selected from the processes in GGST's Wine prefix. See
 [`linux-runtime.md`](linux-runtime.md) and
 [`linux-controller.md`](linux-controller.md) for runtime packages, safe
-process-memory permission troubleshooting, and optional controller setup.
+process-memory permission troubleshooting, and controller setup.
 
 The Windows adapter lives in `lib/services/windows_process_memory.dart`,
 `windows_replay_monitor.dart`, `windows_menu_input.dart`, and
