@@ -101,7 +101,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final controllerTile = tester.widget<RadioListTile<InputMode>>(
-      find.byKey(const ValueKey('input-mode-virtualController')),
+      find.byKey(const ValueKey('input-mode-controller')),
     );
     expect(controllerTile.enabled, isFalse);
     expect(
@@ -134,7 +134,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('READY'), findsOneWidget);
 
-    await controller.setInputMode(InputMode.virtualController);
+    await controller.setInputMode(InputMode.controller);
     await tester.pump();
 
     // Selecting a control method that is not available must lock recording and

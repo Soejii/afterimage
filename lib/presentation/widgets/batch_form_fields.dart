@@ -113,13 +113,13 @@ class InputModeTile extends StatelessWidget {
   String _friendlyInputTitle(InputMode mode) {
     return mode == InputMode.keyboard
         ? 'Use keyboard controls'
-        : 'Use a virtual gamepad';
+        : 'Use controller controls';
   }
 
   String _friendlyInputDescription(InputMode mode) {
     return mode == InputMode.keyboard
         ? 'Afterimage sends the replay menu keys for you.'
-        : 'Afterimage uses a separate gamepad for the replay menu.';
+        : 'Afterimage sends menu input through the selected controller.';
   }
 }
 

@@ -117,11 +117,11 @@ class WindowsNativeRecorderBackend
 
     final checks = <WindowsReadinessCheck>[];
     checks.add(await _inspectGame());
-    if (inputMode == InputMode.virtualController) {
+    if (inputMode == InputMode.controller) {
       final controller = controllerProbe.inspect();
       checks.add(WindowsReadinessCheck(
         code: controller.code,
-        title: 'Virtual controller',
+        title: 'Controller',
         detail: controller.detail,
         ready: controller.ready,
       ));
@@ -145,7 +145,7 @@ class WindowsNativeRecorderBackend
   @override
   Future<MenuInputPort> openMenuInput(InputMode mode) async {
     _ensureWindows();
-    if (mode == InputMode.virtualController) {
+    if (mode == InputMode.controller) {
       return WindowsVirtualControllerMenuInput(
         driver: controllerDriverFactory(),
       );

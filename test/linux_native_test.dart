@@ -349,7 +349,7 @@ void main() {
   });
 
   group('Linux native backend', () {
-    test('does not silently fall back from virtual controller mode', () async {
+    test('does not silently fall back from controller mode', () async {
       final backend = LinuxNativeRecorderBackend(
         displayDiscovery: LinuxGamescopeDisplayDiscovery(
           procFileSystem: _gameProc(':5'),
@@ -359,7 +359,7 @@ void main() {
       );
 
       expect(
-        await backend.openMenuInput(InputMode.virtualController),
+        await backend.openMenuInput(InputMode.controller),
         isA<LinuxUinputMenuInput>(),
       );
     });

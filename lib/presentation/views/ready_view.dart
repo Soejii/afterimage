@@ -141,9 +141,7 @@ class _AdvancedOptions extends StatelessWidget {
           tilePadding: const EdgeInsets.symmetric(horizontal: 20),
           title: const Text('Replay controls'),
           subtitle: Text(
-            options.inputMode == InputMode.keyboard
-                ? 'Keyboard'
-                : 'Virtual gamepad',
+            options.inputMode == InputMode.keyboard ? 'Keyboard' : 'Controller',
           ),
           childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
           children: [

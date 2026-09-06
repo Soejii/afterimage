@@ -76,9 +76,19 @@ class RecorderController extends ChangeNotifier {
     final saved = await preferences?.load();
     if (_disposed || saved == null) return;
     if (identical(before, _options)) {
-      T readEnum<T extends Enum>(List<T> values, String key, T fallback) {
+      T readEnum<T extends Enum>(
+        List<T> values,
+        String key,
+        T fallback, {
+        Map<String, T> aliases = const {},
+      }) {
+        final stored = saved[key];
+        if (stored is String) {
+          final alias = aliases[stored];
+          if (alias != null) return alias;
+        }
         for (final value in values) {
-          if (value.name == saved[key]) return value;
+          if (value.name == stored) return value;
         }
         return fallback;
       }
@@ -88,7 +98,12 @@ class RecorderController extends ChangeNotifier {
       _options = _options.copyWith(
         replayCount: readEnum(
             ReplayCountOption.values, 'replayCount', _options.replayCount),
-        inputMode: readEnum(InputMode.values, 'inputMode', _options.inputMode),
+        inputMode: readEnum(
+          InputMode.values,
+          'inputMode',
+          _options.inputMode,
+          aliases: {'virtualController': InputMode.controller},
+        ),
         customReplayCount:
             count is int && count > 0 && count <= 1000 ? count : 1,
         outputDirectory: _storedPath(path) ?? _options.outputDirectory,
@@ -264,7 +279,7 @@ class RecorderController extends ChangeNotifier {
           ..addAll({
             InputMode.keyboard: NativeBackendReadiness(
                 available: keyboard.isReady, detail: keyboard.detail),
-            InputMode.virtualController: NativeBackendReadiness(
+            InputMode.controller: NativeBackendReadiness(
                 available: controller.isReady, detail: controller.detail),
           });
       } else {
@@ -1001,9 +1016,8 @@ class RecorderController extends ChangeNotifier {
       _disposed || generation != _readinessGeneration;
 
   String _friendlyInputError(InputMode inputMode, Object error) {
-    final inputName = inputMode == InputMode.keyboard
-        ? 'keyboard input'
-        : 'virtual controller input';
+    final inputName =
+        inputMode == InputMode.keyboard ? 'keyboard input' : 'controller input';
     return 'The backend cannot provide $inputName on this machine. ${_friendlyError(error)}';
   }
 

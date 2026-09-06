@@ -430,7 +430,7 @@ void main() {
         controllerDriverFactory: () => driver,
       );
 
-      final input = await backend.openMenuInput(InputMode.virtualController);
+      final input = await backend.openMenuInput(InputMode.controller);
       expect(input, isA<WindowsVirtualControllerMenuInput>());
       await input.perform(ReplayMenuAction.selectNextReplay);
       expect(
@@ -489,7 +489,7 @@ void main() {
       );
 
       final report = await backend.inspectDetailed(
-        inputMode: InputMode.virtualController,
+        inputMode: InputMode.controller,
       );
 
       expect(report.ready, isTrue);

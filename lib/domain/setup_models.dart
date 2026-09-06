@@ -136,16 +136,16 @@ extension VideoModeLabel on VideoMode {
 
 enum InputMode {
   keyboard,
-  virtualController,
+  controller,
 }
 
 extension InputModeLabel on InputMode {
   String get label {
     switch (this) {
       case InputMode.keyboard:
-        return 'Keyboard input';
-      case InputMode.virtualController:
-        return 'Virtual controller';
+        return 'Keyboard';
+      case InputMode.controller:
+        return 'Controller';
     }
   }
 
@@ -153,8 +153,8 @@ extension InputModeLabel on InputMode {
     switch (this) {
       case InputMode.keyboard:
         return 'Uses U to confirm and W to move up in GGST. Keep these menu bindings in the game.';
-      case InputMode.virtualController:
-        return 'Use a separate virtual gamepad; your physical controller stays connected.';
+      case InputMode.controller:
+        return 'Sends menu input through the controller GGST is already using.';
     }
   }
 }

@@ -19,7 +19,7 @@ void main() {
           available: true,
           detail: 'Keyboard input is ready.',
         ),
-        InputMode.virtualController: const NativeBackendReadiness(
+        InputMode.controller: const NativeBackendReadiness(
           available: false,
           detail: 'No virtual controller driver is installed.',
         ),
@@ -31,7 +31,7 @@ void main() {
 
     expect(controller.isInputModeAvailable(InputMode.keyboard), isTrue);
     expect(
-      controller.isInputModeAvailable(InputMode.virtualController),
+      controller.isInputModeAvailable(InputMode.controller),
       isFalse,
     );
     expect(backend.inspectedModes, containsAll(InputMode.values));

@@ -122,14 +122,14 @@ class LinuxNativeRecorderBackend
             ready: true,
           ),
         ],
-      InputMode.virtualController => <LinuxReadinessCheck>[
+      InputMode.controller => <LinuxReadinessCheck>[
           () {
             final controller = controllerProbe.inspect();
             return LinuxReadinessCheck(
               code: controller.ready
                   ? null
                   : LinuxNativeErrorCode.unsupportedController,
-              title: 'Virtual controller',
+              title: 'Controller',
               detail: controller.detail,
               ready: controller.ready,
             );
@@ -163,13 +163,13 @@ class LinuxNativeRecorderBackend
 
     final checks = <LinuxReadinessCheck>[];
     checks.add(await _inspectGame());
-    if (inputMode == InputMode.virtualController) {
+    if (inputMode == InputMode.controller) {
       final controller = controllerProbe.inspect();
       checks.add(LinuxReadinessCheck(
         code: controller.ready
             ? null
             : LinuxNativeErrorCode.unsupportedController,
-        title: 'Virtual controller',
+        title: 'Controller',
         detail: controller.detail,
         ready: controller.ready,
       ));
@@ -196,7 +196,7 @@ class LinuxNativeRecorderBackend
   @override
   Future<MenuInputPort> openMenuInput(InputMode mode) async {
     _ensureLinux();
-    if (mode == InputMode.virtualController) {
+    if (mode == InputMode.controller) {
       return LinuxUinputMenuInput(
         factory: controllerFactory,
       );

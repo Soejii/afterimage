@@ -60,7 +60,7 @@ class LocalSetupService implements SetupService {
       nativeReadiness,
     );
     final controllerReadiness = await _inspectInput(
-      InputMode.virtualController,
+      InputMode.controller,
       nativeReadiness,
     );
     final supported = Platform.isLinux || Platform.isWindows;
@@ -136,7 +136,7 @@ class LocalSetupService implements SetupService {
         ),
         SetupCheck(
           id: SetupCheckId.controllerInput,
-          title: 'Virtual controller',
+          title: 'Controller',
           detail: controllerReadiness.detail,
           status: controllerReadiness.available
               ? SetupCheckStatus.ready

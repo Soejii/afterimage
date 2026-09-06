@@ -26,7 +26,7 @@ void main() {
 
     expect(controller.options.replayCount, ReplayCountOption.custom);
     expect(controller.options.customReplayCount, 12);
-    expect(controller.options.inputMode, InputMode.virtualController);
+    expect(controller.options.inputMode, InputMode.controller);
     expect(controller.options.videoMode, VideoMode.combined);
     expect(controller.options.outputDirectory, outputDirectory);
     controller.dispose();
@@ -74,7 +74,7 @@ void main() {
       RecordingOptions(
         replayCount: ReplayCountOption.custom,
         customReplayCount: 8,
-        inputMode: InputMode.virtualController,
+        inputMode: InputMode.controller,
         videoMode: VideoMode.combined,
         outputDirectory: Directory.systemTemp.path,
       ),
@@ -85,7 +85,7 @@ void main() {
     expect(preferences.writes, hasLength(1));
     expect(preferences.writes.single, {
       'outputDirectory': Directory.systemTemp.path,
-      'inputMode': 'virtualController',
+      'inputMode': 'controller',
       'replayCount': 'custom',
       'customReplayCount': 8,
       'videoMode': 'combined',
