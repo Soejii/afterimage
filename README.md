@@ -43,9 +43,14 @@ then follow the matching instructions below. Keep every extracted file together.
 This alpha build is not code-signed, so Windows may show a security warning.
 Only continue if the archive came from the official release page linked above.
 Windows supports **Keyboard** input and an optional virtual controller. The
-controller mode works alongside a physical Xbox, DualShock, or DualSense pad;
+keyboard mode requires GGST to stay focused for the whole batch. Controller
+mode creates a separate virtual pad alongside a physical pad;
 it requires a separately installed ViGEmBus driver. See
 [`docs/windows-controller.md`](docs/windows-controller.md).
+
+Windows background menu automation remains unverified. One reported borderless
+setup accepts physical controller input behind a smaller browser window but
+stops accepting it when the browser fully covers GGST.
 
 ### 64-bit Linux
 
@@ -86,7 +91,8 @@ an OBS WebSocket is.
 4. Choose how many replays to record, and the folder to save them in. The
    folder is remembered for next time.
 5. Select **Start recording**. Afterimage shows every replay in the batch with
-   its progress, so you can leave it running and check on it later.
+   its progress. Windows keyboard mode requires GGST to stay focused; Windows
+   controller mode is not yet verified for background menu automation.
 
 Afterimage records the whole batch into one video file. Each batch gets its own
 folder, so a second run cannot overwrite the first.

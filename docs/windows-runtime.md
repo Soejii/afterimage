@@ -35,6 +35,36 @@ stops the batch and attempts to preserve the current recording as a partial
 video. Return to Saved Replays before trying again. These checks do not bring
 the game to the foreground automatically.
 
+Replay controls are expanded by default on Windows and display the keyboard
+focus requirement. A connected physical controller does not automatically
+select Afterimage's controller mode.
+
+Afterimage waits up to 30 seconds for OBS's matching recording-stopped event
+before moving the recording. If completion is not confirmed, it leaves the
+file in OBS's recording folder and reports the path when OBS supplied it.
+Move errors include the failed operation and original filesystem error. The
+result screen labels the intended destination as the batch folder, not as proof
+that the video was saved there.
+
+Focus failures include a UTC timestamp, expected GGST PID, foreground PID and
+window handle, lookup failure details, and best-effort process name and window
+title. Batch errors also include the stage, replay index, and elapsed time.
+These details appear in the error and the batch's `summary.json`; window titles
+can include document or page names, so inspect the report before sharing it.
+
+### Background input investigation
+
+On the reported Windows borderless setup, physical controller menu input works
+with a smaller browser focused and GGST partly visible, but fails when that same
+browser fully covers GGST. This distinguishes coverage from focus in that setup;
+it does not establish the cause or prove virtual-controller behavior.
+
+[Microsoft documents DXGI occlusion](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/dxgi-status)
+as a rendering visibility condition that applications may use to suspend work.
+That is a hypothesis here, not a measured GGST status. The documentation also
+excludes flip-model swap chains from this status. No game setting, graphics
+hook, memory write, or focus-stealing workaround is applied on that assumption.
+
 Afterimage does not install drivers, change security policy, patch GGST, or
 modify replay files.
 

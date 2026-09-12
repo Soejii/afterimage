@@ -12,10 +12,8 @@ import '../widgets/status_surface.dart';
 
 /// What is on screen when a batch can start.
 ///
-/// Two decisions are visible: how many replays, and where to save them. The
-/// replay-control choice is defaulted and demoted, because it asks the user to
-/// evaluate a capability the application has already measured. There is no
-/// video-mode choice at all; every batch produces one video.
+/// Windows replay controls start expanded because their focus and driver
+/// requirements affect how the user can record. Every batch produces one video.
 class ReadyView extends StatelessWidget {
   const ReadyView({
     super.key,
@@ -138,10 +136,16 @@ class _AdvancedOptions extends StatelessWidget {
         color: Colors.transparent,
         child: ExpansionTile(
           key: const ValueKey('advanced-options'),
+          initiallyExpanded:
+              Theme.of(context).platform == TargetPlatform.windows,
           tilePadding: const EdgeInsets.symmetric(horizontal: 20),
           title: const Text('Replay controls'),
           subtitle: Text(
-            options.inputMode == InputMode.keyboard ? 'Keyboard' : 'Controller',
+            options.inputMode == InputMode.keyboard
+                ? Theme.of(context).platform == TargetPlatform.windows
+                    ? 'Keyboard: GGST must stay focused'
+                    : 'Keyboard'
+                : 'Controller',
           ),
           childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
           children: [

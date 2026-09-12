@@ -64,12 +64,15 @@ class ObsWebSocketRecorder implements ObsRecorderPort {
     this.connectTimeout = const Duration(seconds: 5),
     this.requestTimeout = const Duration(seconds: 10),
     this.closeTimeout = const Duration(seconds: 2),
+    this.stopTimeout = const Duration(seconds: 30),
   });
 
   final ObsWebSocketConfig config;
   final Duration connectTimeout;
   final Duration requestTimeout;
   final Duration closeTimeout;
+  final Duration stopTimeout;
+  String? _stoppingOutputPath;
 
   WebSocket? _socket;
   StreamIterator<dynamic>? _messages;
@@ -163,6 +166,8 @@ class ObsWebSocketRecorder implements ObsRecorderPort {
       final helloAuth = helloData['authentication'];
       final identifyData = <String, Object?>{
         'rpcVersion': _rpcVersion(helloData['rpcVersion']),
+        // RecordStateChanged confirms that OBS has finished closing its output.
+        'eventSubscriptions': 64,
       };
       if (helloAuth != null) {
         serverRequestedAuthentication = true;
@@ -276,16 +281,23 @@ class ObsWebSocketRecorder implements ObsRecorderPort {
         // A failed request must not permanently poison the request queue.
       }
       await connect();
+      if (requestType == 'StopRecord') _stoppingOutputPath = null;
       try {
         return await _requestUnserialized(requestType, requestData).timeout(
-          requestTimeout,
+          requestType == 'StopRecord' ? stopTimeout : requestTimeout,
           onTimeout: () => throw ObsTimeoutException(
-            'Timed out waiting for OBS request $requestType.',
+            'Timed out waiting for OBS request $requestType.'
+            '${requestType == 'StopRecord' ? _stopRecoveryDetail : ''}',
           ),
         );
       } catch (error, stackTrace) {
         if (error is ObsTimeoutException || error is ObsDisconnectedException) {
           await _closeInternal();
+        }
+        if (requestType == 'StopRecord' && error is ObsDisconnectedException) {
+          Error.throwWithStackTrace(
+              ObsDisconnectedException('${error.message}$_stopRecoveryDetail'),
+              stackTrace);
         }
         if (error is ObsClientException) {
           Error.throwWithStackTrace(error, stackTrace);
@@ -296,6 +308,10 @@ class ObsWebSocketRecorder implements ObsRecorderPort {
       release.complete();
     }
   }
+
+  String get _stopRecoveryDetail =>
+      ' Recording completion was not confirmed; no output was moved. '
+      'Check OBS${_stoppingOutputPath == null ? '.' : ' and $_stoppingOutputPath.'}';
 
   Future<Map<String, dynamic>> _requestUnserialized(
     String requestType,
@@ -311,10 +327,27 @@ class ObsWebSocketRecorder implements ObsRecorderPort {
       },
     });
 
+    Map<String, dynamic>? stopResponse;
+    final stoppedPaths = <String>{};
     while (true) {
       final message = await _readMessage();
       final operation = _intValue(message['op']);
       if (operation == 5) {
+        if (requestType == 'StopRecord') {
+          final event = message['d'];
+          if (event is Map && event['eventType'] == 'RecordStateChanged') {
+            final data = event['eventData'];
+            if (data is Map &&
+                data['outputState'] == 'OBS_WEBSOCKET_OUTPUT_STOPPED' &&
+                data['outputPath'] is String) {
+              stoppedPaths.add(data['outputPath'] as String);
+            }
+          }
+          if (stopResponse != null &&
+              stoppedPaths.contains(stopResponse['outputPath'])) {
+            return stopResponse;
+          }
+        }
         continue;
       }
       if (operation != 7) {
@@ -335,7 +368,17 @@ class ObsWebSocketRecorder implements ObsRecorderPort {
       if (responseData == null) {
         return <String, dynamic>{};
       }
-      return _mapValue(responseData, 'OBS response data');
+      final response = _mapValue(responseData, 'OBS response data');
+      if (requestType == 'StopRecord' &&
+          response['outputPath'] is String &&
+          (response['outputPath'] as String).trim().isNotEmpty) {
+        _stoppingOutputPath = response['outputPath'] as String;
+        if (!stoppedPaths.contains(_stoppingOutputPath)) {
+          stopResponse = response;
+          continue;
+        }
+      }
+      return response;
     }
   }
 

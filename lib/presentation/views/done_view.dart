@@ -194,7 +194,7 @@ class _OutputPanel extends StatelessWidget {
             if (directory != null && directory.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                'Saved in $directory',
+                'Batch folder: $directory',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(

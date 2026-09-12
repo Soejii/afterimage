@@ -8,14 +8,20 @@ class OutputOrganizationException implements Exception {
     required this.message,
     required this.sourcePath,
     required this.destinationPath,
+    this.operation,
+    this.cause,
   });
 
   final String message;
   final String sourcePath;
   final String destinationPath;
+  final String? operation;
+  final FileSystemException? cause;
 
   @override
-  String toString() => '$message Source was left at $sourcePath.';
+  String toString() => '$message Source was left at $sourcePath.'
+      '${operation == null ? '' : ' Operation: $operation. Destination: $destinationPath.'}'
+      '${cause == null ? '' : ' Filesystem detail: $cause'}';
 }
 
 class FileOutputOrganizer implements OutputOrganizerPort {
@@ -79,8 +85,10 @@ class FileOutputOrganizer implements OutputOrganizerPort {
 
     final source = File(sourcePath);
     final destination = File(destinationPath);
+    var operation = 'create destination folder';
     try {
       await Directory(destination.parent.path).create(recursive: true);
+      operation = 'check source file';
       if (!await source.exists()) {
         throw OutputOrganizationException(
           message: 'The OBS output file does not exist.',
@@ -89,6 +97,7 @@ class FileOutputOrganizer implements OutputOrganizerPort {
         );
       }
       try {
+        operation = 'claim destination file';
         // Claim the destination with an exclusive create before copying. A
         // plain rename can overwrite a destination created by another
         // process between the existence check and the rename.
@@ -106,17 +115,21 @@ class FileOutputOrganizer implements OutputOrganizerPort {
       // The destination is already exclusively claimed, so this copy cannot
       // replace another file. If copying or source cleanup fails, both paths
       // remain available for recovery and the partial destination is kept.
+      operation = 'copy recording';
       await source
           .openRead()
           .pipe(destination.openWrite(mode: FileMode.append));
+      operation = 'delete source after copying';
       await source.delete();
     } on OutputOrganizationException {
       rethrow;
-    } on FileSystemException catch (_) {
+    } on FileSystemException catch (error) {
       throw OutputOrganizationException(
         message: 'Could not move the OBS output to the selected folder.',
         sourcePath: sourcePath,
         destinationPath: destinationPath,
+        operation: operation,
+        cause: error,
       );
     }
   }
