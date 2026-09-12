@@ -56,12 +56,20 @@ process-memory permission troubleshooting, and controller setup.
 
 The Windows adapter lives in `lib/services/windows_process_memory.dart`,
 `windows_replay_monitor.dart`, `windows_menu_input.dart`, and
-`windows_native_backend.dart`. Windows input uses `SendInput`, plus an optional
+`windows_native_backend.dart`. Windows keyboard input uses `PostMessageW` through
+`windows_window_message_input.dart`, plus an optional
 Xbox-compatible virtual controller in `windows_virtual_controller.dart` over the
 FFI shim built from `windows/runner/afterimage_controller.cpp`. See
 [`windows-runtime.md`](windows-runtime.md). Native Windows builds are compiled
 by GitHub Actions because this Linux development machine cannot perform a real
 Windows build locally.
+
+The window-message adapter binds one visible unowned window to the game process
+and checks its ownership before every key message. It has no desktop foreground
+requirement and no fallback to the desktop input queue. The old `SendInput`
+adapter retains its foreground guard but is not the production keyboard route.
+Message delivery is not game acceptance; the engine's frame-progress checks
+remain the recording acceptance signal.
 
 ## Pure-Dart services
 
