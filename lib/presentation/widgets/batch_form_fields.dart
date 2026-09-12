@@ -104,7 +104,8 @@ class InputModeTile extends StatelessWidget {
       value: mode,
       enabled: enabled,
       title: Text(_friendlyInputTitle(mode)),
-      subtitle: Text('${_friendlyInputDescription(mode)} $availability'),
+      subtitle: Text(
+          '${_friendlyInputDescription(mode, Theme.of(context).platform)} $availability'),
       contentPadding: EdgeInsets.zero,
       dense: true,
     );
@@ -116,7 +117,12 @@ class InputModeTile extends StatelessWidget {
         : 'Use controller controls';
   }
 
-  String _friendlyInputDescription(InputMode mode) {
+  String _friendlyInputDescription(InputMode mode, TargetPlatform platform) {
+    if (platform == TargetPlatform.windows) {
+      return mode == InputMode.keyboard
+          ? 'Switch to GGST during the countdown and keep it focused for the whole batch.'
+          : 'Uses a separate virtual Xbox controller through ViGEmBus. Background menu control is not yet verified; fully covering GGST may stop input.';
+    }
     return mode == InputMode.keyboard
         ? 'Afterimage sends the replay menu keys for you.'
         : 'Afterimage sends menu input through the selected controller.';
