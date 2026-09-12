@@ -38,7 +38,9 @@ the game to the foreground automatically.
 Afterimage waits up to 30 seconds for OBS's matching recording-stopped event
 before moving the recording. If completion is not confirmed, it leaves the
 file in OBS's recording folder and reports the path when OBS supplied it.
-Move errors include the failed operation and original filesystem error.
+Move errors include the failed operation and original filesystem error. The
+result screen labels the intended destination as the batch folder, not as proof
+that the video was saved there.
 
 Focus failures include a UTC timestamp, expected GGST PID, foreground PID and
 window handle, lookup failure details, and best-effort process name and window
