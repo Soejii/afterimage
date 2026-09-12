@@ -120,7 +120,7 @@ class InputModeTile extends StatelessWidget {
   String _friendlyInputDescription(InputMode mode, TargetPlatform platform) {
     if (platform == TargetPlatform.windows) {
       return mode == InputMode.keyboard
-          ? 'Switch to GGST during the countdown and keep it focused for the whole batch.'
+          ? 'Sends U and W directly to GGST, without typing into your other apps. Game acceptance while covered is not yet verified.'
           : 'Uses a separate virtual Xbox controller through ViGEmBus. Background menu control is not yet verified; fully covering GGST may stop input.';
     }
     return mode == InputMode.keyboard

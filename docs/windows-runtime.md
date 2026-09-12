@@ -2,7 +2,7 @@
 
 Afterimage's Windows adapter reads a small set of values from the running
 GGST process and never writes game memory. It uses the Win32
-`ReadProcessMemory` API and sends the replay-menu keys through `SendInput`.
+`ReadProcessMemory` API and posts replay-menu keys directly to the game window.
 The Windows desktop build includes the Dart runtime, so Python is not needed.
 
 ## Prerequisites
@@ -28,15 +28,22 @@ batch. Confirm that the picture shows GGST and that the expected game sound is
 present. Choose the keyboard or virtual-controller method under **Replay controls**; the
 controller method requires the separately installed ViGEmBus driver.
 
-After selecting Record, switch to GGST during the five-second countdown.
-Keyboard recording checks that GGST owns the active window before it sends
-keys and while the replay plays. If another app becomes active, Afterimage
-stops the batch and attempts to preserve the current recording as a partial
-video. Return to Saved Replays before trying again. These checks do not bring
-the game to the foreground automatically.
+After selecting Record, leave Saved Replays selected during the five-second
+countdown. Keyboard mode uses `PostMessageW` for `WM_KEYDOWN` and `WM_KEYUP` on
+the single visible, unowned main window belonging to `GGST-Win64-Shipping.exe`.
+It rechecks the window's process identity before each message. It never uses
+the foreground desktop input queue, raises the game window, or falls back to
+`SendInput`. The old foreground-guarded SendInput adapter remains in the source
+for its existing tests but is no longer selected by the Windows backend.
 
-Replay controls are expanded by default on Windows and display the keyboard
-focus requirement. A connected physical controller does not automatically
+This removes Afterimage's focus dependency; it does not prove that GGST accepts
+posted menu messages while unfocused or fully covered. Windows accepting a
+posted message only means it queued the message. The replay monitor still
+requires game frame movement, and the batch stops if the replay does not start.
+No activation spoofing, graphics hook, or game-memory write is used.
+
+Replay controls are expanded by default on Windows and describe direct window
+messages and their verification limit. A physical controller does not automatically
 select Afterimage's controller mode.
 
 Afterimage waits up to 30 seconds for OBS's matching recording-stopped event
@@ -46,7 +53,7 @@ Move errors include the failed operation and original filesystem error. The
 result screen labels the intended destination as the batch folder, not as proof
 that the video was saved there.
 
-Focus failures include a UTC timestamp, expected GGST PID, foreground PID and
+Legacy SendInput focus failures include a UTC timestamp, expected GGST PID, foreground PID and
 window handle, lookup failure details, and best-effort process name and window
 title. Batch errors also include the stage, replay index, and elapsed time.
 These details appear in the error and the batch's `summary.json`; window titles
@@ -81,7 +88,8 @@ The Windows preflight keeps these cases separate:
 - **GWorld signature mismatch:** GGST may have updated, or the build is not
   supported by this adapter. No write or patch is attempted.
 - **Keyboard input unavailable:** check that Afterimage and GGST run at the
-  same Windows integrity level.
+  same Windows integrity level. Direct window messages also require equal or
+  lower target integrity, and Afterimage does not change these permissions.
 - **Virtual controller driver missing:** install ViGEmBus manually, restart
   Afterimage, and refresh the setup checks. The adapter does not install a
   driver or silently fall back to keyboard input. See
@@ -91,6 +99,6 @@ The keyboard adapter sends `U,U` to open a replay, `U` to return to the replay
 list, and `W` to select the next replay. It releases every key even when an
 input call fails, and waits 800 milliseconds between the two keys in `U,U`.
 
-The automated tests use fake process-memory, SendInput, and virtual-controller
+The automated tests use fake process-memory, window-message, SendInput, and virtual-controller
 providers. They run on Linux and do not claim that a live GGST process, Windows
 process handle, Windows keyboard event, or virtual controller has been verified.

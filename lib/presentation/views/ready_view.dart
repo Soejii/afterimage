@@ -143,7 +143,7 @@ class _AdvancedOptions extends StatelessWidget {
           subtitle: Text(
             options.inputMode == InputMode.keyboard
                 ? Theme.of(context).platform == TargetPlatform.windows
-                    ? 'Keyboard: GGST must stay focused'
+                    ? 'Keyboard: direct to GGST window'
                     : 'Keyboard'
                 : 'Controller',
           ),

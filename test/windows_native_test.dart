@@ -8,6 +8,7 @@ import 'package:afterimage/domain/recorder_contracts.dart';
 import 'package:afterimage/domain/replay_batch.dart';
 import 'package:afterimage/domain/setup_models.dart';
 import 'package:afterimage/services/windows_menu_input.dart';
+import 'package:afterimage/services/windows_window_message_input.dart';
 import 'package:afterimage/services/windows_native_backend.dart';
 import 'package:afterimage/services/windows_native_errors.dart';
 import 'package:afterimage/services/windows_process_memory.dart';
@@ -452,7 +453,7 @@ void main() {
       expect(await backend.openReplayMonitor(), isA<WindowsReplayMonitor>());
       expect(
         await backend.openMenuInput(InputMode.keyboard),
-        isA<WindowsKeyboardMenuInput>(),
+        isA<WindowsWindowMessageMenuInput>(),
       );
       expect(await backend.openObsRecorder(), same(fakeObs));
       expect(

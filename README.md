@@ -43,7 +43,8 @@ then follow the matching instructions below. Keep every extracted file together.
 This alpha build is not code-signed, so Windows may show a security warning.
 Only continue if the archive came from the official release page linked above.
 Windows supports **Keyboard** input and an optional virtual controller. The
-keyboard mode requires GGST to stay focused for the whole batch. Controller
+keyboard mode posts menu keys directly to GGST's window. It does not type into
+the browser or other foreground application. Controller
 mode creates a separate virtual pad alongside a physical pad;
 it requires a separately installed ViGEmBus driver. See
 [`docs/windows-controller.md`](docs/windows-controller.md).
@@ -91,8 +92,8 @@ an OBS WebSocket is.
 4. Choose how many replays to record, and the folder to save them in. The
    folder is remembered for next time.
 5. Select **Start recording**. Afterimage shows every replay in the batch with
-   its progress. Windows keyboard mode requires GGST to stay focused; Windows
-   controller mode is not yet verified for background menu automation.
+   its progress. Windows keyboard mode targets the game window directly, but
+   game acceptance while covered remains unverified for both input modes.
 
 Afterimage records the whole batch into one video file. Each batch gets its own
 folder, so a second run cannot overwrite the first.
