@@ -87,6 +87,24 @@ part of the change, not as an optional follow-up.
 
 ## Documentation and releases
 
+- Every new change shipped to users must appear on the repository's GitHub
+  Tags and Releases pages. Publishing the tagged release is part of delivery,
+  not an optional follow-up after merging or building.
+- Use a new, unused version tag on the shipped commit and publish a matching
+  GitHub Release. Keep the application version aligned with the tag. Never
+  move an existing release tag or replace an older release's assets.
+- Wait for the required checks and native Linux and Windows builds for that
+  exact commit to pass. Attach their complete portable bundles to the release
+  as `afterimage-linux-x64.tar.gz` and `afterimage-windows-x64.zip`.
+- An Actions artifact or GitHub's automatic source archive is not a shipped
+  application release. Verify the tag, published release, and both downloadable
+  application assets, then give Suji the release link.
+- Use the existing alpha/pre-release convention while the application remains
+  experimental. State unverified live behavior in the release notes; passing
+  builds do not prove end-to-end GGST automation.
+- Unless Suji explicitly asks to keep work local, unpublished, or build-only,
+  include this release workflow when shipping new changes. If publication is
+  blocked, report the blocker instead of claiming delivery is complete.
 - Keep `README.md` and the matching file under `docs/` aligned with runtime,
   installation, controller, or packaging changes.
 - Put architecture changes in `docs/architecture.md`, not `README.md`.

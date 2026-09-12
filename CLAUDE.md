@@ -40,6 +40,25 @@ After any change to runtime behavior, redeploy the whole portable bundle to
 `/home/suji/.local/opt/afterimage` per `AGENTS.md`; the executable, `data/`, and
 `lib/` must stay in sync.
 
+## Release delivery
+
+Every new change shipped to users must appear on GitHub's Tags and Releases
+pages. Follow the full release policy in `AGENTS.md`: align the application
+version, create a new version tag on the shipped commit, and publish a matching
+GitHub Release with the complete Linux and Windows portable bundles from
+successful builds of that exact commit. Never move an existing release tag
+or replace older release assets.
+
+An Actions artifact or automatic source archive does not complete delivery.
+Verify the tag, published release, and both downloadable application assets,
+then give Suji the release link. Keep the existing alpha/pre-release convention
+and disclose unverified GGST behavior. Deploy the released Linux bundle to Wofi
+as required by `AGENTS.md`.
+
+Include publication when shipping changes unless Suji explicitly requests
+local, unpublished, or build-only work. Report any publication blocker rather
+than claiming the release is complete.
+
 ## Architecture
 
 See [`docs/architecture.md`](docs/architecture.md) for the ports-and-adapters
