@@ -303,7 +303,7 @@ class ReplayBatchEngine implements RecordingEngine {
         combinedSourceOutput: combinedSourceOutput,
       );
     } catch (error) {
-      var finalError = error;
+      var finalError = _failureWithContext(error);
       if (combinedRecordingActive) {
         final stopped = await _stopCombined(
           request,
@@ -533,7 +533,7 @@ class ReplayBatchEngine implements RecordingEngine {
       return _failReplay(
         request,
         index,
-        error,
+        _failureWithContext(error),
         recordingActive: recordingActive,
         sourceOutput: sourceOutput,
         organizedOutput: organizedOutput,
@@ -675,6 +675,11 @@ class ReplayBatchEngine implements RecordingEngine {
       }
     }
   }
+
+  Object _failureWithContext(Object error) =>
+      StateError('$error [stage=${_state.name}, replay=$_currentReplay, '
+          'elapsedMs=${clock.elapsed.inMilliseconds}, '
+          'utc=${DateTime.now().toUtc().toIso8601String()}]');
 
   Future<_WaitStatus> _waitForBattleStart(
     ReplayCompletionDetector detector,
