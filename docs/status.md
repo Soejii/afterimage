@@ -2,7 +2,7 @@
 
 This file records what works in the current alpha and what is still unverified.
 
-Version `0.2.1+4` is an alpha desktop release:
+Version `0.2.2+5` is an alpha desktop release:
 
 - One Material 3 dark workspace screen that moves through four states:
   blocked, ready, running, and finished. While blocked it leads with a single
@@ -16,11 +16,18 @@ Version `0.2.1+4` is an alpha desktop release:
 - Production startup selects the real Windows or Linux native backend. Start
   remains locked until the game, OBS, replay library, selected input mode, and
   output folder all pass their checks.
-- Keyboard automation is implemented on Windows through `SendInput` and on
+- Keyboard automation is implemented on Windows through window-targeted
+  `PostMessageW` messages and on
   Linux through targeted gamescope XTest events. Linux controller mode writes
   into the existing evdev node GGST is already reading. Windows supports an
   optional Xbox-compatible virtual controller through a separately installed
   ViGEmBus driver. Neither platform silently falls back to keyboard.
+- Windows keyboard mode targets the original GGST window without requiring
+  desktop focus. Native Windows tests verify message routing and key release,
+  but GGST accepting those messages while fully covered remains unverified.
+- Recording finalization waits for the matching OBS stopped event before moving
+  the output. Failure reports preserve filesystem details and the source path;
+  the finished screen distinguishes the batch folder from the video location.
 - The replay batch engine is now ported behind testable Dart contracts. It waits
   for frame movement before starting a battle, requires a result event or a
   duration-derived run of missing reads to finish it, and treats frozen frames
