@@ -68,6 +68,10 @@ Windows build locally.
 Platform-neutral services live in `lib/services/` and are directly testable:
 
 - `lib/services/obs_websocket_recorder.dart` is a small OBS WebSocket v5 client.
+  It subscribes to output events and keeps StopRecord serialized until both
+  its response and the matching RecordStateChanged stopped event arrive, in
+  either order. A bounded timeout closes the connection without releasing a
+  possibly unfinished recording to the output organizer.
 - `lib/services/obs_config_discovery.dart` reads native Linux, Flatpak Linux, and
   Windows config locations without writing credentials to disk or logs.
 - `lib/services/setup_service.dart` searches Steam manifests and configured library folders,

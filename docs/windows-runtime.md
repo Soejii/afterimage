@@ -35,6 +35,10 @@ stops the batch and attempts to preserve the current recording as a partial
 video. Return to Saved Replays before trying again. These checks do not bring
 the game to the foreground automatically.
 
+Afterimage waits up to 30 seconds for OBS's matching recording-stopped event
+before moving the recording. If completion is not confirmed, it leaves the
+file in OBS's recording folder and reports the path when OBS supplied it.
+
 Afterimage does not install drivers, change security policy, patch GGST, or
 modify replay files.
 

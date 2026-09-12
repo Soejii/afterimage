@@ -24,6 +24,8 @@ class FakeObsServer {
     this.ignoreRequest,
     this.protocolFault = FakeObsProtocolFault.none,
     this.responses = const {},
+    this.autoFinishRecording = true,
+    this.stopEventBeforeResponse = false,
   }) : _recording = initiallyRecording;
 
   final bool requireAuthentication;
@@ -34,6 +36,29 @@ class FakeObsServer {
   final String? ignoreRequest;
   final FakeObsProtocolFault protocolFault;
   final Map<String, Map<String, Object?>> responses;
+  final bool autoFinishRecording;
+  final bool stopEventBeforeResponse;
+  final stopRequested = Completer<void>();
+
+  void sendRecordEvent(String state, {String? path}) {
+    _socket!.add(jsonEncode({
+      'op': 5,
+      'd': {
+        'eventType': 'RecordStateChanged',
+        'eventIntent': 64,
+        'eventData': {
+          'outputState': state,
+          'outputActive': false,
+          'outputPath': path ?? '/tmp/afterimage-obs-$_stopCount.mkv',
+        },
+      },
+    }));
+  }
+
+  void finishRecording() {
+    _recording = false;
+    sendRecordEvent('OBS_WEBSOCKET_OUTPUT_STOPPED');
+  }
 
   final List<Map<String, dynamic>> requests = [];
   final String salt = 'afterimage-test-salt';
@@ -170,8 +195,10 @@ class FakeObsServer {
             _recording = true;
             _respond(socket, data);
           case 'StopRecord':
-            _recording = false;
             _stopCount++;
+            if (autoFinishRecording && stopEventBeforeResponse) {
+              finishRecording();
+            }
             _respond(
               socket,
               data,
@@ -179,6 +206,10 @@ class FakeObsServer {
                 'outputPath': '/tmp/afterimage-obs-$_stopCount.mkv',
               },
             );
+            if (autoFinishRecording && !stopEventBeforeResponse) {
+              finishRecording();
+            }
+            if (!stopRequested.isCompleted) stopRequested.complete();
           default:
             _respond(socket, data);
         }

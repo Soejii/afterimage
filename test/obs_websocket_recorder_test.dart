@@ -7,6 +7,59 @@ import 'support/obs_test_support.dart';
 
 void main() {
   group('ObsWebSocketRecorder', () {
+    test('does not release output for moving before OBS has stopped', () async {
+      final server = FakeObsServer(autoFinishRecording: false);
+      final port = await server.start();
+      addTearDown(server.dispose);
+      final recorder = _recorder(port: port);
+      addTearDown(recorder.close);
+      await recorder.startRecording();
+      var releasedForMoving = false;
+      final stopping = recorder.stopRecording().then((output) {
+        releasedForMoving = true;
+        return output;
+      });
+      await server.stopRequested.future;
+      server.sendRecordEvent('OBS_WEBSOCKET_OUTPUT_STOPPING');
+      server.sendRecordEvent('OBS_WEBSOCKET_OUTPUT_STOPPED',
+          path: '/other.mkv');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(releasedForMoving, isFalse,
+          reason:
+              'OBS still owns the recording: StopRecord response must not release output for moving');
+      server.finishRecording();
+      expect((await stopping).path, '/tmp/afterimage-obs-1.mkv');
+    });
+
+    test('accepts the stopped event arriving before the stop response',
+        () async {
+      final server = FakeObsServer(stopEventBeforeResponse: true);
+      final port = await server.start();
+      addTearDown(server.dispose);
+      final recorder = _recorder(port: port);
+      addTearDown(recorder.close);
+      await recorder.startRecording();
+      expect(
+          (await recorder.stopRecording()).path, '/tmp/afterimage-obs-1.mkv');
+    });
+    test('missing stopped event times out without releasing the output',
+        () async {
+      final server = FakeObsServer(autoFinishRecording: false);
+      final port = await server.start();
+      addTearDown(server.dispose);
+      final recorder = ObsWebSocketRecorder(ObsWebSocketConfig(port: port),
+          stopTimeout: const Duration(milliseconds: 150));
+      addTearDown(recorder.close);
+      await recorder.startRecording();
+      await expectLater(
+          recorder.stopRecording(),
+          throwsA(
+            isA<ObsTimeoutException>().having((error) => error.message,
+                'recovery path', contains('/tmp/afterimage-obs-1.mkv')),
+          ));
+      expect(recorder.isConnected, isFalse);
+    });
+
     test('completes the unauthenticated OBS v5 recording lifecycle', () async {
       final server = FakeObsServer();
       final port = await server.start();
