@@ -21,7 +21,8 @@ typedef LinuxReadOnlyMemoryFactory = LinuxMemorySession Function(
 
 /// Reads only the small GGST state chain needed by the batch completion
 /// detector. This adapter never exposes or writes game memory.
-class LinuxReplayMonitor implements ReplayMonitorPort {
+class LinuxReplayMonitor
+    implements ReplayMonitorPort, ReplayMonitorGWorldPointerPort {
   LinuxReplayMonitor({
     this.processName = ggstLinuxExecutable,
     LinuxReadOnlyMemoryFactory? memoryFactory,
@@ -38,6 +39,7 @@ class LinuxReplayMonitor implements ReplayMonitorPort {
 
   bool get isAttached => _memory != null && !_closed;
 
+  @override
   int? get gWorldPointerAddress => _gWorldPointerAddress;
 
   @override

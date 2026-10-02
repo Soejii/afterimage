@@ -14,6 +14,7 @@ const Set<String> recorderPreferenceKeys = <String>{
   'replayCount',
   'customReplayCount',
   'videoMode',
+  'captureFrameData',
 };
 
 /// Storage mechanics for encoded preference values.

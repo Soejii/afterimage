@@ -11,6 +11,20 @@ import 'support/obs_test_support.dart';
 
 void main() {
   group('FileSummaryWriter', () {
+    test('schema version 2 writes null capture metadata when capture is off',
+        () {
+      final json = ReplayBatchSummary.fromResults(
+        updatedAt: DateTime(2026, 8, 29),
+        outcome: ReplaySummaryOutcome.completed,
+        replays: const [
+          ReplayResult(index: 1, status: ReplayResultStatus.recorded),
+        ],
+      ).toJson();
+
+      expect(json['schemaVersion'], 2);
+      expect((json['replays'] as List<dynamic>).single['capture'], isNull);
+    });
+
     test('writes incremental valid JSON with result paths and errors',
         () async {
       final directory = await createTempDirectory();
@@ -26,12 +40,26 @@ void main() {
           partial: false,
           replayIndex: 1,
         ),
+        capture: ReplayCaptureSummary(
+          path: 'replay_001.frames.jsonl',
+          videoOffsetMs: 41234,
+          rows: 10812,
+          frameGaps: 3,
+          maxFrameGap: 2,
+        ),
       );
       final second = ReplayResult(
         index: 2,
         status: ReplayResultStatus.failed,
         sourceOutput: const RecordedOutput('/tmp/obs-2.mkv'),
         error: StateError('monitor stopped'),
+        capture: const ReplayCaptureSummary(
+          videoOffsetMs: 7,
+          rows: 2,
+          frameGaps: 1,
+          maxFrameGap: 1,
+          error: 'capture read failed',
+        ),
       );
 
       await writer.write(
@@ -45,11 +73,22 @@ void main() {
       final summaryFile = File(_path(directory, 'summary.json'));
       final firstJson =
           jsonDecode(await summaryFile.readAsString()) as Map<String, dynamic>;
-      expect(firstJson['schemaVersion'], 1);
+      expect(firstJson['schemaVersion'], 2);
       expect(firstJson['outcome'], 'running');
       expect((firstJson['replays'] as List<dynamic>), hasLength(1));
       expect((firstJson['replays'] as List<dynamic>).single['output'],
           '/captures/replay_001.mkv');
+      expect(
+        (firstJson['replays'] as List<dynamic>).single['capture'],
+        {
+          'path': 'replay_001.frames.jsonl',
+          'videoOffsetMs': 41234,
+          'rows': 10812,
+          'frameGaps': 3,
+          'maxFrameGap': 2,
+          'error': null,
+        },
+      );
 
       await writer.write(
         outputDirectory: directory.path,
@@ -71,6 +110,14 @@ void main() {
       expect(entries[1]['source'], '/tmp/obs-2.mkv');
       expect(entries[1]['status'], 'failed');
       expect(entries[1]['error'], contains('monitor stopped'));
+      expect(entries[1]['capture'], {
+        'path': null,
+        'videoOffsetMs': 7,
+        'rows': 2,
+        'frameGaps': 1,
+        'maxFrameGap': 1,
+        'error': 'capture read failed',
+      });
       expect(secondText, isNot(contains('memory-only-password')));
       expect(_temporaryFiles(directory), isEmpty);
     });

@@ -166,6 +166,7 @@ class RecordingOptions {
     this.videoMode = VideoMode.combined,
     this.inputMode = InputMode.keyboard,
     this.outputDirectory = '',
+    this.captureFrameData = false,
   });
 
   final ReplayCountOption replayCount;
@@ -173,6 +174,7 @@ class RecordingOptions {
   final VideoMode videoMode;
   final InputMode inputMode;
   final String outputDirectory;
+  final bool captureFrameData;
 
   RecordingOptions copyWith({
     ReplayCountOption? replayCount,
@@ -180,6 +182,7 @@ class RecordingOptions {
     VideoMode? videoMode,
     InputMode? inputMode,
     String? outputDirectory,
+    bool? captureFrameData,
   }) {
     return RecordingOptions(
       replayCount: replayCount ?? this.replayCount,
@@ -187,6 +190,7 @@ class RecordingOptions {
       videoMode: videoMode ?? this.videoMode,
       inputMode: inputMode ?? this.inputMode,
       outputDirectory: outputDirectory ?? this.outputDirectory,
+      captureFrameData: captureFrameData ?? this.captureFrameData,
     );
   }
 }

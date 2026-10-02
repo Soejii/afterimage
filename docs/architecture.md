@@ -2,7 +2,8 @@
 
 Afterimage uses a ports-and-adapters pattern. `lib/domain/recorder_contracts.dart`
 is the seam: the batch engine talks only to `ReplayMonitorPort`, `MenuInputPort`,
-`ObsRecorderPort`, `OutputOrganizerPort`, `SummaryWriterPort`, and `ReplayClock`.
+`ObsRecorderPort`, `OutputOrganizerPort`, `SummaryWriterPort`, `FrameCapturePort`,
+and `ReplayClock`.
 Nothing in `lib/domain` or `lib/services/replay_batch_engine.dart` touches
 `dart:ffi`, process memory, or a socket. Add a capability by extending a
 contract, not by reaching into an adapter from the engine.
@@ -32,7 +33,9 @@ sink.
 The engine injects a monotonic `ReplayClock`, so timeout, polling, failure, and
 stop behavior can be tested without waiting in real time. It explicitly connects
 and closes OBS in its lifecycle and does not let close errors replace the
-primary `ReplayBatchResult`.
+primary `ReplayBatchResult`. Optional frame capture begins after `battleStarted`
+and ends before the result delay; capture failures are diagnostic-only and never
+change replay or recording outcomes.
 
 ## Platform adapters
 
@@ -47,7 +50,10 @@ pointer, then a fixed offset chain to frame and event data.
 
 The Linux adapter lives in `lib/services/linux_process_memory.dart`,
 `linux_replay_monitor.dart`, `linux_menu_input.dart`,
-`linux_evdev_controller.dart`, and `linux_native_backend.dart`. It uses
+`linux_evdev_controller.dart`, `linux_frame_capture.dart`, and
+`linux_native_backend.dart`. Frame capture owns a separate read-only memory
+session in a background isolate and writes raw frame rows to per-replay JSONL
+sidecars. It uses
 read-only process memory, targeted gamescope XTest input, and an existing
 controller evdev node selected from the processes in GGST's Wine prefix. See
 [`linux-runtime.md`](linux-runtime.md) and
@@ -136,6 +142,9 @@ turns red. They come from `AGENTS.md`'s safety boundaries.
 - **Process memory is read-only.** `process_vm_readv` first, then
   `/proc/<pid>/mem` opened read-only as fallback; no write descriptor or write
   API is exposed.
+- **Frame capture is optional and off by default.** It reads raw values only,
+  runs away from the UI and replay-monitor loop, and a capture error is recorded
+  as a diagnostic without failing or truncating the replay or its OBS recording.
 - **No silent input fallback.** An unavailable controller reports itself and
   keeps recording locked. It never degrades to keyboard.
 - **Nothing is overwritten.** The organizer moves with collision-checked names

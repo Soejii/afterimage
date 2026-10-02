@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -6,6 +7,7 @@ import 'package:afterimage/domain/recorder_contracts.dart';
 import 'package:afterimage/domain/replay_batch.dart';
 import 'package:afterimage/domain/replay_summary.dart';
 import 'package:afterimage/domain/setup_models.dart';
+import 'package:afterimage/services/linux_frame_capture.dart';
 import 'package:afterimage/services/replay_batch_engine.dart';
 
 void main() {
@@ -172,6 +174,330 @@ void main() {
         menu.actions.where((action) => action == ReplayMenuAction.openReplay),
         hasLength(2),
       );
+    });
+
+    test('capture brackets battle events and stops before result delay',
+        () async {
+      for (final mode in VideoMode.values) {
+        final markers = <String>[];
+        final clock = _FakeClock()
+          ..onDelayDuration = (duration) {
+            if (duration == const Duration(milliseconds: 10)) {
+              markers.add('resultDelay');
+            }
+          };
+        Duration? obsConfirmedAt;
+        Duration? captureConfirmedAt;
+        final obs = _FakeObs()
+          ..onStart = () {
+            clock.advance(const Duration(milliseconds: 5));
+            obsConfirmedAt = clock.elapsed;
+          };
+        final capture = _FakeFrameCapture(
+          onStart: () {
+            clock.advance(const Duration(milliseconds: 7));
+            captureConfirmedAt = clock.elapsed;
+            markers.add('captureStart');
+          },
+          onStop: () => markers.add('captureStop'),
+        );
+        final engine = _engine(
+          monitor: _FakeMonitor(_successfulReplaySnapshots()),
+          menu: _FakeMenu(),
+          obs: obs,
+          organizer: _FakeOrganizer(),
+          clock: clock,
+          frameCapturePort: capture,
+          onEvent: (event) {
+            if (event.type == ReplayBatchEventType.battleStarted) {
+              markers.add('battleStarted');
+            }
+          },
+        );
+
+        final result = await engine.startBatch(
+          _request(
+            videoMode: mode,
+            captureFrameData: true,
+            timing: _testTiming(resultDelay: const Duration(milliseconds: 10)),
+          ),
+        );
+
+        expect(result.replays.single.status, ReplayResultStatus.recorded);
+        expect(
+          markers.indexOf('battleStarted'),
+          lessThan(markers.indexOf('captureStart')),
+        );
+        expect(
+          markers.indexOf('captureStop'),
+          lessThan(markers.indexOf('resultDelay')),
+        );
+        expect(
+          result.replays.single.capture?.videoOffsetMs,
+          (captureConfirmedAt! - obsConfirmedAt!).inMilliseconds,
+        );
+        expect(capture.startCalls.single.outputPath,
+            '/tmp/afterimage-test/replay_001.frames.jsonl');
+        expect(result.replays.single.capture?.path, 'replay_001.frames.jsonl');
+        expect(result.replays.single.capture?.rows, 3);
+        expect(capture.stopReasons, [FrameCaptureEndReason.completed]);
+      }
+    });
+
+    test('a hung capture stop is bounded and does not keep OBS recording',
+        () async {
+      final capture = _FakeFrameCapture()..neverCompleteOnStop = true;
+      final obs = _FakeObs();
+      late ReplayBatchEngine engine;
+      engine = _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: _FakeMenu(),
+        obs: obs,
+        organizer: _FakeOrganizer(),
+        clock: _FakeClock(),
+        frameCapturePort: capture,
+        onEvent: (event) {
+          if (event.progress.state == ReplayBatchState.waitingForReplayEnd) {
+            unawaited(engine.requestStop());
+          }
+        },
+      );
+
+      final result = await engine
+          .startBatch(
+            _request(
+              captureFrameData: true,
+              timing: _testTiming(
+                frameCaptureStopTimeout: const Duration(milliseconds: 1),
+              ),
+            ),
+          )
+          .timeout(const Duration(milliseconds: 100));
+
+      expect(result.outcome, ReplayBatchOutcome.stopped);
+      expect(result.replays.single.capture?.error,
+          contains('Frame capture stop timed out'));
+      expect(capture.stopReasons, [FrameCaptureEndReason.stopped]);
+      expect(obs.stopCalls, 1);
+      expect(obs.recording, isFalse);
+    });
+
+    test('a hung capture start is bounded and does not keep OBS recording',
+        () async {
+      final capture = _FakeFrameCapture()..neverCompleteOnStart = true;
+      final obs = _FakeObs();
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: _FakeMenu(),
+        obs: obs,
+        organizer: _FakeOrganizer(),
+        clock: _FakeClock(),
+        frameCapturePort: capture,
+      ).startBatch(
+        _request(
+          captureFrameData: true,
+          timing: _testTiming(
+            frameCaptureStopTimeout: const Duration(milliseconds: 1),
+          ),
+        ),
+      );
+
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      expect(result.replays.single.status, ReplayResultStatus.recorded);
+      expect(result.replays.single.capture?.error,
+          contains('Frame capture start timed out'));
+      expect(capture.abortCalls, 1);
+      expect(obs.stopCalls, 1);
+      expect(obs.recording, isFalse);
+    });
+
+    test('capture start failure is diagnostic-only and leaves video complete',
+        () async {
+      final capture = _FakeFrameCapture()..throwOnStart = true;
+      final events = <ReplayBatchEvent>[];
+      final obs = _FakeObs();
+      final engine = _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: _FakeMenu(),
+        obs: obs,
+        organizer: _FakeOrganizer(),
+        frameCapturePort: capture,
+        onEvent: events.add,
+      );
+
+      final result = await engine.startBatch(
+        _request(captureFrameData: true),
+      );
+
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      expect(result.replays.single.status, ReplayResultStatus.recorded);
+      expect(result.replays.single.capture?.path, isNull);
+      expect(result.replays.single.capture?.error,
+          contains('synthetic capture start failure'));
+      expect(obs.startCalls, 1);
+      expect(obs.stopCalls, 1);
+      expect(
+          events
+              .where((event) => event.type == ReplayBatchEventType.diagnostic),
+          hasLength(1));
+    });
+
+    test('capture stop failure does not change replay or OBS results',
+        () async {
+      final capture = _FakeFrameCapture()..throwOnStop = true;
+      final obs = _FakeObs();
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: _FakeMenu(),
+        obs: obs,
+        organizer: _FakeOrganizer(),
+        frameCapturePort: capture,
+      ).startBatch(_request(captureFrameData: true));
+
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      expect(result.replays.single.status, ReplayResultStatus.recorded);
+      expect(result.replays.single.capture?.path, isNull);
+      expect(result.replays.single.capture?.error,
+          contains('synthetic capture stop failure'));
+      expect(obs.startCalls, 1);
+      expect(obs.stopCalls, 1);
+      expect(obs.recording, isFalse);
+    });
+
+    test('capture failure keeps a relative partial log path', () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'afterimage-engine-frame-failure-test-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final absolutePath = '${directory.path}/replay_001.frames.jsonl';
+      final sink = await LinuxFrameCaptureFileSink.create(absolutePath);
+      final captureResult = await runLinuxFrameCaptureSession(
+        replayIndex: 1,
+        source: _MidCaptureFailureSource(),
+        sink: sink,
+        elapsed: () => Duration.zero,
+        delay: (_) async {},
+        startedUtc: '2026-10-02T12:00:00Z',
+        shouldStop: () => false,
+        endReason: () => FrameCaptureEndReason.failed,
+        outputPath: absolutePath,
+      );
+      final capture = _FakeFrameCapture()..stopResult = captureResult;
+
+      expect(captureResult.error, contains('synthetic mid-capture failure'));
+      expect(File(absolutePath).readAsLinesSync(), hasLength(2));
+
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: _FakeMenu(),
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        frameCapturePort: capture,
+      ).startBatch(_request(captureFrameData: true));
+
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      expect(result.replays.single.capture?.path, 'replay_001.frames.jsonl');
+      expect(result.replays.single.capture?.error,
+          contains('synthetic mid-capture failure'));
+      expect(result.replays.single.capture?.rows, 0);
+    });
+
+    test('zero rows with read errors is reported as a capture failure',
+        () async {
+      final capture = _FakeFrameCapture()
+        ..stopResult = const FrameCaptureResult(
+          path: '/tmp/afterimage-test/replay_001.frames.jsonl',
+          readErrors: 3,
+        );
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: _FakeMenu(),
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        frameCapturePort: capture,
+      ).startBatch(_request(captureFrameData: true));
+
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      expect(result.replays.single.capture?.path, 'replay_001.frames.jsonl');
+      expect(
+          result.replays.single.capture?.error, contains('memory read errors'));
+    });
+
+    test('capture closes on stop, timeout, and replay failure', () async {
+      final stoppedCapture = _FakeFrameCapture();
+      final stopClock = _FakeClock();
+      late ReplayBatchEngine stopEngine;
+      stopEngine = _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: _FakeMenu(),
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        clock: stopClock,
+        frameCapturePort: stoppedCapture,
+        onEvent: (event) {
+          if (event.progress.state == ReplayBatchState.waitingForReplayEnd) {
+            unawaited(stopEngine.requestStop());
+          }
+        },
+      );
+      final stopped = await stopEngine.startBatch(
+        _request(captureFrameData: true),
+      );
+      expect(stopped.outcome, ReplayBatchOutcome.stopped);
+      expect(stoppedCapture.stopCalls, 1);
+      expect(stoppedCapture.stopReasons, [FrameCaptureEndReason.stopped]);
+
+      final timeoutCapture = _FakeFrameCapture();
+      final timedOut = await _engine(
+        monitor: _FakeMonitor(
+          [_snapshot(frame: 100), _snapshot(frame: 101)],
+          fallback: _snapshot(frame: 101),
+        ),
+        menu: _FakeMenu(),
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        frameCapturePort: timeoutCapture,
+      ).startBatch(
+        _request(
+          captureFrameData: true,
+          timing: _testTiming(replayTimeout: const Duration(milliseconds: 2)),
+        ),
+      );
+      expect(timedOut.outcome, ReplayBatchOutcome.failed);
+      expect(timeoutCapture.stopCalls, 1);
+      expect(timeoutCapture.stopReasons, [FrameCaptureEndReason.timeout]);
+
+      final failureCapture = _FakeFrameCapture();
+      final failureSnapshots = <BattleSnapshot>[
+        _snapshot(frame: 100),
+        _snapshot(frame: 101),
+      ];
+      final failed = await _engine(
+        monitor: _FakeMonitor(failureSnapshots, throwAt: 2),
+        menu: _FakeMenu(),
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        frameCapturePort: failureCapture,
+      ).startBatch(_request(captureFrameData: true));
+      expect(failed.outcome, ReplayBatchOutcome.failed);
+      expect(failureCapture.stopCalls, 1);
+      expect(failureCapture.stopReasons, [FrameCaptureEndReason.failed]);
+    });
+
+    test('capture off creates no capture metadata or files', () async {
+      final capture = _FakeFrameCapture();
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: _FakeMenu(),
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        frameCapturePort: capture,
+      ).startBatch(_request());
+
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      expect(capture.startCalls, isEmpty);
+      expect(capture.stopCalls, 0);
+      expect(result.replays.single.capture, isNull);
     });
 
     test('summary checkpoints are written after each result and at completion',
@@ -583,6 +909,7 @@ List<BattleSnapshot> _successfulBatchSnapshots(
 ReplayBatchRequest _request({
   int count = 1,
   VideoMode videoMode = VideoMode.separate,
+  bool captureFrameData = false,
   ReplayBatchTiming? timing,
 }) {
   return ReplayBatchRequest(
@@ -590,6 +917,7 @@ ReplayBatchRequest _request({
     options: RecordingOptions(
       videoMode: videoMode,
       outputDirectory: '/tmp/afterimage-test',
+      captureFrameData: captureFrameData,
     ),
     timing: timing ?? _testTiming(),
   );
@@ -597,16 +925,20 @@ ReplayBatchRequest _request({
 
 ReplayBatchTiming _testTiming({
   Duration returnToListTimeout = const Duration(milliseconds: 20),
+  Duration replayTimeout = const Duration(milliseconds: 20),
+  Duration resultDelay = Duration.zero,
+  Duration frameCaptureStopTimeout = const Duration(seconds: 3),
 }) {
   return ReplayBatchTiming(
     pollInterval: const Duration(milliseconds: 1),
     startTimeout: const Duration(milliseconds: 20),
-    replayTimeout: const Duration(milliseconds: 20),
+    replayTimeout: replayTimeout,
     returnToListTimeout: returnToListTimeout,
-    resultDelay: Duration.zero,
+    resultDelay: resultDelay,
     startupDelay: Duration.zero,
     menuDelay: Duration.zero,
     actionDelay: Duration.zero,
+    frameCaptureStopTimeout: frameCaptureStopTimeout,
     absentReadWindow: const Duration(milliseconds: 1),
   );
 }
@@ -619,6 +951,7 @@ ReplayBatchEngine _engine({
   ReplayClock? clock,
   ReplayBatchEventSink? onEvent,
   SummaryWriterPort? summaryWriter,
+  FrameCapturePort? frameCapturePort,
 }) {
   return ReplayBatchEngine(
     monitor: monitor,
@@ -627,6 +960,7 @@ ReplayBatchEngine _engine({
     organizer: organizer,
     clock: clock ?? _FakeClock(),
     summaryWriter: summaryWriter,
+    frameCapturePort: frameCapturePort,
     onEvent: onEvent,
   );
 }
@@ -635,9 +969,15 @@ class _FakeClock implements ReplayClock {
   Duration _elapsed = Duration.zero;
   int delayCalls = 0;
   void Function(int call)? onDelay;
+  void Function(Duration duration)? onDelayDuration;
+  final List<Duration> delays = [];
 
   @override
   Duration get elapsed => _elapsed;
+
+  void advance(Duration duration) {
+    _elapsed += duration;
+  }
 
   @override
   Future<void> delay(Duration duration) async {
@@ -646,7 +986,9 @@ class _FakeClock implements ReplayClock {
     }
     _elapsed += duration;
     delayCalls++;
+    delays.add(duration);
     onDelay?.call(delayCalls);
+    onDelayDuration?.call(duration);
   }
 }
 
@@ -711,6 +1053,7 @@ class _FakeObs implements ObsRecorderPort {
   int stopCalls = 0;
   bool throwOnClose = false;
   bool throwOnStop = false;
+  void Function()? onStart;
 
   @override
   Future<void> connect() async {
@@ -732,6 +1075,7 @@ class _FakeObs implements ObsRecorderPort {
     }
     recording = true;
     startCalls++;
+    onStart?.call();
   }
 
   @override
@@ -754,6 +1098,98 @@ class _FakeObs implements ObsRecorderPort {
       throw StateError('synthetic OBS close failed');
     }
   }
+}
+
+class _MidCaptureFailureSource implements LinuxFrameCaptureSource {
+  bool _failed = false;
+
+  @override
+  int? readFrame() {
+    if (_failed) {
+      throw StateError('synthetic mid-capture failure');
+    }
+    _failed = true;
+    return 100;
+  }
+
+  @override
+  LinuxFrameRowRead readRow(int expectedFrame, int elapsedMicros) =>
+      const LinuxFrameRowRead(
+        row: <String, Object?>{'type': 'frame', 'f': 100, 't': 0},
+      );
+}
+
+class _FakeFrameCapture implements FrameCapturePort, AbortableFrameCapturePort {
+  _FakeFrameCapture({this.onStart, this.onStop});
+
+  final void Function()? onStart;
+  final void Function()? onStop;
+  final List<_FrameCaptureStart> startCalls = [];
+  final List<FrameCaptureEndReason> stopReasons = [];
+  int stopCalls = 0;
+  int closeCalls = 0;
+  bool throwOnStart = false;
+  bool throwOnStop = false;
+  bool neverCompleteOnStart = false;
+  bool neverCompleteOnStop = false;
+  FrameCaptureResult? stopResult;
+  int abortCalls = 0;
+  Completer<void>? _startCompletion;
+
+  @override
+  Future<void> start({
+    required int replayIndex,
+    required String outputPath,
+    int? gWorldPointerAddress,
+  }) async {
+    startCalls.add(_FrameCaptureStart(replayIndex, outputPath));
+    onStart?.call();
+    if (throwOnStart) {
+      throw StateError('synthetic capture start failure');
+    }
+    if (neverCompleteOnStart) {
+      _startCompletion = Completer<void>();
+      return _startCompletion!.future;
+    }
+  }
+
+  @override
+  Future<FrameCaptureResult> stop({
+    required FrameCaptureEndReason reason,
+  }) async {
+    stopCalls++;
+    stopReasons.add(reason);
+    onStop?.call();
+    if (neverCompleteOnStop) {
+      return Completer<FrameCaptureResult>().future;
+    }
+    if (throwOnStop) {
+      throw StateError('synthetic capture stop failure');
+    }
+    return stopResult ??
+        const FrameCaptureResult(rows: 3, frameGaps: 1, maxFrameGap: 1);
+  }
+
+  @override
+  Future<FrameCaptureResult> abort() async {
+    abortCalls++;
+    _startCompletion?.complete();
+    return const FrameCaptureResult(
+      path: '/tmp/afterimage-test/replay_001.frames.jsonl',
+    );
+  }
+
+  @override
+  Future<void> close() async {
+    closeCalls++;
+  }
+}
+
+class _FrameCaptureStart {
+  const _FrameCaptureStart(this.replayIndex, this.outputPath);
+
+  final int replayIndex;
+  final String outputPath;
 }
 
 class _FakeSummaryWriter implements ClosableSummaryWriterPort {

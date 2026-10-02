@@ -36,6 +36,9 @@ Version `0.2.2+5` is an alpha desktop release:
   the end. The engine still supports per-replay recording behind
   `VideoMode.separate`, but no interface offers it. Failures and stop requests
   preserve the current source output as a partial recording when possible.
+- Linux optionally writes raw per-replay frame data to JSONL sidecars. The option
+  is off by default and does not affect recording results; live GGST frame
+  capture remains unverified. Windows frame capture is not implemented yet.
 - OBS WebSocket v5 control now supports localhost configuration discovery,
   Hello/Identify authentication, request timeouts, request failures, and safe
   close handling. Setup marks OBS ready only after this protocol and idle-state

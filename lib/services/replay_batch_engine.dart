@@ -6,7 +6,8 @@ import 'replay_clock.dart';
 
 typedef ReplayBatchEventSink = void Function(ReplayBatchEvent event);
 
-class ReplayBatchEngine implements RecordingEngine {
+class ReplayBatchEngine
+    implements RecordingEngine, FrameCaptureAwareRecordingEngine {
   ReplayBatchEngine({
     required this.monitor,
     required this.menuInput,
@@ -14,9 +15,11 @@ class ReplayBatchEngine implements RecordingEngine {
     required this.organizer,
     ReplayClock? clock,
     SummaryWriterPort? summaryWriter,
+    FrameCapturePort? frameCapturePort,
     this.onEvent,
   })  : clock = clock ?? SystemReplayClock(),
-        summaryWriter = summaryWriter ?? const NoopSummaryWriter();
+        summaryWriter = summaryWriter ?? const NoopSummaryWriter(),
+        _frameCapturePort = frameCapturePort ?? const NoopFrameCapturePort();
 
   final ReplayMonitorPort monitor;
   final MenuInputPort menuInput;
@@ -25,6 +28,10 @@ class ReplayBatchEngine implements RecordingEngine {
   final ReplayClock clock;
   final SummaryWriterPort summaryWriter;
   final ReplayBatchEventSink? onEvent;
+  FrameCapturePort _frameCapturePort;
+  Duration? _batchRecordingStartedAt;
+  Duration _frameCaptureStopTimeout = const Duration(seconds: 3);
+  _CaptureAttempt? _captureAttempt;
 
   bool _isRunning = false;
   bool _stopRequested = false;
@@ -37,6 +44,14 @@ class ReplayBatchEngine implements RecordingEngine {
 
   @override
   bool get isRunning => _isRunning;
+
+  @override
+  void configureFrameCapture(FrameCapturePort port) {
+    if (_isRunning) {
+      throw StateError('Frame capture cannot change during a batch.');
+    }
+    _frameCapturePort = port;
+  }
 
   ReplayBatchProgress get progress => _progress;
 
@@ -70,6 +85,9 @@ class ReplayBatchEngine implements RecordingEngine {
     _state = ReplayBatchState.idle;
     _detail = null;
     _currentOutputPath = null;
+    _batchRecordingStartedAt = null;
+    _frameCaptureStopTimeout = request.timing.frameCaptureStopTimeout;
+    _captureAttempt = null;
 
     final replayResults = <ReplayResult>[];
     var combinedRecordingActive = false;
@@ -135,6 +153,7 @@ class ReplayBatchEngine implements RecordingEngine {
           'Starting the combined OBS recording.',
         );
         await obs.startRecording();
+        _batchRecordingStartedAt = clock.elapsed;
         combinedRecordingActive = true;
       }
 
@@ -323,6 +342,21 @@ class ReplayBatchEngine implements RecordingEngine {
         detail: 'The batch stopped safely after an unexpected failure.',
       );
     } finally {
+      final activeCapture = _captureAttempt;
+      if (activeCapture != null && !activeCapture.stopped) {
+        await _stopFrameCapture(
+          activeCapture.replayIndex,
+          reason: FrameCaptureEndReason.failed,
+        );
+      }
+      try {
+        await _awaitCaptureOperation<void>(
+          _frameCapturePort.close(),
+          _frameCaptureStopTimeout,
+        );
+      } catch (_) {
+        // Releasing optional frame capture must not hide the batch result.
+      }
       try {
         await monitor.close();
       } catch (_) {
@@ -357,6 +391,7 @@ class ReplayBatchEngine implements RecordingEngine {
     required bool combinedRecordingActive,
   }) async {
     var recordingActive = false;
+    Duration? replayRecordingStartedAt;
     RecordedOutput? sourceOutput;
     OrganizedOutput? organizedOutput;
 
@@ -373,6 +408,7 @@ class ReplayBatchEngine implements RecordingEngine {
           'Starting the OBS recording for replay $index.',
         );
         await obs.startRecording();
+        replayRecordingStartedAt = clock.elapsed;
         recordingActive = true;
       }
 
@@ -432,6 +468,13 @@ class ReplayBatchEngine implements RecordingEngine {
         replayIndex: index,
         message: 'Replay $index battle started after frame movement.',
       );
+      await _startFrameCapture(
+        request,
+        index,
+        recordingStartedAt: combinedRecordingActive
+            ? _batchRecordingStartedAt ?? clock.elapsed
+            : replayRecordingStartedAt ?? clock.elapsed,
+      );
 
       _setState(
         ReplayBatchState.waitingForReplayEnd,
@@ -448,9 +491,23 @@ class ReplayBatchEngine implements RecordingEngine {
         );
       }
       if (endStatus == _WaitStatus.timeout) {
-        throw TimeoutException('Replay $index exceeded its replay timeout.');
+        return await _failReplay(
+          request,
+          index,
+          _failureWithContext(
+            TimeoutException('Replay $index exceeded its replay timeout.'),
+          ),
+          recordingActive: recordingActive,
+          sourceOutput: sourceOutput,
+          organizedOutput: organizedOutput,
+          captureEndReason: FrameCaptureEndReason.timeout,
+        );
       }
 
+      await _stopFrameCapture(
+        index,
+        reason: FrameCaptureEndReason.completed,
+      );
       final reason = detector.reason;
       _emit(
         ReplayBatchEventType.replayCompleted,
@@ -528,6 +585,7 @@ class ReplayBatchEngine implements RecordingEngine {
         status: ReplayResultStatus.recorded,
         output: organizedOutput,
         sourceOutput: sourceOutput,
+        capture: _captureSummaryFor(index),
       );
     } catch (error) {
       return _failReplay(
@@ -548,7 +606,9 @@ class ReplayBatchEngine implements RecordingEngine {
     required bool recordingActive,
     required RecordedOutput? sourceOutput,
     required OrganizedOutput? organizedOutput,
+    FrameCaptureEndReason captureEndReason = FrameCaptureEndReason.failed,
   }) async {
+    await _stopFrameCapture(index, reason: captureEndReason);
     var finalError = error;
     var active = recordingActive;
     var source = sourceOutput;
@@ -594,6 +654,7 @@ class ReplayBatchEngine implements RecordingEngine {
       output: organized,
       sourceOutput: source,
       error: finalError,
+      capture: _captureSummaryFor(index),
     );
     _emit(
       ReplayBatchEventType.replayFailed,
@@ -612,6 +673,10 @@ class ReplayBatchEngine implements RecordingEngine {
     required RecordedOutput? sourceOutput,
     required OrganizedOutput? organizedOutput,
   }) async {
+    await _stopFrameCapture(
+      index,
+      reason: FrameCaptureEndReason.stopped,
+    );
     var active = recordingActive;
     var source = sourceOutput;
     var organized = organizedOutput;
@@ -657,6 +722,7 @@ class ReplayBatchEngine implements RecordingEngine {
       output: organized,
       sourceOutput: source,
       error: error,
+      capture: _captureSummaryFor(index),
     );
     _emit(
       ReplayBatchEventType.replayStopped,
@@ -787,6 +853,192 @@ class ReplayBatchEngine implements RecordingEngine {
     );
   }
 
+  Future<void> _startFrameCapture(
+    ReplayBatchRequest request,
+    int replayIndex, {
+    required Duration recordingStartedAt,
+  }) async {
+    if (!request.options.captureFrameData ||
+        _frameCapturePort is NoopFrameCapturePort) {
+      return;
+    }
+
+    final path =
+        _frameCapturePath(request.options.outputDirectory, replayIndex);
+    final attempt = _CaptureAttempt(
+      replayIndex: replayIndex,
+      outputPath: path,
+      summaryPath: _frameCaptureFileName(replayIndex),
+    );
+    _captureAttempt = attempt;
+    try {
+      await _awaitCaptureOperation<void>(
+        _frameCapturePort.start(
+          replayIndex: replayIndex,
+          outputPath: attempt.outputPath,
+          gWorldPointerAddress: monitor is ReplayMonitorGWorldPointerPort
+              ? (monitor as ReplayMonitorGWorldPointerPort).gWorldPointerAddress
+              : null,
+        ),
+        _frameCaptureStopTimeout,
+      );
+      attempt.videoOffsetMs =
+          (clock.elapsed - recordingStartedAt).inMilliseconds;
+      attempt.started = true;
+    } on _CaptureOperationTimedOut {
+      FrameCaptureResult? aborted;
+      if (_frameCapturePort case final AbortableFrameCapturePort abortable) {
+        try {
+          aborted = await _awaitCaptureOperation<FrameCaptureResult>(
+            abortable.abort(),
+            _frameCaptureStopTimeout,
+          );
+        } on Object {
+          // The capture is already abandoned; keep the start timeout diagnostic.
+        }
+      }
+      attempt.stopped = true;
+      _recordCaptureFailure(
+        attempt,
+        StateError(
+          'Frame capture start timed out after '
+          '${_frameCaptureStopTimeout.inMilliseconds} ms; capture was abandoned.',
+        ),
+        result: aborted,
+      );
+    } catch (error) {
+      _recordCaptureFailure(attempt, error);
+    }
+  }
+
+  Future<ReplayCaptureSummary?> _stopFrameCapture(
+    int replayIndex, {
+    required FrameCaptureEndReason reason,
+  }) async {
+    final attempt = _captureAttempt;
+    if (attempt == null ||
+        attempt.replayIndex != replayIndex ||
+        attempt.stopped) {
+      return _captureSummaryFor(replayIndex);
+    }
+    attempt.stopped = true;
+    if (!attempt.started) {
+      return attempt.summary;
+    }
+
+    try {
+      final result = await _awaitCaptureOperation<FrameCaptureResult>(
+        _frameCapturePort.stop(reason: reason),
+        _frameCaptureStopTimeout,
+      );
+      if (result.error != null) {
+        _recordCaptureFailure(
+          attempt,
+          result.error!,
+          result: result,
+        );
+      } else if (result.rows == 0 && result.readErrors > 0) {
+        _recordCaptureFailure(
+          attempt,
+          StateError(
+            'Frame capture recorded no rows after ${result.readErrors} '
+            'memory read errors.',
+          ),
+          result: result,
+        );
+      } else {
+        attempt.summary = ReplayCaptureSummary(
+          path: attempt.summaryPath,
+          videoOffsetMs: attempt.videoOffsetMs,
+          rows: result.rows,
+          frameGaps: result.frameGaps,
+          maxFrameGap: result.maxFrameGap,
+        );
+      }
+    } on _CaptureOperationTimedOut {
+      FrameCaptureResult? aborted;
+      if (_frameCapturePort case final AbortableFrameCapturePort abortable) {
+        try {
+          aborted = await _awaitCaptureOperation<FrameCaptureResult>(
+            abortable.abort(),
+            _frameCaptureStopTimeout,
+          );
+        } on Object {
+          // The capture is already abandoned; keep the timeout diagnostic.
+        }
+      }
+      _recordCaptureFailure(
+        attempt,
+        StateError(
+          'Frame capture stop timed out after '
+          '${_frameCaptureStopTimeout.inMilliseconds} ms; capture was abandoned.',
+        ),
+        result: aborted,
+      );
+    } catch (error) {
+      _recordCaptureFailure(attempt, error);
+    }
+    return attempt.summary;
+  }
+
+  void _recordCaptureFailure(
+    _CaptureAttempt attempt,
+    Object error, {
+    FrameCaptureResult? result,
+  }) {
+    final detail = error.toString();
+    attempt.summary = ReplayCaptureSummary(
+      path: result?.path == null ? null : attempt.summaryPath,
+      videoOffsetMs: attempt.videoOffsetMs,
+      rows: result?.rows ?? 0,
+      frameGaps: result?.frameGaps ?? 0,
+      maxFrameGap: result?.maxFrameGap ?? 0,
+      error: detail,
+    );
+    _emit(
+      ReplayBatchEventType.diagnostic,
+      replayIndex: attempt.replayIndex,
+      message:
+          'Frame capture for replay ${attempt.replayIndex} failed. The video recording will continue.',
+      error: StateError(
+        'Frame capture for replay ${attempt.replayIndex} failed, but the video recording will continue: $detail',
+      ),
+    );
+  }
+
+  ReplayCaptureSummary? _captureSummaryFor(int replayIndex) {
+    final attempt = _captureAttempt;
+    return attempt?.replayIndex == replayIndex ? attempt?.summary : null;
+  }
+
+  String _frameCapturePath(String directory, int replayIndex) {
+    final separator =
+        directory.endsWith('/') || directory.endsWith('\\') ? '' : '/';
+    return '$directory$separator${_frameCaptureFileName(replayIndex)}';
+  }
+
+  String _frameCaptureFileName(int replayIndex) {
+    final number = replayIndex.toString().padLeft(3, '0');
+    return 'replay_$number.frames.jsonl';
+  }
+
+  Future<T> _awaitCaptureOperation<T>(
+    Future<T> operation,
+    Duration timeout,
+  ) async {
+    final marker = Object();
+    final result = await Future.any<Object?>(<Future<Object?>>[
+      operation,
+      Future<void>.delayed(Duration.zero)
+          .then((_) => clock.delay(timeout))
+          .then<Object?>((_) => marker),
+    ]);
+    if (identical(result, marker)) {
+      throw const _CaptureOperationTimedOut();
+    }
+    return result as T;
+  }
+
   Future<ReplayBatchResult> _finishFailure(
     ReplayBatchRequest request,
     List<ReplayResult> replayResults,
@@ -907,7 +1159,8 @@ class ReplayBatchEngine implements RecordingEngine {
         timing.resultDelay < Duration.zero ||
         timing.startupDelay < Duration.zero ||
         timing.menuDelay < Duration.zero ||
-        timing.actionDelay < Duration.zero) {
+        timing.actionDelay < Duration.zero ||
+        timing.frameCaptureStopTimeout <= Duration.zero) {
       throw ArgumentError('Batch timing values must not be negative.');
     }
     if (timing.listConfirmationPolls <= 0) {
@@ -993,6 +1246,26 @@ enum _WaitStatus {
   satisfied,
   timeout,
   stopped,
+}
+
+class _CaptureAttempt {
+  _CaptureAttempt({
+    required this.replayIndex,
+    required this.outputPath,
+    required this.summaryPath,
+  });
+
+  final int replayIndex;
+  final String outputPath;
+  final String summaryPath;
+  int videoOffsetMs = 0;
+  bool started = false;
+  bool stopped = false;
+  ReplayCaptureSummary? summary;
+}
+
+class _CaptureOperationTimedOut implements Exception {
+  const _CaptureOperationTimedOut();
 }
 
 class _CombinedStop {

@@ -107,6 +107,9 @@ class RecorderController extends ChangeNotifier {
         customReplayCount:
             count is int && count > 0 && count <= 1000 ? count : 1,
         outputDirectory: _storedPath(path) ?? _options.outputDirectory,
+        captureFrameData: saved['captureFrameData'] is bool
+            ? saved['captureFrameData'] as bool
+            : _options.captureFrameData,
       );
       setupLocations = LocalSetupLocations(
         gameDirectory: _storedPath(saved['gameDirectory']),
@@ -142,6 +145,7 @@ class RecorderController extends ChangeNotifier {
       'replayCount': _options.replayCount.name,
       'customReplayCount': _options.customReplayCount,
       'videoMode': _options.videoMode.name,
+      'captureFrameData': _options.captureFrameData,
       'gameDirectory': setupLocations.gameDirectory,
       'replayDirectory': setupLocations.replayDirectory,
       'recentOutputs': List<String>.of(_recentOutputPaths),
@@ -358,6 +362,20 @@ class RecorderController extends ChangeNotifier {
 
   NativeBackendReadiness? readinessFor(InputMode inputMode) =>
       _inputReadiness[inputMode];
+
+  bool get frameCaptureSupported =>
+      backend is FrameCaptureAwareNativeRecorderBackend &&
+      (backend as FrameCaptureAwareNativeRecorderBackend).supportsFrameCapture;
+
+  String get frameCaptureUnavailableReason {
+    if (backend case final FrameCaptureAwareNativeRecorderBackend capable) {
+      final detail = capable.frameCaptureUnsupportedReason?.trim();
+      if (detail != null && detail.isNotEmpty) return detail;
+    }
+    return Platform.isWindows
+        ? 'Frame capture is not available on Windows yet.'
+        : 'Frame capture is not available in this build.';
+  }
 
   bool get isChecking =>
       _isChecking || _isRefreshingSetup || (obsConnection?.isChecking ?? false);
@@ -765,6 +783,7 @@ class RecorderController extends ChangeNotifier {
     ReplayMonitorPort? monitor;
     MenuInputPort? menuInput;
     ObsRecorderPort? obs;
+    FrameCapturePort? frameCapture;
     var engineStarted = false;
     try {
       if (setupInspector != null) {
@@ -801,6 +820,21 @@ class RecorderController extends ChangeNotifier {
       _throwIfCancelled();
       final organizer = await backend.openOutputOrganizer();
       _throwIfCancelled();
+      if (_options.captureFrameData &&
+          backend is FrameCaptureAwareNativeRecorderBackend &&
+          (backend as FrameCaptureAwareNativeRecorderBackend)
+              .supportsFrameCapture) {
+        final captureBackend =
+            backend as FrameCaptureAwareNativeRecorderBackend;
+        try {
+          frameCapture = await captureBackend.openFrameCapture();
+        } catch (error) {
+          // Capture is optional. The engine records this per replay and keeps
+          // the video lifecycle independent of the failed capture setup.
+          frameCapture = FailedFrameCapturePort(error);
+        }
+      }
+      _throwIfCancelled();
       final engine = engineFactory(
         monitor: monitor,
         menuInput: menuInput,
@@ -808,6 +842,9 @@ class RecorderController extends ChangeNotifier {
         organizer: organizer,
         onEvent: _onEngineEvent,
       );
+      if (frameCapture != null && engine is FrameCaptureAwareRecordingEngine) {
+        engine.configureFrameCapture(frameCapture);
+      }
       _activeEngine = engine;
       notifyListeners();
       engineStarted = true;
@@ -873,6 +910,7 @@ class RecorderController extends ChangeNotifier {
         await _closePort(menuInput);
         await _closePort(obs);
       }
+      await _closePort(frameCapture);
       _activeEngine = null;
       _isBusy = false;
       _batchEndedAt = DateTime.now();
@@ -969,7 +1007,7 @@ class RecorderController extends ChangeNotifier {
     if (output != null) {
       _addOutputPath(output.path);
     }
-    if (event.error != null) {
+    if (event.error != null && event.type != ReplayBatchEventType.diagnostic) {
       _error = event.error;
     }
     notifyListeners();
@@ -1005,6 +1043,8 @@ class RecorderController extends ChangeNotifier {
         case ObsRecorderPort value:
           await value.close();
         case ClosableMenuInputPort value:
+          await value.close();
+        case FrameCapturePort value:
           await value.close();
       }
     } catch (_) {

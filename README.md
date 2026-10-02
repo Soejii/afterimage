@@ -98,6 +98,10 @@ an OBS WebSocket is.
 Afterimage records the whole batch into one video file. Each batch gets its own
 folder, so a second run cannot overwrite the first.
 
+On Linux, expand **Replay controls** and select **Save frame data for analysis**
+to also write one raw `.frames.jsonl` log per replay in the batch folder. This
+option is off by default and is not yet available on Windows.
+
 Keep Afterimage, OBS, and GGST open while a batch runs, and do not use the
 replay menu yourself during recording. **Stop safely** keeps whatever has
 already been recorded. Afterimage will not start while OBS is already
