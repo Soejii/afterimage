@@ -98,9 +98,33 @@ void main() {
       'replayDirectory': null,
       'recentOutputs': <String>[],
       'recentOutputDirectory': null,
+      'finderDirectory': null,
     });
     expect(preferences.writes.single, isNot(contains('password')));
     expect(preferences.writes.single, isNot(contains('obsWebSocketPassword')));
+    controller.dispose();
+  });
+
+  test('changing options preserves the loaded finder directory', () async {
+    const finderDirectory = '/home/tester/ggst-input-tracker';
+    final preferences = _PreferencesHarness({
+      'finderDirectory': finderDirectory,
+    });
+    final controller = RecorderController(
+      backend: _PreferencesBackend(),
+      preferences: preferences.preferences,
+    );
+
+    await controller.initialize();
+    controller.updateOptions(
+      controller.options.copyWith(
+        replayCount: ReplayCountOption.custom,
+        customReplayCount: 2,
+      ),
+    );
+    await preferences.preferences.flush();
+
+    expect(preferences.writes.single['finderDirectory'], finderDirectory);
     controller.dispose();
   });
 

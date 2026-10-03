@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../domain/recorder_contracts.dart';
+import '../domain/finder_contracts.dart';
+import '../domain/notes_models.dart';
 import '../domain/replay_batch.dart';
 import '../domain/setup_models.dart';
 import '../services/output_directory_picker.dart';
@@ -14,6 +16,7 @@ import '../services/output_launcher.dart';
 import '../services/setup_locations.dart';
 import '../services/output_directory_preflight.dart';
 import '../services/replay_batch_engine.dart';
+import '../services/notes_repository.dart';
 import '../services/summary_writer.dart';
 import 'recorder_blocker.dart';
 import 'replay_timeline.dart';
@@ -39,6 +42,9 @@ class RecorderController extends ChangeNotifier {
     this.obsConnection,
     this.setupInspector,
     this.preferences,
+    this.finder,
+    this.notesRepository,
+    bool Function()? platformIsLinux,
     BatchOutputDirectory? batchDirectories,
     OutputLauncher? outputLauncher,
     this.engineFactory = _createReplayBatchEngine,
@@ -47,19 +53,24 @@ class RecorderController extends ChangeNotifier {
     RecordingOptions options = const RecordingOptions(),
   })  : _options = options,
         batchDirectories = batchDirectories ?? BatchOutputDirectory(),
-        outputLauncher = outputLauncher ?? OutputLauncher() {
+        outputLauncher = outputLauncher ?? OutputLauncher(),
+        _platformIsLinux = platformIsLinux ?? (() => Platform.isLinux) {
     obsConnection?.addListener(_onObsChanged);
   }
 
   final NativeRecorderBackend backend;
   final ObsConnectionService? obsConnection;
   final RecorderPreferences? preferences;
+  final FinderPort? finder;
+  final NotesRepository? notesRepository;
+  final bool Function() _platformIsLinux;
   final BatchOutputDirectory batchDirectories;
   final OutputLauncher outputLauncher;
   LocalSetupLocations setupLocations = const LocalSetupLocations();
   final List<String> _recentOutputPaths = [];
   List<String> get recentOutputPaths => List.unmodifiable(_recentOutputPaths);
   String? _recentOutputDirectory;
+  String? _finderDirectory;
   bool _initialized = false;
   String? preferenceNotice;
 
@@ -68,6 +79,10 @@ class RecorderController extends ChangeNotifier {
   bool _isRefreshingSetup = false;
   Completer<void>? _batchDone;
   String? batchOutputDirectory;
+  FinderRunInfo? _finderRun;
+  String? _finderError;
+  String? _finderBatchLabel;
+  DateTime? _finderStartedAt;
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -121,6 +136,7 @@ class RecorderController extends ChangeNotifier {
             .addAll(recent.map(_storedPath).whereType<String>().take(20));
       }
       _recentOutputDirectory = _storedPath(saved['recentOutputDirectory']);
+      _finderDirectory = _storedPath(saved['finderDirectory']);
     }
     notifyListeners();
   }
@@ -150,6 +166,7 @@ class RecorderController extends ChangeNotifier {
       'replayDirectory': setupLocations.replayDirectory,
       'recentOutputs': List<String>.of(_recentOutputPaths),
       'recentOutputDirectory': _recentOutputDirectory,
+      'finderDirectory': _finderDirectory,
     }).catchError((Object _) {
       preferenceNotice =
           'Your choices could not be remembered. You can still record in this session.';
@@ -414,6 +431,17 @@ class RecorderController extends ChangeNotifier {
 
   ReplayBatchResult? get result => _result;
 
+  FinderRunInfo? get finderRun => _finderRun;
+
+  String? get finderError => _finderError;
+
+  String? get finderBatchLabel => _finderBatchLabel;
+
+  DateTime? get finderStartedAt => _finderStartedAt;
+
+  bool get notesAvailable =>
+      finder?.available == true && notesRepository != null;
+
   Object? get error => _error;
 
   String? get latestMessage {
@@ -562,6 +590,10 @@ class RecorderController extends ChangeNotifier {
     _replayOutcomes.clear();
     _batchStartedAt = null;
     _batchEndedAt = null;
+    _finderRun = null;
+    _finderError = null;
+    _finderBatchLabel = null;
+    _finderStartedAt = null;
     _state = ReplayBatchState.idle;
     _progress = const ReplayBatchProgress(
       state: ReplayBatchState.idle,
@@ -777,6 +809,10 @@ class RecorderController extends ChangeNotifier {
     _outputPaths.clear();
     _result = null;
     batchOutputDirectory = null;
+    _finderRun = null;
+    _finderError = null;
+    _finderBatchLabel = null;
+    _finderStartedAt = null;
     _error = null;
     notifyListeners();
 
@@ -917,7 +953,58 @@ class RecorderController extends ChangeNotifier {
       _stopRequested = false;
       _batchDone?.complete();
       notifyListeners();
+      final result = _result;
+      if (result != null && result.outcome == ReplayBatchOutcome.completed) {
+        unawaited(_startFinder(result));
+      }
     }
+  }
+
+  Future<void> refreshFinderStatus() async {
+    final repository = notesRepository;
+    final batchLabel = _finderBatchLabel;
+    if (repository == null || batchLabel == null) return;
+    _finderRun = await repository.readRun(batchLabel);
+    notifyListeners();
+  }
+
+  Future<void> _startFinder(ReplayBatchResult result) async {
+    final finder = this.finder;
+    final batchDirectory = batchOutputDirectory;
+    if (finder == null ||
+        !finder.available ||
+        !_platformIsLinux() ||
+        !_options.captureFrameData ||
+        batchDirectory == null ||
+        !_hasCaptureFile(result, batchDirectory)) {
+      return;
+    }
+    _finderBatchLabel = _basename(batchDirectory);
+    _finderStartedAt = DateTime.now();
+    _finderError = null;
+    notifyListeners();
+    try {
+      await finder.startBatch(batchDirectory);
+      await refreshFinderStatus();
+    } on Object catch (error) {
+      // Finder startup is auxiliary. The completed recording remains the
+      // primary result, while DoneView reports this separate failure.
+      _finderError = 'Notes failed to start: $error';
+      notifyListeners();
+    }
+  }
+
+  bool _hasCaptureFile(ReplayBatchResult result, String batchDirectory) {
+    if (result.replays.isEmpty) return false;
+    for (final replay in result.replays) {
+      final relative = replay.capture?.path;
+      if (relative == null || relative.isEmpty) continue;
+      final file = File(File(relative).isAbsolute
+          ? relative
+          : _joinPath(batchDirectory, relative));
+      if (file.existsSync()) return true;
+    }
+    return false;
   }
 
   Future<void> requestStop() async {
@@ -1071,6 +1158,18 @@ class RecorderController extends ChangeNotifier {
     }
     return text;
   }
+}
+
+String _basename(String path) {
+  final normalized = path.replaceAll('\\', '/');
+  return normalized.substring(normalized.lastIndexOf('/') + 1);
+}
+
+String _joinPath(String base, String child) {
+  if (child.isEmpty) return base;
+  if (child.startsWith('/') || child.startsWith('\\')) return child;
+  if (base.endsWith('/') || base.endsWith('\\')) return '$base$child';
+  return '$base${Platform.pathSeparator}$child';
 }
 
 RecordingEngine _createReplayBatchEngine({

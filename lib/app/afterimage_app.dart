@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../domain/recorder_contracts.dart';
+import '../domain/finder_contracts.dart';
 import '../presentation/home_shell.dart';
 import '../presentation/recorder_controller.dart';
-import '../presentation/widgets/recording_window_guard.dart';
 import '../services/setup_service.dart';
+import '../services/notes_repository.dart';
 import 'theme.dart';
 
 class AfterimageApp extends StatelessWidget {
@@ -13,12 +14,16 @@ class AfterimageApp extends StatelessWidget {
     this.setupService = const LocalSetupService(),
     this.recorderBackend,
     this.recorderController,
+    this.finder,
+    this.notesRepository,
     this.enableWindowGuard = false,
   });
 
   final SetupService setupService;
   final NativeRecorderBackend? recorderBackend;
   final RecorderController? recorderController;
+  final FinderPort? finder;
+  final NotesRepository? notesRepository;
   final bool enableWindowGuard;
 
   @override
@@ -27,15 +32,16 @@ class AfterimageApp extends StatelessWidget {
       setupService: setupService,
       recorderBackend: recorderBackend,
       recorderController: recorderController,
+      finder: finder,
+      notesRepository: notesRepository,
+      enableWindowGuard: enableWindowGuard,
     );
     return MaterialApp(
       title: 'AFTERIMAGE',
       debugShowCheckedModeBanner: false,
       theme: AfterimageTheme.dark(),
       themeMode: ThemeMode.dark,
-      home: enableWindowGuard && recorderController != null
-          ? RecordingWindowGuard(controller: recorderController!, child: shell)
-          : shell,
+      home: shell,
     );
   }
 }

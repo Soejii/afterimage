@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../domain/notes_models.dart';
+import '../../services/notes_repository.dart';
 import '../recorder_blocker.dart';
 import '../recorder_controller.dart';
 import '../views/blocked_view.dart';
 import '../views/done_view.dart';
 import '../views/ready_view.dart';
 import '../views/running_view.dart';
+import '../notes_pages.dart';
 import '../widgets/afterimage_brand.dart';
 import '../widgets/phase_indicator.dart';
 
@@ -24,6 +27,15 @@ class WorkspaceScreen extends StatelessWidget {
     required this.isRefreshing,
     required this.onRefresh,
     this.errorMessage,
+    this.notesRepository,
+    this.showNotes = false,
+    this.selectedNote,
+    this.notesEditing = false,
+    this.onOpenNotes,
+    this.onBackToNotesList,
+    this.onCloseNotes,
+    this.onNotesEditingChanged,
+    this.onNotesSavingChanged,
   });
 
   final RecorderController controller;
@@ -35,6 +47,15 @@ class WorkspaceScreen extends StatelessWidget {
   /// controller are read inside the listener below, not passed in, so that a
   /// change to them actually reaches the screen.
   final String? errorMessage;
+  final NotesRepository? notesRepository;
+  final bool showNotes;
+  final NotePreview? selectedNote;
+  final bool notesEditing;
+  final ValueChanged<NotePreview?>? onOpenNotes;
+  final VoidCallback? onBackToNotesList;
+  final VoidCallback? onCloseNotes;
+  final ValueChanged<bool>? onNotesEditingChanged;
+  final ValueChanged<bool>? onNotesSavingChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +71,14 @@ class WorkspaceScreen extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _WorkspaceHeader(phase: phase, controller: controller),
+            _WorkspaceHeader(
+              phase: phase,
+              controller: controller,
+              notesAvailable:
+                  notesRepository != null && phase != RecorderPhase.running,
+              notesEditing: notesEditing,
+              onOpenNotes: () => onOpenNotes?.call(null),
+            ),
             Expanded(
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 180),
@@ -66,6 +94,27 @@ class WorkspaceScreen extends StatelessWidget {
   }
 
   Widget _body(RecorderPhase phase, String? message) {
+    if (showNotes &&
+        notesRepository != null &&
+        phase != RecorderPhase.running) {
+      final selected = selectedNote;
+      if (selected == null) {
+        return NotesListPage(
+          key: const ValueKey('notes-list-view'),
+          repository: notesRepository!,
+          onOpen: (preview) => onOpenNotes?.call(preview),
+          onClose: onCloseNotes ?? () {},
+        );
+      }
+      return NotesPage(
+        key: ValueKey('notes-page-view-${selected.sectionPath}'),
+        repository: notesRepository!,
+        preview: selected,
+        onBack: onBackToNotesList ?? () {},
+        onEditingChanged: onNotesEditingChanged,
+        onSavingChanged: onNotesSavingChanged,
+      );
+    }
     switch (phase) {
       case RecorderPhase.checking:
         return const _CheckingView(key: ValueKey('checking-view'));
@@ -95,16 +144,27 @@ class WorkspaceScreen extends StatelessWidget {
         return DoneView(
           key: const ValueKey('done-view'),
           controller: controller,
+          notesRepository: notesRepository,
+          onOpenNotes: notesEditing ? null : () => onOpenNotes?.call(null),
         );
     }
   }
 }
 
 class _WorkspaceHeader extends StatelessWidget {
-  const _WorkspaceHeader({required this.phase, required this.controller});
+  const _WorkspaceHeader({
+    required this.phase,
+    required this.controller,
+    required this.notesAvailable,
+    required this.notesEditing,
+    required this.onOpenNotes,
+  });
 
   final RecorderPhase phase;
   final RecorderController controller;
+  final bool notesAvailable;
+  final bool notesEditing;
+  final VoidCallback onOpenNotes;
 
   @override
   Widget build(BuildContext context) {
@@ -119,6 +179,14 @@ class _WorkspaceHeader extends StatelessWidget {
         children: [
           const AfterimageBrand(),
           const Spacer(),
+          if (notesAvailable)
+            TextButton.icon(
+              key: const ValueKey('open-notes'),
+              onPressed: notesEditing ? null : onOpenNotes,
+              icon: const Icon(Icons.notes_outlined),
+              label: const Text('Notes'),
+            ),
+          if (notesAvailable) const SizedBox(width: 8),
           PhaseIndicator(phase: phase, controller: controller),
         ],
       ),
