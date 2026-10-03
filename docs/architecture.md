@@ -99,6 +99,21 @@ Platform-neutral services live in `lib/services/` and are directly testable:
   `lib/services/recorder_preferences.dart` provide platform-neutral output and
   preference services.
 
+The optional notes finder is another process boundary. `FinderPort` in
+`lib/domain/finder_contracts.dart` exposes only the detached batch-start action;
+`LinuxFinder` owns the Linux command, finder path, minimal `PATH` addition, and
+`run.log` redirection. `NotesRepository` reads finder output and performs the
+explicit section write and apply operations. `RecorderController` starts the
+finder only after a completed Linux batch has produced at least one frame-capture
+sidecar, so finder failures cannot change the recording result. Windows keeps the
+notes entry points hidden because this adapter is Linux-only.
+
+Notes section editing stays behind atomic replacement. The first edit copies the
+finder draft to `section.orig.md`; subsequent edits replace only `section.md` and
+never overwrite the original. Clip playback is behind
+`NotesClipPlayerSession`, which keeps media_kit and libmpv out of widget tests and
+disposes a session when its player leaves the scroll viewport or its page closes.
+
 ## Presentation
 
 The Presentation layer (`lib/presentation/`) is a `ChangeNotifier` view model
