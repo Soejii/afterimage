@@ -34,6 +34,15 @@ typedef NotesClipPlayerSessionFactory = NotesClipPlayerSession Function(
   String path,
 );
 
+/// Software rendering: the GL texture path drew solid blue on an RX 9060 XT
+/// under Wayland. Clips are 1280x720, so the CPU cost is small.
+const notesClipVideoConfiguration = VideoControllerConfiguration(
+  enableHardwareAcceleration: false,
+);
+
+/// The page draws its own play, seek, speed and loop bar.
+const notesClipVideoControls = NoVideoControls;
+
 NotesClipPlayerSession createMediaKitClipPlayer(String path) =>
     MediaKitNotesClipPlayerSession(path);
 
@@ -41,7 +50,10 @@ NotesClipPlayerSession createMediaKitClipPlayer(String path) =>
 /// initialize libmpv.
 class MediaKitNotesClipPlayerSession implements NotesClipPlayerSession {
   MediaKitNotesClipPlayerSession(String path) : _player = Player() {
-    _videoController = VideoController(_player);
+    _videoController = VideoController(
+      _player,
+      configuration: notesClipVideoConfiguration,
+    );
     _ready = _open(path);
   }
 
@@ -103,7 +115,7 @@ class MediaKitNotesClipPlayerSession implements NotesClipPlayerSession {
 
   @override
   Widget buildVideo(BuildContext context) =>
-      Video(controller: _videoController);
+      Video(controller: _videoController, controls: notesClipVideoControls);
 
   @override
   Future<void> dispose() => _player.dispose();
