@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:afterimage/app/theme.dart';
@@ -356,7 +357,9 @@ void main() {
     tester
         .widget<DropdownButton<double>>(find.byType(DropdownButton<double>))
         .onChanged!(0.5);
-    tester.widget<Switch>(find.byType(Switch)).onChanged!(false);
+    tester
+        .widget<IconButton>(find.byKey(const ValueKey('clip-loop')))
+        .onPressed!();
     tester
         .widget<IconButton>(find.byKey(const ValueKey('clip-play')))
         .onPressed!();
@@ -367,6 +370,181 @@ void main() {
     expect(session.lastRate, 0.5);
     expect(session.loopCalls, 1);
     expect(session.lastLoop, isFalse);
+  });
+
+  testWidgets('pausing keeps the paused frame on screen, not the poster',
+      (tester) async {
+    final session = _FakeClipSession();
+    final clipFile = File(
+      '${Directory.systemTemp.path}/afterimage-pause-frame-clip.mp4',
+    )..createSync();
+    addTearDown(() => _deleteTempEntity(clipFile));
+    await tester.pumpWidget(
+      _app(
+        NotesClipPlayer(
+          clip: _playerClip,
+          filePath: clipFile.path,
+          playerFactory: (_) => session,
+        ),
+      ),
+    );
+
+    tester
+        .widget<IconButton>(find.byKey(const ValueKey('clip-play')))
+        .onPressed!();
+    await _settleIo(
+      tester,
+      () => find.byKey(_FakeClipSession.videoKey).evaluate().isNotEmpty,
+    );
+    expect(find.byKey(_FakeClipSession.videoKey), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('clip-play')));
+    await _flushIo(tester);
+    await tester.pump();
+
+    expect(session.pauseCalls, 1);
+    expect(find.byKey(_FakeClipSession.videoKey), findsOneWidget);
+  });
+
+  testWidgets('frame steps, keys, scrubbing and clicking the video work',
+      (tester) async {
+    final session = _FakeClipSession();
+    final clipFile = File(
+      '${Directory.systemTemp.path}/afterimage-player-keys-clip.mp4',
+    )..createSync();
+    addTearDown(() => _deleteTempEntity(clipFile));
+    await tester.pumpWidget(
+      _app(
+        NotesClipPlayer(
+          clip: _playerClip,
+          filePath: clipFile.path,
+          playerFactory: (_) => session,
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('clip-surface')));
+    await _settleIo(tester, () => session.playCalls == 1);
+    expect(session.playCalls, 1);
+    session.emitDuration(const Duration(seconds: 4));
+    session.emitPosition(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.text('0:02.00 / 0:04.00'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('clip-step-forward')));
+    await _flushIo(tester);
+    await tester.pump();
+    expect(session.pauseCalls, 1);
+    expect(session.steps, [1]);
+    expect(find.byKey(_FakeClipSession.videoKey), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyEvent(LogicalKeyboardKey.period);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await _flushIo(tester);
+    expect(session.steps, [1, -1, 1]);
+    expect(session.seeks.last, const Duration(seconds: 1));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await _flushIo(tester);
+    await tester.pump();
+    expect(session.playCalls, 2);
+
+    tester.widget<Slider>(find.byKey(const ValueKey('clip-seek'))).onChanged!(
+      const Duration(milliseconds: 3500).inMicroseconds.toDouble(),
+    );
+    await _flushIo(tester);
+    expect(session.seeks.last, const Duration(milliseconds: 3500));
+  });
+
+  testWidgets('a double click while starting opens one player', (tester) async {
+    final sessions = <_FakeClipSession>[];
+    final clipFile = File(
+      '${Directory.systemTemp.path}/afterimage-double-click-clip.mp4',
+    )..createSync();
+    addTearDown(() => _deleteTempEntity(clipFile));
+    await tester.pumpWidget(_app(NotesClipPlayer(
+      clip: _playerClip,
+      filePath: clipFile.path,
+      playerFactory: (_) {
+        final session = _FakeClipSession();
+        sessions.add(session);
+        return session;
+      },
+    )));
+
+    final play = tester.widget<IconButton>(
+      find.byKey(const ValueKey('clip-play')),
+    );
+    play.onPressed!();
+    play.onPressed!();
+    await _settleIo(tester, () => sessions.isNotEmpty);
+    await _settleIo(tester, () => false);
+
+    expect(sessions, hasLength(1));
+  });
+
+  testWidgets('leaving while a clip starts never opens a player',
+      (tester) async {
+    var opened = 0;
+    final clipFile = File(
+      '${Directory.systemTemp.path}/afterimage-leave-early-clip.mp4',
+    )..createSync();
+    addTearDown(() => _deleteTempEntity(clipFile));
+    await tester.pumpWidget(_app(NotesClipPlayer(
+      clip: _playerClip,
+      filePath: clipFile.path,
+      playerFactory: (_) {
+        opened++;
+        return _FakeClipSession();
+      },
+    )));
+
+    tester
+        .widget<IconButton>(find.byKey(const ValueKey('clip-play')))
+        .onPressed!();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await _settleIo(tester, () => false);
+
+    expect(opened, 0);
+  });
+
+  testWidgets('the card clicked last wins when two start together',
+      (tester) async {
+    final sessions = <String, _FakeClipSession>{};
+    final gateA = Completer<void>();
+    final clipDirectory = _createTempDirectory('afterimage-race-clips');
+    final clipA = File('${clipDirectory.path}/a.mp4')..createSync();
+    final clipB = File('${clipDirectory.path}/b.mp4')..createSync();
+    addTearDown(() => _deleteTempEntity(clipDirectory));
+    await tester.pumpWidget(_app(
+      _TwoClipHarness(
+        clip: _playerClip,
+        filePaths: [clipA.path, clipB.path],
+        playerFactory: (path) {
+          final session = _FakeClipSession();
+          if (path.endsWith('a.mp4')) session.gate = gateA;
+          return sessions[path.split('/').last] = session;
+        },
+      ),
+    ));
+    await _pumpUntilFound(
+        tester, find.byKey(const ValueKey('two-clip-harness')));
+
+    final play = find.byKey(const ValueKey('clip-play'));
+    tester.widget<IconButton>(play.at(0)).onPressed!();
+    tester.widget<IconButton>(play.at(1)).onPressed!();
+    await tester.pump();
+    await _settleIo(tester, () => (sessions['b.mp4']?.playCalls ?? 0) == 1);
+    // A's startup was slower; it finishes only now, after B is playing.
+    gateA.complete();
+    await _settleIo(tester, () => false);
+
+    expect(sessions['b.mp4']?.playCalls, 1);
+    expect(sessions['b.mp4']?.pauseCalls, 0);
+    final a = sessions['a.mp4'];
+    expect(a == null || a.playCalls == 0 || a.pauseCalls >= a.playCalls, isTrue,
+        reason: 'A started before B but must not keep playing');
   });
 
   testWidgets('list orders metadata previews and greys legacy entries',
@@ -444,7 +622,7 @@ void main() {
     expect(find.byKey(const ValueKey('apply-notes')), findsNothing);
   });
 
-  testWidgets('restarting a clip pauses the other card', (tester) async {
+  testWidgets('starting a clip pauses the other card', (tester) async {
     final sessions = <_FakeClipSession>[];
     final clipDirectory = _createTempDirectory('afterimage-restart-clips');
     final clipA = File('${clipDirectory.path}/a.mp4')..createSync();
@@ -488,22 +666,14 @@ void main() {
     await _flushIo(tester);
     await tester.pump();
     expect(sessions, hasLength(2));
-    tester
-        .widget<IconButton>(find.byKey(const ValueKey('clip-pause')).at(1))
-        .onPressed!();
-    await tester.pump();
+    expect(sessions[0].pauseCalls, 1);
+    final pausesOfB = sessions[1].pauseCalls;
     tester.widget<IconButton>(play.at(0)).onPressed!();
-    await _flushIo(tester);
-    await tester.pump();
-    final pausesBeforeRestart = sessions[0].pauseCalls;
-    tester
-        .widget<IconButton>(find.byKey(const ValueKey('clip-restart')).at(1))
-        .onPressed!();
     await _flushIo(tester);
     await tester.pump();
 
     expect(sessions, hasLength(2));
-    expect(sessions[0].pauseCalls, pausesBeforeRestart + 1);
+    expect(sessions[1].pauseCalls, pausesOfB + 1);
   });
 
   testWidgets('deleting an earlier card preserves the later clip state',
@@ -724,11 +894,28 @@ class _FakeNotesRepository extends NotesRepository {
   Future<NotePreview?> refreshPreview(NotePreview preview) async => preview;
 }
 
+const _playerClip = NoteClip(
+  file: 's1-1.mp4',
+  poster: null,
+  replay: 1,
+  videoTime: '00:54',
+  videoTimeMs: 54989,
+  startMs: 53489,
+  endMs: 57100,
+  herNext: null,
+  answer: 'Ky 5P',
+  outcome: 'hit',
+  counterHit: true,
+);
+
 class _FakeClipSession implements NotesClipPlayerSession {
   final StreamController<Duration> _position =
       StreamController<Duration>.broadcast();
   final StreamController<Duration> _duration =
       StreamController<Duration>.broadcast();
+  final StreamController<bool> _playing = StreamController<bool>.broadcast();
+  final List<int> steps = <int>[];
+  final List<Duration> seeks = <Duration>[];
   bool created = false;
   int playCalls = 0;
   int disposeCalls = 0;
@@ -745,6 +932,13 @@ class _FakeClipSession implements NotesClipPlayerSession {
   Stream<Duration> get duration => _duration.stream;
 
   @override
+  Stream<bool> get playing => _playing.stream;
+
+  void emitPosition(Duration value) => _position.add(value);
+
+  void emitDuration(Duration value) => _duration.add(value);
+
+  @override
   Future<void> play() async {
     created = true;
     playCalls++;
@@ -756,12 +950,19 @@ class _FakeClipSession implements NotesClipPlayerSession {
   }
 
   @override
-  Future<void> seek(Duration position) async {}
+  Future<void> seek(Duration position) async => seeks.add(position);
+
+  @override
+  Future<void> stepFrame(int direction) async => steps.add(direction);
+
+  /// When set, startup waits here, so a test can finish another card first.
+  Completer<void>? gate;
 
   @override
   Future<void> setRate(double rate) async {
     rateCalls++;
     lastRate = rate;
+    await gate?.future;
   }
 
   @override
@@ -773,15 +974,18 @@ class _FakeClipSession implements NotesClipPlayerSession {
   @override
   Future<Duration> currentPosition() async => Duration.zero;
 
+  static const videoKey = ValueKey('fake-clip-video');
+
   @override
   Widget buildVideo(BuildContext context) =>
-      const ColoredBox(color: Colors.black);
+      const ColoredBox(key: videoKey, color: Colors.black);
 
   @override
   Future<void> dispose() async {
     disposeCalls++;
     await _position.close();
     await _duration.close();
+    await _playing.close();
   }
 }
 
@@ -839,6 +1043,16 @@ Future<void> _pumpUntilFound(WidgetTester tester, Finder finder) async {
     if (finder.evaluate().isNotEmpty) return;
   }
   fail('Timed out waiting for the requested widget.');
+}
+
+/// Lets real file IO finish until [done] holds (bounded), pumping between tries.
+Future<void> _settleIo(WidgetTester tester, bool Function() done) async {
+  for (var attempt = 0; attempt < 200 && !done(); attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+    await tester.pump();
+  }
 }
 
 Future<void> _flushIo(WidgetTester tester) async {
