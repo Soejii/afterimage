@@ -272,6 +272,7 @@ class NoteClip {
     required this.answer,
     required this.outcome,
     required this.counterHit,
+    this.option,
   });
 
   factory NoteClip.fromJson(Map<String, Object?> json) {
@@ -289,6 +290,7 @@ class NoteClip {
       answer: json['answer']?.toString(),
       outcome: json['outcome']?.toString() ?? '',
       counterHit: json['counter_hit'] == true,
+      option: json['option']?.toString(),
     );
   }
 
@@ -303,6 +305,9 @@ class NoteClip {
   final String? answer;
   final String outcome;
   final bool counterHit;
+
+  /// The table row this clip belongs to: her option, or `no attack`.
+  final String? option;
 
   String caption() {
     final parts = <String>[];
@@ -336,7 +341,118 @@ List<NoteClip> matchClipsForCard(NoteCard card, ClipIndex? index) {
     if (leftHit != rightHit) return leftHit ? -1 : 1;
     return left.key.compareTo(right.key);
   });
-  return indexed.map((entry) => entry.value).take(4).toList(growable: false);
+  return indexed.map((entry) => entry.value).toList(growable: false);
+}
+
+/// Name of the row for clips she answered with nothing.
+const noAttackOption = 'no attack';
+
+/// The clips cut for one table row (her option), in index order.
+List<NoteClip> clipsForOption(List<NoteClip> clips, String option) => [
+      for (final clip in clips)
+        if ((clip.option ?? clip.herNext ?? noAttackOption) == option) clip,
+    ];
+
+/// One piece of a card body: a text line or a markdown table.
+sealed class NoteBodyBlock {
+  const NoteBodyBlock();
+}
+
+/// A text line; `habit: ...` style lines expose their [label].
+class NoteTextLine extends NoteBodyBlock {
+  const NoteTextLine(this.text);
+
+  final String text;
+
+  static final _labelled = RegExp(r'^(habit|rps|lab|seen|holding):\s?(.*)$');
+
+  String? get label => _labelled.firstMatch(text)?.group(1);
+
+  String get rest => _labelled.firstMatch(text)?.group(2) ?? text;
+}
+
+class NoteTable extends NoteBodyBlock {
+  const NoteTable({required this.header, required this.rows});
+
+  final List<String> header;
+  final List<NoteTableRow> rows;
+}
+
+class NoteTableRow {
+  const NoteTableRow(this.cells);
+
+  final List<String> cells;
+
+  /// Her option: the first cell's wikilink target, or its plain text.
+  String get option {
+    final first = cells.isEmpty ? '' : cells.first;
+    final link = RegExp(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]').firstMatch(first);
+    return (link?.group(1) ?? first).trim();
+  }
+}
+
+/// Splits a card body into lines and tables. Consecutive `|` lines form a table;
+/// its first line is the header and `| --- |` separator lines are skipped.
+List<NoteBodyBlock> parseNoteBody(String body) {
+  final blocks = <NoteBodyBlock>[];
+  List<List<String>>? table;
+
+  void closeTable() {
+    final rows = table;
+    if (rows == null) return;
+    blocks.add(NoteTable(
+      header: rows.first,
+      rows: [for (final row in rows.skip(1)) NoteTableRow(row)],
+    ));
+    table = null;
+  }
+
+  for (final raw in body.replaceAll('\r\n', '\n').split('\n')) {
+    final line = raw.trimRight();
+    if (line.trimLeft().startsWith('|')) {
+      final cells = _tableCells(line);
+      if (cells.every((cell) => RegExp(r'^:?-{3,}:?$').hasMatch(cell))) {
+        continue;
+      }
+      (table ??= <List<String>>[]).add(cells);
+      continue;
+    }
+    closeTable();
+    blocks.add(NoteTextLine(line));
+  }
+  closeTable();
+  while (blocks.isNotEmpty &&
+      blocks.last is NoteTextLine &&
+      (blocks.last as NoteTextLine).text.isEmpty) {
+    blocks.removeLast();
+  }
+  return blocks;
+}
+
+List<String> _tableCells(String line) {
+  var text = line.trim();
+  if (text.startsWith('|')) text = text.substring(1);
+  if (text.endsWith('|')) text = text.substring(0, text.length - 1);
+  // Split on `|`, but not inside a `[[target|alias]]` wikilink.
+  final cells = <String>[];
+  final cell = StringBuffer();
+  var depth = 0;
+  for (var index = 0; index < text.length; index++) {
+    if (text.startsWith('[[', index)) {
+      depth++;
+    } else if (text.startsWith(']]', index) && depth > 0) {
+      depth--;
+    }
+    final char = text[index];
+    if (char == '|' && depth == 0) {
+      cells.add(cell.toString().trim());
+      cell.clear();
+    } else {
+      cell.write(char);
+    }
+  }
+  cells.add(cell.toString().trim());
+  return cells;
 }
 
 ClipSituation? _fallbackSituation(

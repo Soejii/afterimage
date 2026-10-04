@@ -113,6 +113,91 @@ void main() {
     });
   });
 
+  group('situation tables', () {
+    const body = 'she is -13 at range\n'
+        '\n'
+        '| her option | times | beats | loses to | you did |\n'
+        '| --- | --- | --- | --- | --- |\n'
+        '| [[Elphelt 2H]] | 2 | backdash | dash, [[Ky 2P]] | backdash hit x2 |\n'
+        '| no attack | 1 | untested | untested | dash won |\n'
+        '\n'
+        'habit: backdash 2 of 2 hit\n'
+        'lab: record MC > 2H\n'
+        'seen: batch_x 01:34, 03:39';
+
+    test('a card body splits into lines and one table with row options', () {
+      final blocks = parseNoteBody(body);
+
+      expect(blocks, hasLength(7));
+      expect((blocks[0] as NoteTextLine).text, 'she is -13 at range');
+      final table = blocks[2] as NoteTable;
+      expect(table.header,
+          ['her option', 'times', 'beats', 'loses to', 'you did']);
+      expect(table.rows.map((row) => row.option), ['Elphelt 2H', 'no attack']);
+      expect(table.rows.first.cells[3], 'dash, [[Ky 2P]]');
+      expect((blocks[4] as NoteTextLine).label, 'habit');
+      expect((blocks[4] as NoteTextLine).rest, 'backdash 2 of 2 hit');
+      expect((blocks[5] as NoteTextLine).label, 'lab');
+    });
+
+    test('a wikilink alias pipe inside a cell does not split the cell', () {
+      final table = parseNoteBody(
+        '| her option | times |\n'
+        '| --- | --- |\n'
+        '| [[Elphelt 2H|2H]] | 2 |',
+      ).single as NoteTable;
+
+      expect(table.rows.single.cells, ['[[Elphelt 2H|2H]]', '2']);
+      expect(table.rows.single.option, 'Elphelt 2H');
+    });
+
+    test('rows take the clips cut for their option', () {
+      NoteClip clip(String file, String? option, String? herNext) =>
+          NoteClip.fromJson({
+            'file': file,
+            'option': option,
+            'her_next': herNext,
+            'outcome': 'hit',
+          });
+      final clips = [
+        clip('a.mp4', 'Elphelt 2H', 'Elphelt 2H'),
+        clip('b.mp4', 'no attack', null),
+        clip('c.mp4', null, 'Elphelt 2H'),
+        clip('d.mp4', null, null),
+      ];
+
+      expect(clipsForOption(clips, 'Elphelt 2H').map((c) => c.file),
+          ['a.mp4', 'c.mp4']);
+      expect(clipsForOption(clips, 'no attack').map((c) => c.file),
+          ['b.mp4', 'd.mp4']);
+    });
+
+    test('a situation keeps every clip, not only four', () {
+      final clips = [
+        for (var index = 0; index < 9; index++)
+          NoteClip.fromJson({'file': '$index.mp4', 'outcome': 'hit'}),
+      ];
+      final index = ClipIndex(
+        video: null,
+        situations: [
+          ClipSituation(
+            heading: '### blocked [[Elphelt 2H]]',
+            entry: 'block',
+            posture: 'ground',
+            herMoveLink: 'Elphelt 2H',
+            clips: clips,
+          ),
+        ],
+        errors: const [],
+      );
+
+      expect(
+        matchClipsForCard(const NoteCard('### blocked [[Elphelt 2H]]'), index),
+        hasLength(9),
+      );
+    });
+  });
+
   group('finder status and apply mapping', () {
     test('running with a dead pid is failed, while other statuses parse', () {
       for (final state in [

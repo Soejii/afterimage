@@ -287,6 +287,139 @@ void main() {
     expect(session.disposeCalls, 1);
   });
 
+  testWidgets('a table card plays the clip of the row that was tapped',
+      (tester) async {
+    final opened = <String>[];
+    final sessions = <_FakeClipSession>[];
+    final clipDirectory = _createTempDirectory('afterimage-table-clips');
+    Directory('${clipDirectory.path}/clips').createSync();
+    for (final name in ['s1-1.mp4', 's1-2.mp4']) {
+      File('${clipDirectory.path}/clips/$name').createSync();
+    }
+    addTearDown(() => _deleteTempEntity(clipDirectory));
+    final preview = _preview(
+      batchLabel: 'batch-table',
+      opponent: 'Elphelt',
+      sectionPath: '${clipDirectory.path}/section.md',
+    );
+    const heading = '### blocked [[Elphelt Miss Charlotte]]';
+    NoteClip clip(String file, String time, String option) => NoteClip(
+          file: file,
+          poster: null,
+          replay: 1,
+          videoTime: time,
+          videoTimeMs: 1000,
+          startMs: 0,
+          endMs: 3000,
+          herNext: option == 'no attack' ? null : option,
+          answer: 'backdash',
+          outcome: 'hit',
+          counterHit: false,
+          option: option,
+        );
+    final tableData = NoteSectionData(
+      preview: preview,
+      document: splitNoteSection(
+        '$heading\n'
+        'she is -13 at range\n\n'
+        '| her option | times | beats | loses to | you did |\n'
+        '| --- | --- | --- | --- | --- |\n'
+        '| [[Elphelt 2H]] | 2 | backdash | dash | backdash hit x2 |\n'
+        '| no attack | 1 | untested | untested | dash won |\n\n'
+        'habit: backdash got hit\n',
+      ),
+      warnings: const <String>[],
+      clipIndex: ClipIndex(
+        video: null,
+        situations: [
+          ClipSituation(
+            heading: heading,
+            entry: 'block',
+            posture: 'ground',
+            herMoveLink: 'Elphelt Miss Charlotte',
+            clips: [
+              clip('s1-1.mp4', '03:39', 'Elphelt 2H'),
+              clip('s1-2.mp4', '01:34', 'no attack'),
+            ],
+          ),
+        ],
+        errors: const <String>[],
+      ),
+    );
+
+    await tester.pumpWidget(_app(
+      NotesPage(
+        repository: _FakeNotesRepository(preview, tableData),
+        preview: preview,
+        onBack: () {},
+        playerFactory: (path) {
+          opened.add(path.split('/').last);
+          final session = _FakeClipSession();
+          sessions.add(session);
+          return session;
+        },
+      ),
+    ));
+    Finder keyed(String prefix, [String suffix = '']) => find.byWidgetPredicate(
+          (widget) =>
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith(prefix) &&
+              (widget.key! as ValueKey<String>).value.endsWith(suffix),
+        );
+    await _pumpUntilFound(tester, keyed('situation-table-'));
+
+    expect(find.text('HABIT  backdash got hit', findRichText: true),
+        findsOneWidget);
+    expect(find.byType(ChoiceChip), findsNothing);
+    final rowClip = keyed('row-clip-', '-s1-2.mp4');
+    await tester.ensureVisible(rowClip);
+    await tester.tap(rowClip);
+    await _settleIo(
+      tester,
+      () => sessions.isNotEmpty && sessions.single.playCalls == 1,
+    );
+
+    expect(opened, ['s1-2.mp4']);
+    expect(sessions.single.playCalls, 1);
+  });
+
+  testWidgets('a holding card without a table still gets its label',
+      (tester) async {
+    final directory = _createTempDirectory('afterimage-holding');
+    addTearDown(() => _deleteTempEntity(directory));
+    final preview = _preview(
+      batchLabel: 'batch-holding',
+      opponent: 'Elphelt',
+      sectionPath: '${directory.path}/section.md',
+    );
+    final holding = NoteSectionData(
+      preview: preview,
+      document: splitNoteSection(
+        '### blocked [[Elphelt 6P]]\n'
+        'holding: 5 times, never hit. you did: [[Ky 2P]] won x3\n'
+        'seen: batch-holding 05:12\n',
+      ),
+      warnings: const <String>[],
+      clipIndex: null,
+    );
+
+    await tester.pumpWidget(_app(NotesPage(
+      repository: _FakeNotesRepository(preview, holding),
+      preview: preview,
+      onBack: () {},
+    )));
+    await _pumpUntilFound(
+      tester,
+      find.textContaining('5 times, never hit', findRichText: true),
+    );
+
+    expect(
+      find.text('HOLDING  5 times, never hit. you did: Ky 2P won x3',
+          findRichText: true),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('missing clip files show unavailable without opening a session',
       (tester) async {
     var factoryCalls = 0;

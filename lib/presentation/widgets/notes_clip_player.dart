@@ -154,6 +154,7 @@ class NotesClipPlayer extends StatefulWidget {
     this.pauseRequested = false,
     this.onStarted,
     this.playerCardKey,
+    this.playRequest = 0,
   });
 
   final NoteClip clip;
@@ -162,6 +163,9 @@ class NotesClipPlayer extends StatefulWidget {
   final bool pauseRequested;
   final VoidCallback? onStarted;
   final Key? playerCardKey;
+
+  /// Bumped by the page to start this clip, e.g. from a table row's play button.
+  final int playRequest;
 
   @override
   State<NotesClipPlayer> createState() => _NotesClipPlayerState();
@@ -202,6 +206,15 @@ class _NotesClipPlayerState extends State<NotesClipPlayer> {
       if (session != null) unawaited(_pauseSession(session));
       _playing = false;
     }
+    if (widget.playRequest != oldWidget.playRequest) {
+      // After this frame: _play tells the page it started, and the page is
+      // mid-build right now.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        // Same clip asked for again: play it from the start.
+        unawaited(_play(fromStart: _session != null));
+      });
+    }
   }
 
   @override
@@ -213,7 +226,7 @@ class _NotesClipPlayerState extends State<NotesClipPlayer> {
 
   Future<void> _togglePlay() => _playing ? _pause() : _play();
 
-  Future<void> _play() async {
+  Future<void> _play({bool fromStart = false}) async {
     final request = ++_request;
     // Claim the page now, so a card clicked later can cancel this start.
     widget.onStarted?.call();
@@ -229,9 +242,10 @@ class _NotesClipPlayerState extends State<NotesClipPlayer> {
         await session.setLoop(_loop);
         if (!current()) return;
       }
-      if (!_loop &&
-          _duration > Duration.zero &&
-          _position >= _duration - const Duration(milliseconds: 100)) {
+      if (fromStart ||
+          !_loop &&
+              _duration > Duration.zero &&
+              _position >= _duration - const Duration(milliseconds: 100)) {
         await session.seek(Duration.zero);
         if (!current()) return;
       }

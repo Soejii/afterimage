@@ -232,6 +232,7 @@ class _NotesPageState extends State<NotesPage> {
   bool _saving = false;
   bool _applying = false;
   final Map<String, int> _selectedClips = <String, int>{};
+  final Map<String, int> _playRequests = <String, int>{};
   String? _playingCard;
   ApplySectionResult? _applyResult;
   ScaffoldMessengerState? _scaffoldMessenger;
@@ -503,7 +504,7 @@ class _NotesPageState extends State<NotesPage> {
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 820),
+          constraints: const BoxConstraints(maxWidth: 1080),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -619,6 +620,8 @@ class _NotesPageState extends State<NotesPage> {
     final selected = (_selectedClips[cardKey] ?? 0) < clips.length
         ? _selectedClips[cardKey] ?? 0
         : 0;
+    final blocks = parseNoteBody(card.body);
+    final hasTable = blocks.any((block) => block is NoteTable);
     return Card(
       key: ValueKey('note-card-${card.id ?? index}'),
       margin: const EdgeInsets.only(bottom: 14),
@@ -661,7 +664,17 @@ class _NotesPageState extends State<NotesPage> {
                 textCapitalization: TextCapitalization.sentences,
               )
             else
-              _MarkdownNoteText(text: card.body),
+              _NoteBody(
+                blocks: blocks,
+                clips: clips,
+                selected: clips.isEmpty ? null : clips[selected],
+                cardKey: cardKey,
+                onPlay: (clip) => setState(() {
+                  _selectedClips[cardKey] = clips.indexOf(clip);
+                  _playRequests[cardKey] = (_playRequests[cardKey] ?? 0) + 1;
+                  _playingCard = cardKey;
+                }),
+              ),
             if (editing) ...[
               const SizedBox(height: 12),
               Row(
@@ -683,27 +696,31 @@ class _NotesPageState extends State<NotesPage> {
             ],
             if (!editing && clips.isNotEmpty) ...[
               const SizedBox(height: 14),
-              Wrap(
-                spacing: 7,
-                runSpacing: 7,
-                children: [
-                  for (var clipIndex = 0; clipIndex < clips.length; clipIndex++)
-                    ChoiceChip(
-                      key: ValueKey('clip-chip-$cardKey-$clipIndex'),
-                      label: Text(clips[clipIndex].caption()),
-                      selected: selected == clipIndex,
-                      onSelected: (_) => setState(() {
-                        _selectedClips[cardKey] = clipIndex;
-                        _playingCard = null;
-                      }),
-                    ),
-                ],
-              ),
+              if (!hasTable)
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: [
+                    for (var clipIndex = 0;
+                        clipIndex < clips.length;
+                        clipIndex++)
+                      ChoiceChip(
+                        key: ValueKey('clip-chip-$cardKey-$clipIndex'),
+                        label: Text(clips[clipIndex].caption()),
+                        selected: selected == clipIndex,
+                        onSelected: (_) => setState(() {
+                          _selectedClips[cardKey] = clipIndex;
+                          _playingCard = null;
+                        }),
+                      ),
+                  ],
+                ),
               NotesClipPlayer(
                 playerCardKey: playerCardKey,
                 clip: clips[selected],
                 filePath: _clipPath(data.preview, clips[selected]),
                 playerFactory: widget.playerFactory,
+                playRequest: _playRequests[cardKey] ?? 0,
                 pauseRequested: _playingCard != null && _playingCard != cardKey,
                 onStarted: () {
                   if (mounted) setState(() => _playingCard = cardKey);
@@ -758,39 +775,249 @@ class _NotesPageState extends State<NotesPage> {
   String _cardKey(NoteCard card, int index) => card.id ?? '$index';
 }
 
-class _MarkdownNoteText extends StatelessWidget {
-  const _MarkdownNoteText({required this.text});
+/// A situation card body: lines, labelled lines and the her-option table.
+class _NoteBody extends StatelessWidget {
+  const _NoteBody({
+    required this.blocks,
+    required this.clips,
+    required this.selected,
+    required this.cardKey,
+    required this.onPlay,
+  });
 
-  final String text;
+  final List<NoteBodyBlock> blocks;
+  final List<NoteClip> clips;
+  final NoteClip? selected;
+  final String cardKey;
+  final ValueChanged<NoteClip> onPlay;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final lines = text.split('\n');
-    final spans = <InlineSpan>[];
-    for (var index = 0; index < lines.length; index++) {
-      final line = lines[index];
-      final subtle = line.startsWith('lab:') || line.startsWith('seen:');
-      spans.addAll(
-        _wikilinkSpans(
-          line,
-          baseStyle: theme.textTheme.bodyMedium?.copyWith(
-            color: subtle
-                ? theme.colorScheme.onSurfaceVariant
-                : theme.colorScheme.onSurface,
-            height: 1.45,
-            fontStyle: subtle ? FontStyle.italic : FontStyle.normal,
-          ),
-          linkStyle: theme.textTheme.bodyMedium?.copyWith(
-            color: AfterimageTheme.accent,
-            fontWeight: FontWeight.w700,
-            height: 1.45,
-          ),
+    final base = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurface,
+      height: 1.45,
+    );
+    final link = base?.copyWith(
+      color: AfterimageTheme.accent,
+      fontWeight: FontWeight.w700,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final block in blocks)
+          switch (block) {
+            NoteTable() => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: _SituationTable(
+                  table: block,
+                  clips: clips,
+                  selected: selected,
+                  cardKey: cardKey,
+                  onPlay: onPlay,
+                ),
+              ),
+            NoteTextLine(text: '') => const SizedBox(height: 6),
+            NoteTextLine() => Padding(
+                padding: const EdgeInsets.only(bottom: 3),
+                child: _labelledLine(theme, block, base, link),
+              ),
+          },
+      ],
+    );
+  }
+
+  Widget _labelledLine(
+    ThemeData theme,
+    NoteTextLine line,
+    TextStyle? base,
+    TextStyle? link,
+  ) {
+    final label = line.label;
+    if (label == null) {
+      return Text.rich(
+        TextSpan(
+          children: _wikilinkSpans(line.text, baseStyle: base, linkStyle: link),
         ),
       );
-      if (index < lines.length - 1) spans.add(const TextSpan(text: '\n'));
     }
-    return Text.rich(TextSpan(children: spans));
+    final subtle = label == 'seen';
+    final textStyle = subtle
+        ? base?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontStyle: FontStyle.italic,
+          )
+        : base;
+    final labelColor = switch (label) {
+      'holding' => AfterimageTheme.ready,
+      'seen' => theme.colorScheme.onSurfaceVariant,
+      _ => AfterimageTheme.accent,
+    };
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: '${label.toUpperCase()}  ',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: labelColor,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.8,
+            ),
+          ),
+          ..._wikilinkSpans(
+            line.rest,
+            baseStyle: textStyle,
+            linkStyle: subtle ? textStyle : link,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Her options after the situation, one row each, with that row's clips.
+class _SituationTable extends StatelessWidget {
+  const _SituationTable({
+    required this.table,
+    required this.clips,
+    required this.selected,
+    required this.cardKey,
+    required this.onPlay,
+  });
+
+  final NoteTable table;
+  final List<NoteClip> clips;
+  final NoteClip? selected;
+  final String cardKey;
+  final ValueChanged<NoteClip> onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final columns = table.header.length;
+    final cellStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurface,
+      height: 1.35,
+    );
+    final linkStyle = cellStyle?.copyWith(
+      color: AfterimageTheme.accent,
+      fontWeight: FontWeight.w700,
+    );
+    final divider = BorderSide(color: theme.colorScheme.outlineVariant);
+
+    Widget cell(String text, {TextStyle? style, TextStyle? links}) => Padding(
+          padding: const EdgeInsets.fromLTRB(6, 7, 6, 7),
+          child: Text.rich(
+            TextSpan(
+              children: _wikilinkSpans(
+                text,
+                baseStyle: style ?? cellStyle,
+                linkStyle: links ?? linkStyle,
+              ),
+            ),
+          ),
+        );
+
+    return Table(
+      key: ValueKey('situation-table-$cardKey'),
+      defaultVerticalAlignment: TableCellVerticalAlignment.top,
+      columnWidths: {
+        for (var column = 0; column < columns; column++)
+          column: switch (table.header[column].toLowerCase()) {
+            'times' => const IntrinsicColumnWidth(),
+            'you did' => const FlexColumnWidth(1.6),
+            'her option' => const FlexColumnWidth(1.15),
+            _ => const FlexColumnWidth(1.3),
+          },
+        columns: const IntrinsicColumnWidth(),
+      },
+      children: [
+        TableRow(
+          decoration: BoxDecoration(border: Border(bottom: divider)),
+          children: [
+            for (final title in table.header)
+              cell(
+                title.toUpperCase(),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            cell(
+              'CLIPS',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ],
+        ),
+        for (final row in table.rows) _row(theme, row, columns, cell, divider),
+      ],
+    );
+  }
+
+  TableRow _row(
+    ThemeData theme,
+    NoteTableRow row,
+    int columns,
+    Widget Function(String, {TextStyle? style, TextStyle? links}) cell,
+    BorderSide divider,
+  ) {
+    final rowClips = clipsForOption(clips, row.option);
+    final active = selected != null && rowClips.contains(selected);
+    final cells = [
+      for (var column = 0; column < columns; column++)
+        column < row.cells.length ? row.cells[column] : '',
+    ];
+    final optionStyle = theme.textTheme.bodySmall?.copyWith(
+      color: AfterimageTheme.accent,
+      fontWeight: FontWeight.w800,
+      height: 1.35,
+    );
+    return TableRow(
+      decoration: BoxDecoration(
+        color: active ? theme.colorScheme.surfaceContainerHighest : null,
+        border: Border(bottom: divider),
+      ),
+      children: [
+        for (var column = 0; column < columns; column++)
+          column == 0
+              ? cell(cells[column], style: optionStyle, links: optionStyle)
+              : cell(cells[column]),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(2, 3, 2, 3),
+          child: Wrap(
+            spacing: 2,
+            runSpacing: 2,
+            children: [
+              for (final clip in rowClips)
+                Tooltip(
+                  message: clip.caption(),
+                  child: TextButton.icon(
+                    key: ValueKey('row-clip-$cardKey-${clip.file}'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      minimumSize: const Size(0, 30),
+                      foregroundColor: identical(clip, selected)
+                          ? AfterimageTheme.accentStrong
+                          : clip.outcome == 'hit'
+                              ? theme.colorScheme.error
+                              : theme.colorScheme.onSurfaceVariant,
+                    ),
+                    onPressed: () => onPlay(clip),
+                    icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                    label: Text(clip.videoTime ?? clip.file),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }
 
