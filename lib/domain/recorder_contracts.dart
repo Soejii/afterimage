@@ -22,6 +22,12 @@ abstract interface class ReplayMonitorPort {
   Future<void> close();
 }
 
+/// Optional monitor detail that lets frame capture reuse the resolved static
+/// GWorld pointer address without making the engine depend on Linux adapters.
+abstract interface class ReplayMonitorGWorldPointerPort {
+  int? get gWorldPointerAddress;
+}
+
 /// Semantic actions keep the engine independent of keyboard and controller
 /// details. Each platform/input adapter maps these actions to its own device.
 enum ReplayMenuAction {
@@ -88,6 +94,84 @@ abstract interface class SummaryWriterPort {
 abstract interface class ClosableSummaryWriterPort
     implements SummaryWriterPort {
   Future<void> close();
+}
+
+/// Optional replay frame capture. Capture data is auxiliary, so implementations
+/// report their own failure instead of changing the recording result.
+abstract interface class FrameCapturePort {
+  Future<void> start({
+    required int replayIndex,
+    required String outputPath,
+    int? gWorldPointerAddress,
+  });
+
+  Future<FrameCaptureResult> stop({required FrameCaptureEndReason reason});
+
+  Future<void> close();
+}
+
+/// Optional emergency stop used when a capture isolate does not respond to a
+/// normal stop request within the batch safety bound.
+abstract interface class AbortableFrameCapturePort {
+  Future<FrameCaptureResult> abort();
+}
+
+class NoopFrameCapturePort implements FrameCapturePort {
+  const NoopFrameCapturePort();
+
+  @override
+  Future<void> start({
+    required int replayIndex,
+    required String outputPath,
+    int? gWorldPointerAddress,
+  }) async {}
+
+  @override
+  Future<FrameCaptureResult> stop(
+          {required FrameCaptureEndReason reason}) async =>
+      const FrameCaptureResult();
+
+  @override
+  Future<void> close() async {}
+}
+
+/// Optional extension for platform backends that implement frame capture.
+/// Existing backend fakes and unsupported platforms need not implement it.
+abstract interface class FrameCaptureAwareNativeRecorderBackend {
+  bool get supportsFrameCapture;
+
+  String? get frameCaptureUnsupportedReason;
+
+  Future<FrameCapturePort> openFrameCapture();
+}
+
+/// Optional engine extension so existing engine factories remain compatible.
+abstract interface class FrameCaptureAwareRecordingEngine
+    implements RecordingEngine {
+  void configureFrameCapture(FrameCapturePort port);
+}
+
+class FailedFrameCapturePort implements FrameCapturePort {
+  const FailedFrameCapturePort(this.failure);
+
+  final Object failure;
+
+  @override
+  Future<void> start({
+    required int replayIndex,
+    required String outputPath,
+    int? gWorldPointerAddress,
+  }) async {
+    throw failure;
+  }
+
+  @override
+  Future<FrameCaptureResult> stop(
+          {required FrameCaptureEndReason reason}) async =>
+      FrameCaptureResult(error: failure.toString());
+
+  @override
+  Future<void> close() async {}
 }
 
 class NoopSummaryWriter implements SummaryWriterPort {

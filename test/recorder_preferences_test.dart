@@ -25,6 +25,7 @@ void main() {
         'replayCount': 'one',
         'customReplayCount': 1,
         'videoMode': 'separate',
+        'captureFrameData': true,
         'password': 'must not persist',
         'obsWebSocketPassword': 'must not persist',
       });
@@ -40,6 +41,7 @@ void main() {
         'replayCount': 'one',
         'customReplayCount': 1,
         'videoMode': 'separate',
+        'captureFrameData': true,
       });
     });
 

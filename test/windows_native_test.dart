@@ -205,6 +205,19 @@ void main() {
       expect(snapshot.enginePresent, isFalse);
     });
 
+    test('turns a garbage pointer with the high bit set into an empty snapshot',
+        () async {
+      final fake = _FakeWindowsMemorySession.withGWorldSignature();
+      final monitor = WindowsReplayMonitor(memoryFactory: (_) => fake);
+
+      await monitor.attach();
+      // GGST can leave freed memory in the chain while it loads a replay.
+      fake._writePointer(0x2130, 0xDEADBEEFDEADBEEF);
+      final snapshot = await monitor.snapshot();
+
+      expect(snapshot.enginePresent, isFalse);
+    });
+
     test('propagates persistent process-memory denial during a snapshot',
         () async {
       final fake = _FakeWindowsMemorySession.withGWorldSignature();
@@ -616,6 +629,9 @@ class _FakeWindowsMemorySession implements WindowsMemorySession {
 
   @override
   List<int> readBytes(int address, int length) {
+    if (address < 0 || length < 0) {
+      throw ArgumentError('Memory address and length must not be negative.');
+    }
     if (throwOnPatternReads && address == module.baseAddress) {
       throw const WindowsNativeException(
         WindowsNativeErrorCode.processMemoryDenied,

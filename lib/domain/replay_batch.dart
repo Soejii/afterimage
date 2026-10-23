@@ -103,6 +103,7 @@ class ReplayBatchTiming {
     this.startupDelay = const Duration(seconds: 5),
     this.menuDelay = const Duration(seconds: 2),
     this.actionDelay = const Duration(milliseconds: 800),
+    this.frameCaptureStopTimeout = const Duration(seconds: 3),
     this.absentReadWindow = const Duration(seconds: 3),
     this.listConfirmationPolls = 4,
   });
@@ -115,6 +116,7 @@ class ReplayBatchTiming {
   final Duration startupDelay;
   final Duration menuDelay;
   final Duration actionDelay;
+  final Duration frameCaptureStopTimeout;
   final Duration absentReadWindow;
   final int listConfirmationPolls;
 
@@ -152,6 +154,7 @@ enum ReplayBatchEventType {
   outputSaved,
   replayFailed,
   replayStopped,
+  diagnostic,
   stopped,
   completed,
   failed,
@@ -218,6 +221,60 @@ class OrganizedOutput {
   final int? replayIndex;
 }
 
+enum FrameCaptureEndReason {
+  completed,
+  stopped,
+  timeout,
+  failed,
+}
+
+/// Statistics returned by a frame-capture adapter when a replay is stopped.
+class FrameCaptureResult {
+  const FrameCaptureResult({
+    this.rows = 0,
+    this.frameGaps = 0,
+    this.maxFrameGap = 0,
+    this.readErrors = 0,
+    this.path,
+    this.error,
+  });
+
+  final int rows;
+  final int frameGaps;
+  final int maxFrameGap;
+  final int readErrors;
+  final String? path;
+  final String? error;
+}
+
+/// Per-replay capture metadata saved in `summary.json`.
+class ReplayCaptureSummary {
+  const ReplayCaptureSummary({
+    required this.videoOffsetMs,
+    required this.rows,
+    required this.frameGaps,
+    required this.maxFrameGap,
+    this.path,
+    this.error,
+  });
+
+  final String? path;
+  final int videoOffsetMs;
+  final int rows;
+  final int frameGaps;
+  final int maxFrameGap;
+  final String? error;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        'path': path,
+        'videoOffsetMs': videoOffsetMs,
+        'rows': rows,
+        'frameGaps': frameGaps,
+        'maxFrameGap': maxFrameGap,
+        'error': error,
+      };
+}
+
 enum ReplayResultStatus {
   recorded,
   failed,
@@ -231,6 +288,7 @@ class ReplayResult {
     this.output,
     this.sourceOutput,
     this.error,
+    this.capture,
   });
 
   final int index;
@@ -238,6 +296,7 @@ class ReplayResult {
   final OrganizedOutput? output;
   final RecordedOutput? sourceOutput;
   final Object? error;
+  final ReplayCaptureSummary? capture;
 }
 
 class ReplayBatchResult {

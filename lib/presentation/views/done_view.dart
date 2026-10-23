@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../domain/replay_batch.dart';
+import '../../domain/notes_models.dart';
+import '../../services/notes_repository.dart';
 import '../batch_outcome_summary.dart';
 import '../recorder_controller.dart';
 import '../replay_timeline.dart';
@@ -18,9 +20,18 @@ import '../widgets/status_surface.dart';
 /// running state, because with one combined video it is the only record of
 /// which replays actually made it in.
 class DoneView extends StatelessWidget {
-  const DoneView({super.key, required this.controller});
+  const DoneView({
+    super.key,
+    required this.controller,
+    this.notesRepository,
+    this.onOpenNotes,
+    this.now = DateTime.now,
+  });
 
   final RecorderController controller;
+  final NotesRepository? notesRepository;
+  final VoidCallback? onOpenNotes;
+  final DateTime Function() now;
 
   @override
   Widget build(BuildContext context) {
@@ -106,6 +117,13 @@ class DoneView extends StatelessWidget {
                   ),
                 ),
               ],
+              if (notesRepository != null && onOpenNotes != null)
+                _NotesStatusPanel(
+                  controller: controller,
+                  repository: notesRepository!,
+                  onOpen: onOpenNotes!,
+                  now: now,
+                ),
               const SizedBox(height: 20),
               _OutputPanel(controller: controller),
               const SizedBox(height: 22),
@@ -134,6 +152,215 @@ class DoneView extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _NotesStatusPanel extends StatefulWidget {
+  const _NotesStatusPanel({
+    required this.controller,
+    required this.repository,
+    required this.onOpen,
+    required this.now,
+  });
+
+  final RecorderController controller;
+  final NotesRepository repository;
+  final VoidCallback onOpen;
+  final DateTime Function() now;
+
+  @override
+  State<_NotesStatusPanel> createState() => _NotesStatusPanelState();
+}
+
+class _NotesStatusPanelState extends State<_NotesStatusPanel> {
+  static const _runFileTimeout = Duration(seconds: 60);
+
+  Timer? _poll;
+  List<NotePreview> _previews = const <NotePreview>[];
+  Object? _error;
+  String? _missingRunMessage;
+  late DateTime _now;
+
+  @override
+  void initState() {
+    super.initState();
+    _now = widget.now();
+    unawaited(_refresh());
+    _poll = Timer.periodic(const Duration(seconds: 3), (_) {
+      unawaited(_refresh());
+    });
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    final label = widget.controller.finderBatchLabel;
+    if (label == null) return;
+    try {
+      await widget.controller.refreshFinderStatus();
+      final previews = await widget.repository.list();
+      if (!mounted) return;
+      final run = widget.controller.finderRun;
+      final now = widget.now();
+      final missingTooLong = run == null && _hasFinderTimedOut(label, now);
+      if ((run != null && run.state != FinderRunState.running) ||
+          missingTooLong) {
+        _poll?.cancel();
+        _poll = null;
+      }
+      setState(() {
+        _previews = previews
+            .where((preview) => preview.batchLabel == label)
+            .toList(growable: false);
+        _error = null;
+        _missingRunMessage = missingTooLong
+            ? 'The notes finder did not start. See ${widget.repository.runLogPath(label)}.'
+            : null;
+        _now = now;
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error;
+        _now = widget.now();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = widget.controller.finderBatchLabel;
+    if (label == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final run = widget.controller.finderRun;
+    final finderError = widget.controller.finderError;
+    final missingRunMessage = _missingRunMessage;
+    if (_error != null ||
+        finderError != null ||
+        missingRunMessage != null ||
+        run?.state == FinderRunState.failed) {
+      final message = finderError ??
+          missingRunMessage ??
+          run?.message ??
+          'The notes finder could not finish.';
+      return Padding(
+        padding: const EdgeInsets.only(top: 20),
+        child: StatusSurface(
+          tone: StatusTone.failed,
+          icon: Icons.error_outline,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Notes failed: $message'),
+              const SizedBox(height: 5),
+              Text(
+                'Log: ${widget.repository.runLogPath(label)}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (run == null || run.state == FinderRunState.running) {
+      final started = run?.startedAt;
+      final elapsed =
+          started == null ? null : _now.difference(started.toLocal());
+      return Padding(
+        padding: const EdgeInsets.only(top: 20),
+        child: Card(
+          key: const ValueKey('notes-status'),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    elapsed == null
+                        ? 'Writing notes...'
+                        : 'Writing notes... ${formatElapsed(elapsed)}',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    if (run.state == FinderRunState.nothing) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 20),
+        child: StatusSurface(
+          tone: StatusTone.blocked,
+          icon: Icons.notes_outlined,
+          child: Text('No situation came up often enough.'),
+        ),
+      );
+    }
+
+    final written = _previews.where((preview) => !preview.isLegacy).toList();
+    final opponents = written.isNotEmpty
+        ? written
+            .map((preview) =>
+                '${preview.opponent} (${preview.cardCount} ${preview.cardCount == 1 ? 'situation' : 'situations'})')
+            .join(', ')
+        : run.opponents
+            .where((opponent) => opponent.status == 'written')
+            .map((opponent) =>
+                '${opponent.name} (${opponent.situations ?? 0} ${opponent.situations == 1 ? 'situation' : 'situations'})')
+            .join(', ');
+    return Padding(
+      padding: const EdgeInsets.only(top: 20),
+      child: Card(
+        key: const ValueKey('notes-status'),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  opponents.isEmpty
+                      ? 'No situation came up often enough.'
+                      : 'Notes ready: $opponents',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: AfterimageTheme.readyText,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (opponents.isNotEmpty)
+                TextButton(
+                  key: const ValueKey('open-notes-from-done'),
+                  onPressed: widget.onOpen,
+                  child: const Text('Open'),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _hasFinderTimedOut(String label, DateTime now) {
+    final started = widget.controller.finderStartedAt;
+    return started != null &&
+        now.difference(started) >= _runFileTimeout &&
+        widget.controller.finderBatchLabel == label;
   }
 }
 

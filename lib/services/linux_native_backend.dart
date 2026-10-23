@@ -8,6 +8,7 @@ import 'linux_menu_input.dart';
 import 'linux_native_errors.dart';
 import 'linux_process_memory.dart';
 import 'linux_replay_monitor.dart';
+import 'linux_frame_capture.dart';
 import 'linux_evdev_controller.dart';
 import 'obs_config_discovery.dart';
 import 'obs_websocket_recorder.dart';
@@ -47,7 +48,10 @@ class SystemLinuxNativeLibraryProbe implements LinuxNativeLibraryProbe {
 /// desktop Start action remains locked until the app wires a complete
 /// platform backend into its setup report.
 class LinuxNativeRecorderBackend
-    implements NativeRecorderBackend, InputModeAwareNativeRecorderBackend {
+    implements
+        NativeRecorderBackend,
+        InputModeAwareNativeRecorderBackend,
+        FrameCaptureAwareNativeRecorderBackend {
   LinuxNativeRecorderBackend({
     this.obsDiscovery = const ObsWebSocketConfigDiscovery(),
     this.obsConfig,
@@ -95,6 +99,12 @@ class LinuxNativeRecorderBackend
   final LinuxEvdevControllerDiscovery controllerDiscovery;
   final LinuxEvdevReadinessProbe controllerProbe;
   final LinuxEvdevDeviceFactory controllerFactory;
+
+  @override
+  bool get supportsFrameCapture => true;
+
+  @override
+  String? get frameCaptureUnsupportedReason => null;
 
   @override
   Future<NativeBackendReadiness> inspect() async {
@@ -234,6 +244,12 @@ class LinuxNativeRecorderBackend
   Future<OutputOrganizerPort> openOutputOrganizer() async {
     _ensureLinux();
     return outputOrganizerFactory();
+  }
+
+  @override
+  Future<FrameCapturePort> openFrameCapture() async {
+    _ensureLinux();
+    return LinuxFrameCapture(processName: ggstLinuxExecutable);
   }
 
   Future<LinuxReadinessCheck> _inspectGame() async {

@@ -56,6 +56,7 @@ void main() {
       videoMode: VideoMode.separate,
       inputMode: InputMode.keyboard,
       outputDirectory: '/tmp/captures',
+      captureFrameData: true,
     );
     final changed = original.copyWith(replayCount: ReplayCountOption.all);
 
@@ -63,6 +64,8 @@ void main() {
     expect(changed.videoMode, VideoMode.separate);
     expect(changed.inputMode, InputMode.keyboard);
     expect(changed.outputDirectory, '/tmp/captures');
+    expect(changed.captureFrameData, isTrue);
+    expect(changed.copyWith(captureFrameData: false).captureFrameData, isFalse);
   });
 }
 

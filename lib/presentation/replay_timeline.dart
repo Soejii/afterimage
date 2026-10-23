@@ -40,6 +40,7 @@ ReplayOutcome? outcomeFromEvent(ReplayBatchEvent event) {
     case ReplayBatchEventType.stateChanged:
     case ReplayBatchEventType.replayStarted:
     case ReplayBatchEventType.battleStarted:
+    case ReplayBatchEventType.diagnostic:
     case ReplayBatchEventType.outputSaved:
     case ReplayBatchEventType.stopped:
     case ReplayBatchEventType.completed:

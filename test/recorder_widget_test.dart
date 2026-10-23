@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -112,6 +114,73 @@ void main() {
       find.textContaining('Not available in the current backend.'),
       findsNothing,
     );
+  });
+
+  testWidgets('frame capture is disabled with a reason when unsupported',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = _controller(
+      _FakeBackend(),
+      _CompletingEngine(),
+      options: const RecordingOptions(outputDirectory: '/tmp/captures'),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      AfterimageApp(
+        setupService: _ReadySetupService(),
+        recorderController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('advanced-options')));
+    await tester.tap(find.byKey(const ValueKey('advanced-options')));
+    await tester.pumpAndSettle();
+
+    final captureOption = tester.widget<CheckboxListTile>(
+      find.byKey(const ValueKey('capture-frame-data')),
+    );
+    expect(captureOption.onChanged, isNull);
+    expect(
+      find.text(
+        Platform.isWindows
+            ? 'Frame capture is not available on Windows yet.'
+            : 'Frame capture is not available in this build.',
+      ),
+      findsOneWidget,
+    );
+    expect(controller.canStart, isTrue);
+  });
+
+  testWidgets('supported frame capture option can be toggled', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = _controller(
+      _CaptureAwareFakeBackend(),
+      _CompletingEngine(),
+      options: const RecordingOptions(outputDirectory: '/tmp/captures'),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      AfterimageApp(
+        setupService: _ReadySetupService(),
+        recorderController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('advanced-options')));
+    await tester.tap(find.byKey(const ValueKey('advanced-options')));
+    await tester.pumpAndSettle();
+
+    final captureOption = tester.widget<CheckboxListTile>(
+      find.byKey(const ValueKey('capture-frame-data')),
+    );
+    expect(captureOption.onChanged, isNotNull);
+    await tester.tap(find.byKey(const ValueKey('capture-frame-data')));
+    await tester.pumpAndSettle();
+    expect(controller.options.captureFrameData, isTrue);
   });
 
   testWidgets('the phase indicator follows selected input readiness changes',
@@ -287,6 +356,19 @@ class _FakeBackend
 
   @override
   Future<OutputOrganizerPort> openOutputOrganizer() async => _FakeOrganizer();
+}
+
+class _CaptureAwareFakeBackend extends _FakeBackend
+    implements FrameCaptureAwareNativeRecorderBackend {
+  @override
+  bool get supportsFrameCapture => true;
+
+  @override
+  String? get frameCaptureUnsupportedReason => null;
+
+  @override
+  Future<FrameCapturePort> openFrameCapture() async =>
+      const NoopFrameCapturePort();
 }
 
 class _CompletingEngine implements RecordingEngine {

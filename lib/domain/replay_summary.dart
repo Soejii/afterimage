@@ -15,6 +15,7 @@ class ReplaySummaryEntry {
     this.outputPath,
     this.partial,
     this.error,
+    this.capture,
   });
 
   factory ReplaySummaryEntry.fromResult(ReplayResult result) {
@@ -25,6 +26,7 @@ class ReplaySummaryEntry {
       outputPath: result.output?.path,
       partial: result.output?.partial,
       error: result.error?.toString(),
+      capture: result.capture,
     );
   }
 
@@ -34,6 +36,7 @@ class ReplaySummaryEntry {
   final String? outputPath;
   final bool? partial;
   final String? error;
+  final ReplayCaptureSummary? capture;
 
   Map<String, Object?> toJson() {
     return {
@@ -43,6 +46,7 @@ class ReplaySummaryEntry {
       'output': outputPath,
       'partial': partial,
       'error': error,
+      'capture': capture?.toJson(),
     };
   }
 }
@@ -88,7 +92,7 @@ class ReplayBatchSummary {
 
   Map<String, Object?> toJson() {
     return {
-      'schemaVersion': 1,
+      'schemaVersion': 2,
       'updatedAt': updatedAt.toUtc().toIso8601String(),
       'outcome': outcome.name,
       'replays': replays.map((replay) => replay.toJson()).toList(),

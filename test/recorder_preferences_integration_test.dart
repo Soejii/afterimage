@@ -15,6 +15,7 @@ void main() {
       'customReplayCount': 12,
       'inputMode': 'virtualController',
       'videoMode': 'combined',
+      'captureFrameData': true,
       'outputDirectory': outputDirectory,
     });
     final controller = RecorderController(
@@ -28,6 +29,7 @@ void main() {
     expect(controller.options.customReplayCount, 12);
     expect(controller.options.inputMode, InputMode.controller);
     expect(controller.options.videoMode, VideoMode.combined);
+    expect(controller.options.captureFrameData, isTrue);
     expect(controller.options.outputDirectory, outputDirectory);
     controller.dispose();
   });
@@ -55,6 +57,7 @@ void main() {
     // one combined video, so a preferences file written by an older build must
     // not be able to put the engine back into per-replay mode.
     expect(controller.options.videoMode, VideoMode.combined);
+    expect(controller.options.captureFrameData, isFalse);
     expect(controller.options.outputDirectory, isEmpty);
     controller.dispose();
   });
@@ -77,6 +80,7 @@ void main() {
         inputMode: InputMode.controller,
         videoMode: VideoMode.combined,
         outputDirectory: Directory.systemTemp.path,
+        captureFrameData: true,
       ),
     );
     await preferences.preferences.flush();
@@ -89,13 +93,40 @@ void main() {
       'replayCount': 'custom',
       'customReplayCount': 8,
       'videoMode': 'combined',
+      'captureFrameData': true,
       'gameDirectory': null,
       'replayDirectory': null,
       'recentOutputs': <String>[],
       'recentOutputDirectory': null,
+      'finderDirectory': null,
     });
     expect(preferences.writes.single, isNot(contains('password')));
     expect(preferences.writes.single, isNot(contains('obsWebSocketPassword')));
+    controller.dispose();
+  });
+
+  test('changing options preserves the loaded finder directory', () async {
+    // Stored paths must be absolute on the host, so build one from its temp.
+    final finderDirectory =
+        '${Directory.systemTemp.path}${Platform.pathSeparator}ggst-input-tracker';
+    final preferences = _PreferencesHarness({
+      'finderDirectory': finderDirectory,
+    });
+    final controller = RecorderController(
+      backend: _PreferencesBackend(),
+      preferences: preferences.preferences,
+    );
+
+    await controller.initialize();
+    controller.updateOptions(
+      controller.options.copyWith(
+        replayCount: ReplayCountOption.custom,
+        customReplayCount: 2,
+      ),
+    );
+    await preferences.preferences.flush();
+
+    expect(preferences.writes.single['finderDirectory'], finderDirectory);
     controller.dispose();
   });
 

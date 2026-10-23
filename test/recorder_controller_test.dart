@@ -195,6 +195,166 @@ void main() {
     controller.dispose();
   });
 
+  test('enabled frame capture is opened and configured on the engine',
+      () async {
+    final capture = _RecordingCapture();
+    final backend = _CaptureAwareBackend(capture);
+    final engine = _FakeEngine();
+    final controller = RecorderController(
+      backend: backend,
+      options: const RecordingOptions(
+        outputDirectory: '/tmp/afterimage',
+        captureFrameData: true,
+      ),
+      engineFactory: ({
+        required monitor,
+        required menuInput,
+        required obs,
+        required organizer,
+        required onEvent,
+      }) {
+        engine.onEvent = onEvent;
+        return engine;
+      },
+    )..setSetupReport(_readyReport());
+    await controller.refreshReadiness();
+
+    final run = controller.startBatch();
+    await _waitUntil(() => engine.startCalls == 1);
+
+    expect(backend.frameCaptureOpens, 1);
+    expect(engine.configuredCapture, same(capture));
+    engine.complete(const ReplayBatchResult(
+      outcome: ReplayBatchOutcome.completed,
+      replays: <ReplayResult>[],
+    ));
+    await run;
+    controller.dispose();
+  });
+
+  test('disabled frame capture does not open or configure a capture port',
+      () async {
+    final capture = _RecordingCapture();
+    final backend = _CaptureAwareBackend(capture);
+    final engine = _FakeEngine();
+    final controller = RecorderController(
+      backend: backend,
+      options: const RecordingOptions(outputDirectory: '/tmp/afterimage'),
+      engineFactory: ({
+        required monitor,
+        required menuInput,
+        required obs,
+        required organizer,
+        required onEvent,
+      }) {
+        engine.onEvent = onEvent;
+        return engine;
+      },
+    )..setSetupReport(_readyReport());
+    await controller.refreshReadiness();
+
+    final run = controller.startBatch();
+    await _waitUntil(() => engine.startCalls == 1);
+
+    expect(backend.frameCaptureOpens, 0);
+    expect(engine.configuredCapture, isNull);
+    engine.complete(const ReplayBatchResult(
+      outcome: ReplayBatchOutcome.completed,
+      replays: <ReplayResult>[],
+    ));
+    await run;
+    controller.dispose();
+  });
+
+  test('capture setup failure reaches the engine as a failed port', () async {
+    final capture = _RecordingCapture();
+    final backend = _CaptureAwareBackend(capture)
+      ..throwOnFrameCaptureOpen = true;
+    final engine = _FakeEngine();
+    final controller = RecorderController(
+      backend: backend,
+      options: const RecordingOptions(
+        outputDirectory: '/tmp/afterimage',
+        captureFrameData: true,
+      ),
+      engineFactory: ({
+        required monitor,
+        required menuInput,
+        required obs,
+        required organizer,
+        required onEvent,
+      }) {
+        engine.onEvent = onEvent;
+        return engine;
+      },
+    )..setSetupReport(_readyReport());
+    await controller.refreshReadiness();
+
+    final run = controller.startBatch();
+    await _waitUntil(() => engine.startCalls == 1);
+
+    expect(engine.configuredCapture, isA<FailedFrameCapturePort>());
+    engine.complete(const ReplayBatchResult(
+      outcome: ReplayBatchOutcome.completed,
+      replays: <ReplayResult>[],
+    ));
+    await run;
+    controller.dispose();
+  });
+
+  test(
+      'capture diagnostics stay warnings instead of replacing the primary error',
+      () async {
+    final backend = _FakeBackend();
+    final engine = _FakeEngine();
+    final controller = RecorderController(
+      backend: backend,
+      options: const RecordingOptions(outputDirectory: '/tmp/afterimage'),
+      engineFactory: ({
+        required monitor,
+        required menuInput,
+        required obs,
+        required organizer,
+        required onEvent,
+      }) {
+        engine.onEvent = onEvent;
+        return engine;
+      },
+    )..setSetupReport(_readyReport());
+    await controller.refreshReadiness();
+
+    final run = controller.startBatch();
+    await _waitUntil(() => engine.startCalls == 1);
+    engine.onEvent?.call(
+      ReplayBatchEvent(
+        type: ReplayBatchEventType.diagnostic,
+        replayIndex: 1,
+        error: StateError('synthetic capture warning'),
+        message: 'Frame capture warning.',
+        progress: const ReplayBatchProgress(
+          state: ReplayBatchState.recordingReplay,
+          totalReplays: 1,
+          currentReplay: 1,
+          completedReplays: 0,
+        ),
+      ),
+    );
+
+    expect(controller.error, isNull);
+    expect(
+      controller.events
+          .where((event) => event.type == ReplayBatchEventType.diagnostic),
+      hasLength(1),
+    );
+
+    engine.complete(const ReplayBatchResult(
+      outcome: ReplayBatchOutcome.completed,
+      replays: <ReplayResult>[],
+    ));
+    await run;
+    controller.dispose();
+  });
+
   test('folder picker does not overwrite a path edited while it is open',
       () async {
     final pickerResult = Completer<String?>();
@@ -316,16 +476,22 @@ class _BlockingOutputPreflight implements OutputDirectoryPreflight {
   }
 }
 
-class _FakeEngine implements RecordingEngine {
+class _FakeEngine implements FrameCaptureAwareRecordingEngine {
   final Completer<ReplayBatchResult> _completion =
       Completer<ReplayBatchResult>();
   ReplayBatchEventSink? onEvent;
+  FrameCapturePort? configuredCapture;
   int startCalls = 0;
   int stopCalls = 0;
   bool _running = false;
 
   @override
   bool get isRunning => _running;
+
+  @override
+  void configureFrameCapture(FrameCapturePort port) {
+    configuredCapture = port;
+  }
 
   @override
   Future<ReplayBatchResult> startBatch(ReplayBatchRequest request) async {
@@ -359,6 +525,48 @@ class _FakeEngine implements RecordingEngine {
       _completion.complete(result);
     }
   }
+}
+
+class _CaptureAwareBackend extends _FakeBackend
+    implements FrameCaptureAwareNativeRecorderBackend {
+  _CaptureAwareBackend(this.capture);
+
+  final FrameCapturePort capture;
+  int frameCaptureOpens = 0;
+  bool throwOnFrameCaptureOpen = false;
+
+  @override
+  bool get supportsFrameCapture => true;
+
+  @override
+  String? get frameCaptureUnsupportedReason => null;
+
+  @override
+  Future<FrameCapturePort> openFrameCapture() async {
+    frameCaptureOpens++;
+    if (throwOnFrameCaptureOpen) {
+      throw StateError('synthetic frame capture setup failure');
+    }
+    return capture;
+  }
+}
+
+class _RecordingCapture implements FrameCapturePort {
+  @override
+  Future<void> start({
+    required int replayIndex,
+    required String outputPath,
+    int? gWorldPointerAddress,
+  }) async {}
+
+  @override
+  Future<FrameCaptureResult> stop({
+    required FrameCaptureEndReason reason,
+  }) async =>
+      const FrameCaptureResult();
+
+  @override
+  Future<void> close() async {}
 }
 
 class _FakeMonitor implements ReplayMonitorPort {

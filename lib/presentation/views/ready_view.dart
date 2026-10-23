@@ -175,6 +175,26 @@ class _AdvancedOptions extends StatelessWidget {
                 ],
               ),
             ),
+            CheckboxListTile(
+              key: const ValueKey('capture-frame-data'),
+              value: options.captureFrameData,
+              onChanged: controller.frameCaptureSupported
+                  ? (value) => controller.updateOptions(
+                        options.copyWith(captureFrameData: value ?? false),
+                      )
+                  : null,
+              title: const Text('Save frame data for analysis'),
+              subtitle: Text(
+                controller.frameCaptureSupported
+                    ? 'Writes raw frame values beside the batch recording.'
+                    : controller.frameCaptureUnavailableReason,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+            ),
           ],
         ),
       ),

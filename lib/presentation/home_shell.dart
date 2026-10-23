@@ -3,12 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../domain/recorder_contracts.dart';
+import '../domain/finder_contracts.dart';
+import '../domain/notes_models.dart';
 import '../services/obs_connection_service.dart';
+import '../services/notes_repository.dart';
 import '../services/setup_service.dart';
 import 'recorder_blocker.dart';
 import 'recorder_controller.dart';
 import 'screens/workspace_screen.dart';
 import 'widgets/obs_connection_card.dart';
+import 'widgets/recording_window_guard.dart';
 
 class AfterimageHomeShell extends StatefulWidget {
   const AfterimageHomeShell({
@@ -16,11 +20,17 @@ class AfterimageHomeShell extends StatefulWidget {
     required this.setupService,
     this.recorderBackend,
     this.recorderController,
+    this.finder,
+    this.notesRepository,
+    this.enableWindowGuard = false,
   });
 
   final SetupService setupService;
   final NativeRecorderBackend? recorderBackend;
   final RecorderController? recorderController;
+  final FinderPort? finder;
+  final NotesRepository? notesRepository;
+  final bool enableWindowGuard;
 
   @override
   State<AfterimageHomeShell> createState() => _AfterimageHomeShellState();
@@ -43,6 +53,10 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
   Timer? _obsPoll;
   bool _isChecking = false;
   String? _errorMessage;
+  bool _showNotes = false;
+  NotePreview? _selectedNote;
+  bool _notesEditing = false;
+  bool _notesSaving = false;
 
   @override
   void initState() {
@@ -81,6 +95,39 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
   }
 
   void _onControllerChanged() => _syncObsPoll();
+
+  void _openNotes([NotePreview? preview]) {
+    if (!mounted || _recorderController.isBusy || _notesEditing) return;
+    setState(() {
+      _showNotes = true;
+      _selectedNote = preview;
+    });
+  }
+
+  void _closeNotes() {
+    if (!mounted) return;
+    setState(() {
+      _showNotes = false;
+      _selectedNote = null;
+      _notesEditing = false;
+      _notesSaving = false;
+    });
+  }
+
+  void _backToNotesList() {
+    if (!mounted) return;
+    setState(() => _selectedNote = null);
+  }
+
+  void _onNotesEditingChanged(bool editing) {
+    if (!mounted) return;
+    setState(() => _notesEditing = editing);
+  }
+
+  void _onNotesSavingChanged(bool saving) {
+    if (!mounted) return;
+    setState(() => _notesSaving = saving);
+  }
 
   /// Runs the poll only while the user is actually waiting on OBS.
   void _syncObsPoll() {
@@ -127,7 +174,7 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
   @override
   Widget build(BuildContext context) {
     final connection = _recorderController.obsConnection;
-    return Scaffold(
+    final scaffold = Scaffold(
       body: SafeArea(
         child: connection == null
             ? _workspace(null)
@@ -137,11 +184,30 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
               ),
       ),
     );
+    if (!widget.enableWindowGuard) return scaffold;
+    return RecordingWindowGuard(
+      controller: _recorderController,
+      notesEditing: _notesEditing,
+      notesSaving: _notesSaving,
+      child: scaffold,
+    );
   }
 
   Widget _workspace(ObsConnectionService? connection) {
+    final finder = widget.finder ?? _recorderController.finder;
+    final notesRepository =
+        widget.notesRepository ?? _recorderController.notesRepository;
     return WorkspaceScreen(
       controller: _recorderController,
+      notesRepository: finder?.available == true ? notesRepository : null,
+      showNotes: _showNotes,
+      selectedNote: _selectedNote,
+      notesEditing: _notesEditing,
+      onOpenNotes: _openNotes,
+      onBackToNotesList: _backToNotesList,
+      onCloseNotes: _closeNotes,
+      onNotesEditingChanged: _onNotesEditingChanged,
+      onNotesSavingChanged: _onNotesSavingChanged,
       isRefreshing: _isChecking || _recorderController.isBusy,
       onRefresh: _refreshChecks,
       // `controller.error` covers failures raised before the engine starts,

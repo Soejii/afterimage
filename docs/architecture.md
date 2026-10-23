@@ -2,7 +2,8 @@
 
 Afterimage uses a ports-and-adapters pattern. `lib/domain/recorder_contracts.dart`
 is the seam: the batch engine talks only to `ReplayMonitorPort`, `MenuInputPort`,
-`ObsRecorderPort`, `OutputOrganizerPort`, `SummaryWriterPort`, and `ReplayClock`.
+`ObsRecorderPort`, `OutputOrganizerPort`, `SummaryWriterPort`, `FrameCapturePort`,
+and `ReplayClock`.
 Nothing in `lib/domain` or `lib/services/replay_batch_engine.dart` touches
 `dart:ffi`, process memory, or a socket. Add a capability by extending a
 contract, not by reaching into an adapter from the engine.
@@ -32,7 +33,9 @@ sink.
 The engine injects a monotonic `ReplayClock`, so timeout, polling, failure, and
 stop behavior can be tested without waiting in real time. It explicitly connects
 and closes OBS in its lifecycle and does not let close errors replace the
-primary `ReplayBatchResult`.
+primary `ReplayBatchResult`. Optional frame capture begins after `battleStarted`
+and ends before the result delay; capture failures are diagnostic-only and never
+change replay or recording outcomes.
 
 ## Platform adapters
 
@@ -47,7 +50,10 @@ pointer, then a fixed offset chain to frame and event data.
 
 The Linux adapter lives in `lib/services/linux_process_memory.dart`,
 `linux_replay_monitor.dart`, `linux_menu_input.dart`,
-`linux_evdev_controller.dart`, and `linux_native_backend.dart`. It uses
+`linux_evdev_controller.dart`, `linux_frame_capture.dart`, and
+`linux_native_backend.dart`. Frame capture owns a separate read-only memory
+session in a background isolate and writes raw frame rows to per-replay JSONL
+sidecars. It uses
 read-only process memory, targeted gamescope XTest input, and an existing
 controller evdev node selected from the processes in GGST's Wine prefix. See
 [`linux-runtime.md`](linux-runtime.md) and
@@ -93,6 +99,21 @@ Platform-neutral services live in `lib/services/` and are directly testable:
   `lib/services/recorder_preferences.dart` provide platform-neutral output and
   preference services.
 
+The optional notes finder is another process boundary. `FinderPort` in
+`lib/domain/finder_contracts.dart` exposes only the detached batch-start action;
+`LinuxFinder` owns the Linux command, finder path, minimal `PATH` addition, and
+`run.log` redirection. `NotesRepository` reads finder output and performs the
+explicit section write and apply operations. `RecorderController` starts the
+finder only after a completed Linux batch has produced at least one frame-capture
+sidecar, so finder failures cannot change the recording result. Windows keeps the
+notes entry points hidden because this adapter is Linux-only.
+
+Notes section editing stays behind atomic replacement. The first edit copies the
+finder draft to `section.orig.md`; subsequent edits replace only `section.md` and
+never overwrite the original. Clip playback is behind
+`NotesClipPlayerSession`, which keeps media_kit and libmpv out of widget tests and
+disposes a session when its player leaves the scroll viewport or its page closes.
+
 ## Presentation
 
 The Presentation layer (`lib/presentation/`) is a `ChangeNotifier` view model
@@ -136,6 +157,9 @@ turns red. They come from `AGENTS.md`'s safety boundaries.
 - **Process memory is read-only.** `process_vm_readv` first, then
   `/proc/<pid>/mem` opened read-only as fallback; no write descriptor or write
   API is exposed.
+- **Frame capture is optional and off by default.** It reads raw values only,
+  runs away from the UI and replay-monitor loop, and a capture error is recorded
+  as a diagnostic without failing or truncating the replay or its OBS recording.
 - **No silent input fallback.** An unavailable controller reports itself and
   keeps recording locked. It never degrades to keyboard.
 - **Nothing is overwritten.** The organizer moves with collision-checked names
