@@ -167,6 +167,19 @@ void main() {
       expect(snapshot.enginePresent, isFalse);
     });
 
+    test('turns a garbage pointer with the high bit set into an empty snapshot',
+        () async {
+      final fake = _FakeMemorySession.withGWorldSignature();
+      final monitor = LinuxReplayMonitor(memoryFactory: (_) => fake);
+
+      await monitor.attach();
+      // GGST can leave freed memory in the chain while it loads a replay.
+      _putPointer(fake.memory, 0x3130, 0xDEADBEEFDEADBEEF);
+      final snapshot = await monitor.snapshot();
+
+      expect(snapshot.enginePresent, isFalse);
+    });
+
     test('propagates persistent process-memory denial', () async {
       final fake = _FakeMemorySession.withGWorldSignature();
       final monitor = LinuxReplayMonitor(memoryFactory: (_) => fake);
@@ -569,6 +582,9 @@ class _FakeMemorySession implements LinuxMemorySession {
 
   @override
   List<int> readBytes(int address, int length) {
+    if (address < 0 || length < 0) {
+      throw ArgumentError('Memory address and length must not be negative.');
+    }
     if (throwOnPatternReads && address == 0x1000) {
       throw const OSError('denied', 13);
     }

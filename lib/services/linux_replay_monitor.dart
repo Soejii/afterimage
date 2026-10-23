@@ -15,6 +15,8 @@ const int linuxEventSize = 0x10;
 const int linuxMatchResultEventType = 15;
 const int linuxMaxEventCount = 10;
 
+const int _maxUserSpaceAddress = 0x7FFFFFFFFFFF;
+
 typedef LinuxReadOnlyMemoryFactory = LinuxMemorySession Function(
   String processName,
 );
@@ -159,7 +161,7 @@ class LinuxReplayMonitor
     if (bytes.length < 8) {
       throw const OSError('A pointer read returned fewer than eight bytes.');
     }
-    return bytes[0] |
+    final value = bytes[0] |
         (bytes[1] << 8) |
         (bytes[2] << 16) |
         (bytes[3] << 24) |
@@ -167,6 +169,16 @@ class LinuxReplayMonitor
         (bytes[5] << 40) |
         (bytes[6] << 48) |
         (bytes[7] << 56);
+    // While GGST loads a replay the chain can hold freed memory. A value
+    // outside user space, including one with the top bit set that Dart reads
+    // as negative, is a missing sample rather than an address to follow.
+    if (value < 0 || value > _maxUserSpaceAddress) {
+      throw const LinuxNativeException(
+        LinuxNativeErrorCode.memoryReadFailed,
+        'A GGST pointer read returned an address outside user space.',
+      );
+    }
+    return value;
   }
 
   int _readUint32(LinuxMemorySession memory, int address) {
