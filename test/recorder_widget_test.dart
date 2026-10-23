@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -141,7 +143,11 @@ void main() {
     );
     expect(captureOption.onChanged, isNull);
     expect(
-      find.text('Frame capture is not available in this build.'),
+      find.text(
+        Platform.isWindows
+            ? 'Frame capture is not available on Windows yet.'
+            : 'Frame capture is not available in this build.',
+      ),
       findsOneWidget,
     );
     expect(controller.canStart, isTrue);
