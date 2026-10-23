@@ -30,5 +30,5 @@ void main() {
     expect(home, isNotNull);
     expect(oldPath, isNotNull);
     expect(startedEnvironment?['PATH'], '$home/.local/bin:$oldPath');
-  });
+  }, skip: !Platform.isLinux);
 }

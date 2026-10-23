@@ -106,7 +106,9 @@ void main() {
   });
 
   test('changing options preserves the loaded finder directory', () async {
-    const finderDirectory = '/home/tester/ggst-input-tracker';
+    // Stored paths must be absolute on the host, so build one from its temp.
+    final finderDirectory =
+        '${Directory.systemTemp.path}${Platform.pathSeparator}ggst-input-tracker';
     final preferences = _PreferencesHarness({
       'finderDirectory': finderDirectory,
     });

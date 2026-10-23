@@ -353,7 +353,7 @@ void main() {
         preview: preview,
         onBack: () {},
         playerFactory: (path) {
-          opened.add(path.split('/').last);
+          opened.add(path.split(RegExp(r'[\\/]')).last);
           final session = _FakeClipSession();
           sessions.add(session);
           return session;
@@ -450,8 +450,10 @@ void main() {
     ));
 
     await tester.tap(find.byKey(const ValueKey('clip-play')));
-    await _flushIo(tester);
-    await tester.pump();
+    await _settleIo(
+      tester,
+      () => find.text('Clip unavailable').evaluate().isNotEmpty,
+    );
 
     expect(factoryCalls, 0);
     expect(find.text('Clip unavailable'), findsOneWidget);
@@ -496,8 +498,10 @@ void main() {
     tester
         .widget<IconButton>(find.byKey(const ValueKey('clip-play')))
         .onPressed!();
-    await _flushIo(tester);
-    await tester.pump();
+    await _settleIo(
+      tester,
+      () => session.rateCalls == 1 && session.loopCalls == 1,
+    );
 
     expect(session.rateCalls, 1);
     expect(session.lastRate, 0.5);
