@@ -23,6 +23,7 @@ void main() {
         action: -55,
         actionTime: 6,
         hitstop: 3,
+        hp: 420,
         w1b0: 0x4000000,
         enable: 0x1000,
         attack: 9,
@@ -53,6 +54,7 @@ void main() {
         action: 31,
         actionTime: 7,
         hitstop: 8,
+        hp: 92,
         w1b0: 0,
         enable: 3,
         attack: 4,
@@ -106,12 +108,19 @@ void main() {
       expect(row['in'], [0x1ff, 0x12]);
       final players = row['p']! as List<Map<String, Object?>>;
       expect(players, hasLength(2));
+      expect(
+        players[0].containsKey('hp'),
+        isTrue,
+        reason: 'Player row is missing the hp key.',
+      );
+      expect(players[0]['hp'], 420);
       expect(players[0], {
         'spr': 'kyk203_04',
         'bbs': 'NmlAtk5CNear',
         'act': -55,
         'at': 6,
         'hs': 3,
+        'hp': 420,
         'w1b0': 0x4000000,
         'en': 0x1000,
         'atk': 9,
@@ -144,6 +153,7 @@ void main() {
       expect(entities, hasLength(3));
       expect(entities[0]['id'], '0x$_entity1Hex');
       expect(entities[0]['own'], 0);
+      expect(entities[0].containsKey('hp'), isFalse);
       expect(entities[1]['own'], 1);
       expect(entities[2]['own'], isNull, reason: 'Orphans have no owner.');
     });
@@ -426,6 +436,7 @@ void _writePlayer(
   required int action,
   required int actionTime,
   required int hitstop,
+  required int hp,
   required int w1b0,
   required int enable,
   required int attack,
@@ -452,6 +463,7 @@ void _writePlayer(
     ..putInt32(address + 0xC50C, action)
     ..putInt32(address + 0x1CC, actionTime)
     ..putInt32(address + 0x288, hitstop)
+    ..putInt32(address + 0x1254, hp)
     ..putUint32(address + 0x1B0, w1b0)
     ..putUint32(address + 0x6320, enable)
     ..putUint32(address + 0x632C, attack)

@@ -786,6 +786,7 @@ Map<String, Object?> _readPlayer(LinuxMemorySession memory, int address) {
     'act': _readInt32(memory, address + 0xC50C),
     'at': _readInt32(memory, address + 0x1CC),
     'hs': _readInt32(memory, address + 0x288),
+    'hp': _readInt32(memory, address + 0x1254),
     'w1b0': _readUint32(memory, address + 0x1B0),
     'en': _readUint32(memory, address + 0x6320),
     'atk': _readUint32(memory, address + 0x632C),
