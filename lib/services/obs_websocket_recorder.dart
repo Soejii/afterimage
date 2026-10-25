@@ -7,6 +7,8 @@ import 'package:crypto/crypto.dart';
 import '../domain/obs_models.dart';
 import '../domain/recorder_contracts.dart';
 import '../domain/replay_batch.dart';
+import 'bmp_image.dart';
+import 'obs_screen_guard.dart';
 
 class ObsClientException implements Exception {
   const ObsClientException(this.message);
@@ -58,7 +60,7 @@ class ObsCapturePreview {
   final String imageBase64;
 }
 
-class ObsWebSocketRecorder implements ObsRecorderPort {
+class ObsWebSocketRecorder implements ObsRecorderPort, ObsThumbnailSource {
   ObsWebSocketRecorder(
     this.config, {
     this.connectTimeout = const Duration(seconds: 5),
@@ -111,6 +113,37 @@ class ObsWebSocketRecorder implements ObsRecorderPort {
       throw const ObsProtocolException('OBS returned an invalid PNG image.');
     }
     return ObsCapturePreview(name, encoded);
+  }
+
+  @override
+  Future<RgbImage> captureThumbnail() async {
+    final scene = await _request('GetCurrentProgramScene');
+    final name = scene['currentProgramSceneName'] ?? scene['sceneName'];
+    if (name is! String || name.isEmpty) {
+      throw const ObsProtocolException(
+        'OBS did not provide its current scene.',
+      );
+    }
+    final response = await _request('GetSourceScreenshot', {
+      'sourceName': name,
+      'imageFormat': 'bmp',
+      'imageWidth': 192,
+      'imageHeight': 108,
+    });
+    final imageData = response['imageData'];
+    const prefix = 'data:image/bmp;base64,';
+    if (imageData is! String ||
+        !imageData.startsWith(prefix) ||
+        imageData.length > 8000000) {
+      throw const ObsProtocolException(
+        'OBS returned an invalid screen-check image.',
+      );
+    }
+    try {
+      return decodeBmpImage(base64Decode(imageData.substring(prefix.length)));
+    } on FormatException catch (error) {
+      throw ObsProtocolException('OBS returned an invalid BMP image: $error');
+    }
   }
 
   @override

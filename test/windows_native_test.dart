@@ -268,7 +268,7 @@ void main() {
   });
 
   group('Windows SendInput mapping', () {
-    test('maps actions, waits between U,U, and closes after failure', () async {
+    test('maps one-confirm actions and closes after failure', () async {
       final driver = _FakeWindowsKeyboardDriver()..failOnPress = 'W';
       final delays = <Duration>[];
       final input = WindowsKeyboardMenuInput(
@@ -276,10 +276,12 @@ void main() {
         delay: (duration) async => delays.add(duration),
       );
 
-      await input.perform(ReplayMenuAction.openReplay);
+      await input.perform(ReplayMenuAction.openReplayMenu);
       expect(driver.openCount, 1);
+      expect(driver.pressed, ['U']);
+      await input.perform(ReplayMenuAction.confirmMenuItem);
       expect(driver.pressed, ['U', 'U']);
-      expect(delays, [const Duration(milliseconds: 800)]);
+      expect(delays, isEmpty);
 
       await input.perform(ReplayMenuAction.exitToReplayList);
       expect(driver.pressed, ['U', 'U', 'U']);
@@ -319,7 +321,7 @@ void main() {
       expect(
         () => WindowsMenuInputMapping(
           sequences: <ReplayMenuAction, Iterable<String>>{
-            ReplayMenuAction.openReplay: const <String>[],
+            ReplayMenuAction.openReplayMenu: const <String>[],
           },
         ),
         throwsA(_windowsCode(WindowsNativeErrorCode.invalidKey)),
@@ -331,8 +333,10 @@ void main() {
     test('maps replay actions to position-neutral controller buttons', () {
       final mapping = WindowsVirtualControllerMapping();
 
-      expect(mapping.sequenceFor(ReplayMenuAction.openReplay), [
+      expect(mapping.sequenceFor(ReplayMenuAction.openReplayMenu), [
         WindowsControllerButton.south,
+      ]);
+      expect(mapping.sequenceFor(ReplayMenuAction.confirmMenuItem), [
         WindowsControllerButton.south,
       ]);
       expect(
@@ -354,7 +358,8 @@ void main() {
         delay: (duration) async => delays.add(duration),
       );
 
-      await input.perform(ReplayMenuAction.openReplay);
+      await input.perform(ReplayMenuAction.openReplayMenu);
+      await input.perform(ReplayMenuAction.confirmMenuItem);
       expect(driver.openCount, 1);
       expect(driver.states, [
         WindowsControllerButton.south,
@@ -364,7 +369,6 @@ void main() {
       ]);
       expect(delays, [
         const Duration(milliseconds: 80),
-        const Duration(milliseconds: 800),
         const Duration(milliseconds: 80),
       ]);
 

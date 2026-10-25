@@ -98,6 +98,10 @@ an OBS WebSocket is.
 Afterimage records the whole batch into one video file. Each batch gets its own
 folder, so a second run cannot overwrite the first.
 
+Optionally, in **Replay controls**, turn on **Check the game screen before each
+menu press** and use **Teach screens** to capture the Saved Replays list and the
+replay menu with **View Replay** highlighted.
+
 On Linux, expand **Replay controls** and select **Save frame data for analysis**
 to also write one raw `.frames.jsonl` log per replay in the batch folder. This
 option is off by default and is not yet available on Windows.

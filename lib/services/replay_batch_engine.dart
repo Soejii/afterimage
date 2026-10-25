@@ -7,7 +7,10 @@ import 'replay_clock.dart';
 typedef ReplayBatchEventSink = void Function(ReplayBatchEvent event);
 
 class ReplayBatchEngine
-    implements RecordingEngine, FrameCaptureAwareRecordingEngine {
+    implements
+        RecordingEngine,
+        FrameCaptureAwareRecordingEngine,
+        ScreenGuardAwareRecordingEngine {
   ReplayBatchEngine({
     required this.monitor,
     required this.menuInput,
@@ -16,10 +19,12 @@ class ReplayBatchEngine
     ReplayClock? clock,
     SummaryWriterPort? summaryWriter,
     FrameCapturePort? frameCapturePort,
+    ScreenGuardPort? screenGuardPort,
     this.onEvent,
   })  : clock = clock ?? SystemReplayClock(),
         summaryWriter = summaryWriter ?? const NoopSummaryWriter(),
-        _frameCapturePort = frameCapturePort ?? const NoopFrameCapturePort();
+        _frameCapturePort = frameCapturePort ?? const NoopFrameCapturePort(),
+        _screenGuardPort = screenGuardPort ?? const NoopScreenGuard();
 
   final ReplayMonitorPort monitor;
   final MenuInputPort menuInput;
@@ -29,6 +34,7 @@ class ReplayBatchEngine
   final SummaryWriterPort summaryWriter;
   final ReplayBatchEventSink? onEvent;
   FrameCapturePort _frameCapturePort;
+  ScreenGuardPort _screenGuardPort;
   Duration? _batchRecordingStartedAt;
   Duration _frameCaptureStopTimeout = const Duration(seconds: 3);
   _CaptureAttempt? _captureAttempt;
@@ -51,6 +57,14 @@ class ReplayBatchEngine
       throw StateError('Frame capture cannot change during a batch.');
     }
     _frameCapturePort = port;
+  }
+
+  @override
+  void configureScreenGuard(ScreenGuardPort port) {
+    if (_isRunning) {
+      throw StateError('The screen guard cannot change during a batch.');
+    }
+    _screenGuardPort = port;
   }
 
   ReplayBatchProgress get progress => _progress;
@@ -422,11 +436,54 @@ class ReplayBatchEngine
         );
       }
 
+      final replayListStatus = await _verifyScreen(
+        ScreenCheck.replayList,
+        request.timing,
+        index,
+      );
+      if (replayListStatus == _WaitStatus.stopped) {
+        return await _stopReplay(
+          request,
+          index,
+          recordingActive: recordingActive,
+          sourceOutput: sourceOutput,
+          organizedOutput: organizedOutput,
+        );
+      }
+
       _setState(
         ReplayBatchState.openingReplay,
         'Opening replay $index in GGST.',
       );
-      await menuInput.perform(ReplayMenuAction.openReplay);
+      _assertInputSafe();
+      await menuInput.perform(ReplayMenuAction.openReplayMenu);
+      await clock.delay(request.timing.actionDelay);
+      if (_stopRequested) {
+        return await _stopReplay(
+          request,
+          index,
+          recordingActive: recordingActive,
+          sourceOutput: sourceOutput,
+          organizedOutput: organizedOutput,
+        );
+      }
+
+      final menuStatus = await _verifyScreen(
+        ScreenCheck.replayMenuViewHighlighted,
+        request.timing,
+        index,
+      );
+      if (menuStatus == _WaitStatus.stopped) {
+        return await _stopReplay(
+          request,
+          index,
+          recordingActive: recordingActive,
+          sourceOutput: sourceOutput,
+          organizedOutput: organizedOutput,
+        );
+      }
+      _assertInputSafe();
+      await menuInput.perform(ReplayMenuAction.confirmMenuItem);
       await clock.delay(request.timing.actionDelay);
       if (_stopRequested) {
         return await _stopReplay(
@@ -808,6 +865,140 @@ class ReplayBatchEngine
     return _WaitStatus.timeout;
   }
 
+  Future<_WaitStatus> _verifyScreen(
+    ScreenCheck check,
+    ReplayBatchTiming timing,
+    int replayIndex,
+  ) async {
+    const pollInterval = Duration(milliseconds: 250);
+    final deadline = clock.elapsed + timing.screenCheckTimeout;
+    var attempts = 0;
+    var lastScore = 255.0;
+    Object? lastError;
+    var receivedReadableResult = false;
+
+    while (true) {
+      if (_stopRequested) {
+        return _WaitStatus.stopped;
+      }
+      final remaining = deadline - clock.elapsed;
+      if (remaining <= Duration.zero) {
+        break;
+      }
+
+      var checkCompleted = false;
+      final checkFuture = Future<ScreenCheckResult>.sync(
+        () => _screenGuardPort.check(check),
+      ).then(
+        (result) {
+          checkCompleted = true;
+          return result;
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          checkCompleted = true;
+          return ScreenCheckResult(
+            matched: false,
+            score: 255,
+            error: error,
+          );
+        },
+      );
+      final timeoutFuture = Future<ScreenCheckResult?>.delayed(
+        Duration.zero,
+      ).then((_) async {
+        if (checkCompleted) return null;
+        final timeoutRemaining = deadline - clock.elapsed;
+        if (timeoutRemaining > Duration.zero) {
+          await clock.delay(timeoutRemaining);
+        }
+        return null;
+      });
+      final result = await Future.any<ScreenCheckResult?>([
+        checkFuture,
+        timeoutFuture,
+      ]);
+      attempts++;
+
+      if (result == null || clock.elapsed >= deadline) {
+        if (result == null) {
+          lastScore = 255;
+          lastError = StateError(
+            'Screen check ${check.name} did not complete before the deadline.',
+          );
+          _emit(
+            ReplayBatchEventType.diagnostic,
+            replayIndex: replayIndex,
+            message:
+                'Screen check ${check.name} did not complete before the deadline.',
+            error: lastError,
+          );
+        } else {
+          lastScore = result.score;
+          if (result.error == null) {
+            receivedReadableResult = true;
+          } else {
+            lastError = result.error;
+          }
+          lastError ??= StateError(
+            'Screen check ${check.name} completed after the deadline.',
+          );
+          _emit(
+            ReplayBatchEventType.diagnostic,
+            replayIndex: replayIndex,
+            message:
+                'Screen check ${check.name} completed after the deadline; result ignored.',
+            error: lastError,
+          );
+        }
+        break;
+      }
+
+      lastScore = result.score;
+      if (result.error == null) {
+        receivedReadableResult = true;
+      } else {
+        lastError = result.error;
+      }
+      _emit(
+        ReplayBatchEventType.diagnostic,
+        replayIndex: replayIndex,
+        message:
+            'Screen check ${check.name}: score ${result.score.toStringAsFixed(2)}${result.matched ? ' matched' : ' did not match'}.',
+        error: result.error,
+      );
+      if (_stopRequested) {
+        return _WaitStatus.stopped;
+      }
+      if (result.matched && result.error == null) {
+        return _WaitStatus.satisfied;
+      }
+
+      final waitRemaining = deadline - clock.elapsed;
+      if (waitRemaining <= Duration.zero) {
+        break;
+      }
+      await clock.delay(
+        waitRemaining < pollInterval ? waitRemaining : pollInterval,
+      );
+      if (_stopRequested) {
+        return _WaitStatus.stopped;
+      }
+    }
+
+    final lastScoreText = lastScore.toStringAsFixed(2);
+    if (!receivedReadableResult) {
+      throw StateError(
+        'Screen check ${check.name} was unavailable after $attempts attempt(s); '
+        'last score: $lastScoreText. Last error: $lastError',
+      );
+    }
+    throw StateError(
+      'Screen check ${check.name} timed out after '
+      '${timing.screenCheckTimeout.inMilliseconds} ms; '
+      'last score: $lastScoreText.',
+    );
+  }
+
   Future<_CombinedStop> _stopCombined(
     ReplayBatchRequest request, {
     required bool partial,
@@ -1160,6 +1351,7 @@ class ReplayBatchEngine
         timing.startupDelay < Duration.zero ||
         timing.menuDelay < Duration.zero ||
         timing.actionDelay < Duration.zero ||
+        timing.screenCheckTimeout <= Duration.zero ||
         timing.frameCaptureStopTimeout <= Duration.zero) {
       throw ArgumentError('Batch timing values must not be negative.');
     }

@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:afterimage/domain/obs_models.dart';
 import 'package:afterimage/services/obs_websocket_recorder.dart';
 
 import 'support/obs_test_support.dart';
+import 'support/screen_test_support.dart';
 
 void main() {
   group('ObsWebSocketRecorder', () {
@@ -29,6 +32,61 @@ void main() {
               'OBS still owns the recording: StopRecord response must not release output for moving');
       server.finishRecording();
       expect((await stopping).path, '/tmp/afterimage-obs-1.mkv');
+    });
+
+    test('captures a bounded 192x108 BMP thumbnail read-only', () async {
+      final bytes = makeTestBmp(
+        width: 1,
+        height: 1,
+        pixelAt: (x, y) => const [15, 25, 35],
+      );
+      final server = FakeObsServer(responses: {
+        'GetCurrentProgramScene': {
+          'currentProgramSceneName': 'Replay Scene',
+        },
+        'GetSourceScreenshot': {
+          'imageData': 'data:image/bmp;base64,${base64Encode(bytes)}',
+        },
+      });
+      final port = await server.start();
+      addTearDown(server.dispose);
+      final recorder = _recorder(port: port);
+      addTearDown(recorder.close);
+
+      final image = await recorder.captureThumbnail();
+
+      expect(image.width, 1);
+      expect(image.height, 1);
+      expect(image.rgb, [15, 25, 35]);
+      expect(image.bmpBytes, bytes);
+      expect(server.requestTypes, [
+        'GetCurrentProgramScene',
+        'GetSourceScreenshot',
+      ]);
+      final screenshotRequest =
+          server.requests.last['d']['requestData'] as Map<String, dynamic>;
+      expect(screenshotRequest, {
+        'sourceName': 'Replay Scene',
+        'imageFormat': 'bmp',
+        'imageWidth': 192,
+        'imageHeight': 108,
+      });
+    });
+
+    test('rejects a thumbnail with the wrong image data prefix', () async {
+      final server = FakeObsServer(responses: {
+        'GetCurrentProgramScene': {'currentProgramSceneName': 'Replay Scene'},
+        'GetSourceScreenshot': {'imageData': 'data:image/png;base64,AAAA'},
+      });
+      final port = await server.start();
+      addTearDown(server.dispose);
+      final recorder = _recorder(port: port);
+      addTearDown(recorder.close);
+
+      await expectLater(
+        recorder.captureThumbnail(),
+        throwsA(isA<ObsProtocolException>()),
+      );
     });
 
     test('accepts the stopped event arriving before the stop response',

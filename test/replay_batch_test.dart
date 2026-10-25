@@ -78,6 +78,160 @@ void main() {
   });
 
   group('ReplayBatchEngine', () {
+    test('a failed replay-menu screen check must not send the second confirm',
+        () async {
+      final menu = _FakeMenu();
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: menu,
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        screenGuardPort: _MenuNeverMatchingScreenGuard(),
+      ).startBatch(_request());
+
+      expect(menu.actions, contains(ReplayMenuAction.openReplayMenu));
+      expect(
+        menu.actions,
+        isNot(contains(ReplayMenuAction.confirmMenuItem)),
+        reason: 'The second confirm activates the highlighted menu item.',
+      );
+      expect(result.outcome, ReplayBatchOutcome.failed);
+      expect(
+        result.replays.single.error.toString(),
+        contains('replayMenuViewHighlighted'),
+      );
+      expect(
+        (result.replays.single.error as Object).toString(),
+        contains('last score: 70.00'),
+      );
+      expect(
+        menu.actions,
+        [ReplayMenuAction.openReplayMenu],
+      );
+    });
+
+    test('a matched screen check arriving after its deadline is rejected',
+        () async {
+      final clock = _FakeClock();
+      final menu = _FakeMenu();
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: menu,
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        clock: clock,
+        screenGuardPort: _LateMatchingScreenGuard(
+          clock: clock,
+          lateBy: const Duration(milliseconds: 2),
+        ),
+      ).startBatch(
+        _request(
+          timing: _testTiming(
+            screenCheckTimeout: const Duration(milliseconds: 1),
+          ),
+        ),
+      );
+
+      expect(result.outcome, ReplayBatchOutcome.failed);
+      expect(menu.actions, [ReplayMenuAction.openReplayMenu]);
+      expect(
+        result.replays.single.error.toString(),
+        contains('replayMenuViewHighlighted'),
+      );
+    });
+
+    test('checks the list and menu in order before each confirm action',
+        () async {
+      final trace = <String>[];
+      final menu = _FakeMenu()
+        ..onPerform = (action) => trace.add('action:${action.name}');
+      final screenGuard = _AlwaysMatchingScreenGuard(
+        onCheck: (check) => trace.add('check:${check.name}'),
+      );
+      final events = <ReplayBatchEvent>[];
+
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulBatchSnapshots(2)),
+        menu: menu,
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        screenGuardPort: screenGuard,
+        onEvent: events.add,
+      ).startBatch(_request(count: 2));
+
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      expect(trace, [
+        'check:replayList',
+        'action:openReplayMenu',
+        'check:replayMenuViewHighlighted',
+        'action:confirmMenuItem',
+        'action:exitToReplayList',
+        'action:selectNextReplay',
+        'check:replayList',
+        'action:openReplayMenu',
+        'check:replayMenuViewHighlighted',
+        'action:confirmMenuItem',
+        'action:exitToReplayList',
+      ]);
+      final diagnostics = events
+          .where((event) => event.type == ReplayBatchEventType.diagnostic)
+          .toList();
+      expect(diagnostics, hasLength(4));
+      expect(diagnostics.first.message, contains('replayList'));
+      expect(diagnostics.first.message, contains('score 0.00'));
+      expect(diagnostics[1].message, contains('replayMenuViewHighlighted'));
+    });
+
+    test('stop during screen verification prevents the next menu action',
+        () async {
+      late ReplayBatchEngine engine;
+      final menu = _FakeMenu();
+      final screenGuard = _AlwaysMatchingScreenGuard(
+          onCheck: (check) {
+            if (check == ScreenCheck.replayMenuViewHighlighted) {
+              unawaited(engine.requestStop());
+            }
+          },
+          matched: (check) => check == ScreenCheck.replayList);
+      engine = _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: menu,
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        screenGuardPort: screenGuard,
+      );
+
+      final result = await engine.startBatch(_request());
+
+      expect(result.outcome, ReplayBatchOutcome.stopped);
+      expect(menu.actions, [ReplayMenuAction.openReplayMenu]);
+    });
+
+    test('noop screen guard preserves unguarded action delays', () async {
+      final clock = _FakeClock();
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulReplaySnapshots()),
+        menu: _FakeMenu(),
+        obs: _FakeObs(),
+        organizer: _FakeOrganizer(),
+        clock: clock,
+      ).startBatch(
+        _request(
+          timing: _testTiming(actionDelay: const Duration(milliseconds: 800)),
+        ),
+      );
+
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      expect(
+        clock.delays.where(
+          (delay) => delay == const Duration(milliseconds: 800),
+        ),
+        // The first delay is the old inter-confirm gap, followed by the
+        // existing post-confirm and return-to-list delays.
+        hasLength(3),
+      );
+    });
+
     test(
         'separate mode records once per replay and waits for list confirmation',
         () async {
@@ -119,10 +273,12 @@ void main() {
       expect(
         menu.actions,
         [
-          ReplayMenuAction.openReplay,
+          ReplayMenuAction.openReplayMenu,
+          ReplayMenuAction.confirmMenuItem,
           ReplayMenuAction.exitToReplayList,
           ReplayMenuAction.selectNextReplay,
-          ReplayMenuAction.openReplay,
+          ReplayMenuAction.openReplayMenu,
+          ReplayMenuAction.confirmMenuItem,
           ReplayMenuAction.exitToReplayList,
         ],
       );
@@ -171,7 +327,8 @@ void main() {
       expect(result.combinedOutput?.partial, isFalse);
       expect(result.combinedOutput?.path, 'combined_1.mp4');
       expect(
-        menu.actions.where((action) => action == ReplayMenuAction.openReplay),
+        menu.actions
+            .where((action) => action == ReplayMenuAction.openReplayMenu),
         hasLength(2),
       );
     });
@@ -337,8 +494,11 @@ void main() {
       expect(obs.startCalls, 1);
       expect(obs.stopCalls, 1);
       expect(
-          events
-              .where((event) => event.type == ReplayBatchEventType.diagnostic),
+          events.where((event) =>
+              event.type == ReplayBatchEventType.diagnostic &&
+              event.error
+                  .toString()
+                  .contains('synthetic capture start failure')),
           hasLength(1));
     });
 
@@ -596,7 +756,10 @@ void main() {
       expect(obs.startCalls, 1);
       expect(obs.stopCalls, 1);
       expect(organizer.replayCalls.single.partial, isTrue);
-      expect(menu.actions, [ReplayMenuAction.openReplay]);
+      expect(menu.actions, [
+        ReplayMenuAction.openReplayMenu,
+        ReplayMenuAction.confirmMenuItem,
+      ]);
       expect(obs.recording, isFalse);
     });
 
@@ -633,7 +796,8 @@ void main() {
       expect(result.replays.single.error, isNotNull);
       expect(obs.stopCalls, 1);
       expect(menu.actions, [
-        ReplayMenuAction.openReplay,
+        ReplayMenuAction.openReplayMenu,
+        ReplayMenuAction.confirmMenuItem,
         ReplayMenuAction.exitToReplayList,
       ]);
       expect(
@@ -678,7 +842,10 @@ void main() {
               'Losing game focus must fail safely instead of continuing the batch');
       expect(result.replays.single.output?.partial, isTrue);
       expect(obs.stopCalls, 1);
-      expect(menu.actions, [ReplayMenuAction.openReplay]);
+      expect(menu.actions, [
+        ReplayMenuAction.openReplayMenu,
+        ReplayMenuAction.confirmMenuItem,
+      ]);
     });
 
     test('a stop request preserves the active replay as partial output',
@@ -713,7 +880,10 @@ void main() {
       expect(result.replays.single.output?.partial, isTrue);
       expect(result.replays.single.sourceOutput?.path, 'obs_1.mp4');
       expect(obs.stopCalls, 1);
-      expect(menu.actions, [ReplayMenuAction.openReplay]);
+      expect(menu.actions, [
+        ReplayMenuAction.openReplayMenu,
+        ReplayMenuAction.confirmMenuItem,
+      ]);
       expect(organizer.replayCalls.single.partial, isTrue);
     });
 
@@ -750,10 +920,12 @@ void main() {
       expect(result.combinedOutput?.partial, isTrue);
       expect(organizer.combinedCalls.single.partial, isTrue);
       expect(menu.actions, [
-        ReplayMenuAction.openReplay,
+        ReplayMenuAction.openReplayMenu,
+        ReplayMenuAction.confirmMenuItem,
         ReplayMenuAction.exitToReplayList,
         ReplayMenuAction.selectNextReplay,
-        ReplayMenuAction.openReplay,
+        ReplayMenuAction.openReplayMenu,
+        ReplayMenuAction.confirmMenuItem,
       ]);
     });
 
@@ -927,6 +1099,8 @@ ReplayBatchTiming _testTiming({
   Duration returnToListTimeout = const Duration(milliseconds: 20),
   Duration replayTimeout = const Duration(milliseconds: 20),
   Duration resultDelay = Duration.zero,
+  Duration screenCheckTimeout = const Duration(milliseconds: 1),
+  Duration actionDelay = Duration.zero,
   Duration frameCaptureStopTimeout = const Duration(seconds: 3),
 }) {
   return ReplayBatchTiming(
@@ -937,7 +1111,8 @@ ReplayBatchTiming _testTiming({
     resultDelay: resultDelay,
     startupDelay: Duration.zero,
     menuDelay: Duration.zero,
-    actionDelay: Duration.zero,
+    actionDelay: actionDelay,
+    screenCheckTimeout: screenCheckTimeout,
     frameCaptureStopTimeout: frameCaptureStopTimeout,
     absentReadWindow: const Duration(milliseconds: 1),
   );
@@ -952,6 +1127,7 @@ ReplayBatchEngine _engine({
   ReplayBatchEventSink? onEvent,
   SummaryWriterPort? summaryWriter,
   FrameCapturePort? frameCapturePort,
+  ScreenGuardPort? screenGuardPort,
 }) {
   return ReplayBatchEngine(
     monitor: monitor,
@@ -961,6 +1137,7 @@ ReplayBatchEngine _engine({
     clock: clock ?? _FakeClock(),
     summaryWriter: summaryWriter,
     frameCapturePort: frameCapturePort,
+    screenGuardPort: screenGuardPort,
     onEvent: onEvent,
   );
 }
@@ -1041,6 +1218,50 @@ class _FakeMenu implements MenuInputPort {
   Future<void> perform(ReplayMenuAction action) async {
     actions.add(action);
     onPerform?.call(action);
+  }
+}
+
+class _MenuNeverMatchingScreenGuard implements ScreenGuardPort {
+  final List<ScreenCheck> checks = [];
+
+  @override
+  Future<ScreenCheckResult> check(ScreenCheck check) async {
+    checks.add(check);
+    return ScreenCheckResult(
+      matched: check == ScreenCheck.replayList,
+      score: check == ScreenCheck.replayList ? 0 : 70,
+    );
+  }
+}
+
+class _AlwaysMatchingScreenGuard implements ScreenGuardPort {
+  _AlwaysMatchingScreenGuard({
+    this.onCheck,
+    bool Function(ScreenCheck check)? matched,
+  }) : matched = matched ?? ((_) => true);
+
+  final void Function(ScreenCheck check)? onCheck;
+  final bool Function(ScreenCheck check) matched;
+
+  @override
+  Future<ScreenCheckResult> check(ScreenCheck check) async {
+    onCheck?.call(check);
+    return ScreenCheckResult(matched: matched(check), score: 0);
+  }
+}
+
+class _LateMatchingScreenGuard implements ScreenGuardPort {
+  _LateMatchingScreenGuard({required this.clock, required this.lateBy});
+
+  final _FakeClock clock;
+  final Duration lateBy;
+
+  @override
+  Future<ScreenCheckResult> check(ScreenCheck check) async {
+    if (check == ScreenCheck.replayMenuViewHighlighted) {
+      await clock.delay(lateBy);
+    }
+    return const ScreenCheckResult(matched: true, score: 0);
   }
 }
 

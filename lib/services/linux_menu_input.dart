@@ -16,7 +16,8 @@ class LinuxMenuInputMapping {
   }) : sequences = _validateSequences(sequences ?? defaultSequences);
 
   static const Map<ReplayMenuAction, List<String>> defaultSequences = {
-    ReplayMenuAction.openReplay: <String>['U', 'U'],
+    ReplayMenuAction.openReplayMenu: <String>['U'],
+    ReplayMenuAction.confirmMenuItem: <String>['U'],
     ReplayMenuAction.exitToReplayList: <String>['U'],
     ReplayMenuAction.selectNextReplay: <String>['W'],
   };

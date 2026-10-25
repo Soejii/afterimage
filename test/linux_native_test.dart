@@ -310,8 +310,10 @@ void main() {
         driver: driver,
       );
 
-      await input.perform(ReplayMenuAction.openReplay);
+      await input.perform(ReplayMenuAction.openReplayMenu);
       expect(driver.openedDisplays, [':4']);
+      expect(driver.pressed, ['U']);
+      await input.perform(ReplayMenuAction.confirmMenuItem);
       expect(driver.pressed, ['U', 'U']);
       await input.perform(ReplayMenuAction.exitToReplayList);
       expect(driver.pressed, ['U', 'U', 'U']);
@@ -332,7 +334,7 @@ void main() {
       );
     });
 
-    test('waits between keys in a multi-key replay action', () async {
+    test('sends each replay-menu confirm as a separate action', () async {
       final driver = _FakeKeyboardDriver();
       final delays = <Duration>[];
       final input = LinuxKeyboardMenuInput(
@@ -343,17 +345,18 @@ void main() {
         delay: (duration) async => delays.add(duration),
       );
 
-      await input.perform(ReplayMenuAction.openReplay);
+      await input.perform(ReplayMenuAction.openReplayMenu);
+      await input.perform(ReplayMenuAction.confirmMenuItem);
 
       expect(driver.pressed, ['U', 'U']);
-      expect(delays, [const Duration(milliseconds: 800)]);
+      expect(delays, isEmpty);
     });
 
     test('rejects empty or incomplete configurable mappings', () {
       expect(
         () => LinuxMenuInputMapping(
           sequences: <ReplayMenuAction, Iterable<String>>{
-            ReplayMenuAction.openReplay: const <String>[],
+            ReplayMenuAction.openReplayMenu: const <String>[],
           },
         ),
         throwsA(_nativeCode(LinuxNativeErrorCode.invalidKey)),

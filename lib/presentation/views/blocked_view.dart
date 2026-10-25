@@ -8,6 +8,7 @@ import '../recorder_controller.dart';
 import '../widgets/diagnostics_drawer.dart';
 import '../widgets/obs_setup_guide.dart';
 import '../widgets/status_surface.dart';
+import '../widgets/teach_screens_dialog.dart';
 
 /// What is on screen while something prevents recording.
 ///
@@ -240,6 +241,15 @@ class _BlockerAction extends StatelessWidget {
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                 height: 1.4,
               ),
+        );
+      case RecorderBlockerAction.teachScreens:
+        return FilledButton.icon(
+          key: const ValueKey('blocker-teach-screens'),
+          onPressed: busy
+              ? null
+              : () => unawaited(showTeachScreensDialog(context, controller)),
+          icon: const Icon(Icons.photo_camera_outlined),
+          label: const Text('Teach screens'),
         );
     }
   }

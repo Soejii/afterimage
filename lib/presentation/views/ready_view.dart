@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../domain/setup_models.dart';
+import '../recorder_blocker.dart';
 import '../recorder_controller.dart';
 import '../widgets/batch_form_fields.dart';
 import '../widgets/diagnostics_drawer.dart';
 import '../widgets/section_card.dart';
 import '../widgets/status_surface.dart';
+import '../widgets/teach_screens_dialog.dart';
 
 /// What is on screen when a batch can start.
 ///
@@ -195,6 +197,34 @@ class _AdvancedOptions extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               dense: true,
             ),
+            SwitchListTile(
+              key: const ValueKey('screen-guard-toggle'),
+              value: options.screenGuardEnabled,
+              onChanged: (value) => controller.updateOptions(
+                options.copyWith(screenGuardEnabled: value),
+              ),
+              title: const Text(
+                'Check the game screen before each menu press',
+              ),
+              subtitle: Text(
+                controller.screenReferencesTaught
+                    ? 'Both game screens are taught on this computer.'
+                    : 'Teach the replay list and View Replay selection first.',
+              ),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: const ValueKey('teach-screens'),
+                onPressed: () => unawaited(
+                  showTeachScreensDialog(context, controller),
+                ),
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('Teach screens'),
+              ),
+            ),
           ],
         ),
       ),
@@ -236,13 +266,31 @@ class _StartPanel extends StatelessWidget {
                 for (final blocker in pending)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      '${blocker.label}: ${blocker.message}',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: AfterimageTheme.blockedText,
-                        height: 1.4,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${blocker.label}: ${blocker.message}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: AfterimageTheme.blockedText,
+                            height: 1.4,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (blocker.action ==
+                            RecorderBlockerAction.teachScreens)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: OutlinedButton.icon(
+                              key: const ValueKey('blocker-teach-screens'),
+                              onPressed: () => unawaited(
+                                showTeachScreensDialog(context, controller),
+                              ),
+                              icon: const Icon(Icons.photo_camera_outlined),
+                              label: const Text('Teach screens'),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
               ],

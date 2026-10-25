@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,11 +8,16 @@ import 'package:afterimage/app/afterimage_app.dart';
 import 'package:afterimage/domain/recorder_contracts.dart';
 import 'package:afterimage/domain/replay_batch.dart';
 import 'package:afterimage/domain/setup_models.dart';
+import 'package:afterimage/presentation/recorder_blocker.dart';
 import 'package:afterimage/presentation/recorder_controller.dart';
+import 'package:afterimage/presentation/widgets/teach_screens_dialog.dart';
 import 'package:afterimage/services/output_directory_preflight.dart';
 import 'package:afterimage/services/batch_output_directory.dart';
 import 'package:afterimage/services/setup_service.dart';
 import 'package:afterimage/services/replay_batch_engine.dart';
+import 'package:afterimage/services/bmp_image.dart';
+import 'package:afterimage/services/obs_screen_guard.dart';
+import 'support/screen_test_support.dart';
 
 void main() {
   testWidgets('ready backend unlocks start and shows the terminal result',
@@ -183,6 +189,120 @@ void main() {
     expect(controller.options.captureFrameData, isTrue);
   });
 
+  testWidgets('screen guard blocks until both screens have been taught',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = _controller(
+      _FakeBackend(),
+      _CompletingEngine(),
+      screenThumbnailSource: _FakeThumbnailSource(
+        makeTestBmp(width: 192, height: 108),
+      ),
+      screenReferenceStore: _MemoryScreenReferenceStore(),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      AfterimageApp(
+        setupService: _ReadySetupService(),
+        recorderController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('advanced-options')));
+    await tester.tap(find.byKey(const ValueKey('advanced-options')));
+    await tester.pumpAndSettle();
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('screen-guard-toggle')));
+    await tester.tap(find.byKey(const ValueKey('screen-guard-toggle')));
+    await tester.pumpAndSettle();
+
+    expect(controller.options.screenGuardEnabled, isTrue);
+    expect(
+      controller.optionBlockers.map((blocker) => blocker.id),
+      contains(RecorderBlockerId.screenReferences),
+    );
+    expect(find.byKey(const ValueKey('option-blockers')), findsOneWidget);
+    expect(find.byKey(const ValueKey('teach-screens')), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('blocker-teach-screens')),
+    );
+    await tester.tap(find.byKey(const ValueKey('blocker-teach-screens')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('teach-screens-dialog')), findsOneWidget);
+    expect(find.byKey(const ValueKey('teach-replay-list')), findsOneWidget);
+    expect(find.byKey(const ValueKey('teach-replay-menu')), findsOneWidget);
+    expect(
+      find.textContaining('open Saved Replays so the replay list shows'),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(find.byKey(const ValueKey('teach-replay-list')));
+    await tester.tap(find.byKey(const ValueKey('teach-replay-list')));
+    await tester.pumpAndSettle();
+    expect(find.text('Taught'), findsOneWidget);
+    expect(controller.screenReferencesTaught, isFalse);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('teach-replay-menu')));
+    await tester.tap(find.byKey(const ValueKey('teach-replay-menu')));
+    await tester.pumpAndSettle();
+    expect(controller.screenReferencesTaught, isTrue);
+    expect(
+      controller.optionBlockers.map((blocker) => blocker.id),
+      isNot(contains(RecorderBlockerId.screenReferences)),
+    );
+  });
+
+  testWidgets('a delayed initial reference read cannot replace a new capture',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final referenceStore = _DelayedScreenReferenceStore();
+    final controller = _controller(
+      _FakeBackend(),
+      _CompletingEngine(),
+      screenThumbnailSource: _FakeThumbnailSource(
+        makeTestBmp(width: 192, height: 108),
+      ),
+      screenReferenceStore: referenceStore,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              key: const ValueKey('open-teach-screens'),
+              onPressed: () => showTeachScreensDialog(context, controller),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('open-teach-screens')));
+    await tester.pumpAndSettle();
+
+    expect(referenceStore.replayListReadStarted, isTrue);
+    await tester.ensureVisible(find.byKey(const ValueKey('teach-replay-list')));
+    await tester.tap(find.byKey(const ValueKey('teach-replay-list')));
+    await tester.pumpAndSettle();
+
+    final replayListState = find.byKey(
+      const ValueKey('teach-state-replayList'),
+    );
+    expect(tester.widget<Text>(replayListState).data, 'Taught');
+
+    referenceStore.pendingReplayListRead.complete(null);
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<Text>(replayListState).data, 'Taught');
+    expect(find.text('No screen captured'), findsOneWidget);
+  });
+
   testWidgets('the phase indicator follows selected input readiness changes',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
@@ -268,6 +388,8 @@ RecorderController _controller(
     outputDirectory: '/tmp/afterimage',
   ),
   OutputDirectoryPicker? picker,
+  ObsThumbnailSource? screenThumbnailSource,
+  ScreenReferenceStore? screenReferenceStore,
 }) {
   return RecorderController(
     backend: backend,
@@ -275,6 +397,8 @@ RecorderController _controller(
     directoryPicker: picker ?? () async => null,
     outputPreflight: const _ReadyOutputPreflight(),
     batchDirectories: _MemoryBatchDirectories(),
+    screenThumbnailSource: screenThumbnailSource,
+    screenReferenceStore: screenReferenceStore,
     engineFactory: ({
       required monitor,
       required menuInput,
@@ -369,6 +493,47 @@ class _CaptureAwareFakeBackend extends _FakeBackend
   @override
   Future<FrameCapturePort> openFrameCapture() async =>
       const NoopFrameCapturePort();
+}
+
+class _FakeThumbnailSource implements ObsThumbnailSource {
+  _FakeThumbnailSource(this.bytes);
+
+  final List<int> bytes;
+
+  @override
+  Future<RgbImage> captureThumbnail() async => decodeBmpImage(bytes);
+}
+
+class _MemoryScreenReferenceStore implements ScreenReferenceStore {
+  final Map<ScreenCheck, List<int>> values = {};
+
+  @override
+  Future<List<int>?> readBmp(ScreenCheck check) async => values[check];
+
+  @override
+  Future<void> writeBmp(ScreenCheck check, List<int> bytes) async {
+    values[check] = bytes;
+  }
+}
+
+class _DelayedScreenReferenceStore implements ScreenReferenceStore {
+  final Completer<List<int>?> pendingReplayListRead = Completer();
+  final Map<ScreenCheck, List<int>> values = {};
+  bool replayListReadStarted = false;
+
+  @override
+  Future<List<int>?> readBmp(ScreenCheck check) async {
+    if (check == ScreenCheck.replayList && !replayListReadStarted) {
+      replayListReadStarted = true;
+      return pendingReplayListRead.future;
+    }
+    return values[check];
+  }
+
+  @override
+  Future<void> writeBmp(ScreenCheck check, List<int> bytes) async {
+    values[check] = bytes;
+  }
 }
 
 class _CompletingEngine implements RecordingEngine {

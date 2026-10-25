@@ -12,6 +12,8 @@ import '../services/output_directory_picker.dart';
 import '../services/obs_connection_service.dart';
 import '../services/batch_output_directory.dart';
 import '../services/recorder_preferences.dart';
+import '../services/bmp_image.dart';
+import '../services/obs_screen_guard.dart';
 import '../services/output_launcher.dart';
 import '../services/setup_locations.dart';
 import '../services/output_directory_preflight.dart';
@@ -44,6 +46,8 @@ class RecorderController extends ChangeNotifier {
     this.preferences,
     this.finder,
     this.notesRepository,
+    this.screenThumbnailSource,
+    ScreenReferenceStore? screenReferenceStore,
     bool Function()? platformIsLinux,
     BatchOutputDirectory? batchDirectories,
     OutputLauncher? outputLauncher,
@@ -52,6 +56,8 @@ class RecorderController extends ChangeNotifier {
     this.outputPreflight = const FileOutputDirectoryPreflight(),
     RecordingOptions options = const RecordingOptions(),
   })  : _options = options,
+        _screenReferenceStore =
+            screenReferenceStore ?? FileScreenReferenceStore(),
         batchDirectories = batchDirectories ?? BatchOutputDirectory(),
         outputLauncher = outputLauncher ?? OutputLauncher(),
         _platformIsLinux = platformIsLinux ?? (() => Platform.isLinux) {
@@ -63,6 +69,8 @@ class RecorderController extends ChangeNotifier {
   final RecorderPreferences? preferences;
   final FinderPort? finder;
   final NotesRepository? notesRepository;
+  final ObsThumbnailSource? screenThumbnailSource;
+  final ScreenReferenceStore _screenReferenceStore;
   final bool Function() _platformIsLinux;
   final BatchOutputDirectory batchDirectories;
   final OutputLauncher outputLauncher;
@@ -72,6 +80,9 @@ class RecorderController extends ChangeNotifier {
   String? _recentOutputDirectory;
   String? _finderDirectory;
   bool _initialized = false;
+  final Map<ScreenCheck, bool> _screenReferenceStatus = {
+    for (final check in ScreenCheck.values) check: false,
+  };
   String? preferenceNotice;
 
   Future<SetupReport> Function()? setupInspector;
@@ -89,8 +100,8 @@ class RecorderController extends ChangeNotifier {
     _initialized = true;
     final before = _options;
     final saved = await preferences?.load();
-    if (_disposed || saved == null) return;
-    if (identical(before, _options)) {
+    if (_disposed) return;
+    if (saved != null && identical(before, _options)) {
       T readEnum<T extends Enum>(
         List<T> values,
         String key,
@@ -125,6 +136,9 @@ class RecorderController extends ChangeNotifier {
         captureFrameData: saved['captureFrameData'] is bool
             ? saved['captureFrameData'] as bool
             : _options.captureFrameData,
+        screenGuardEnabled: saved['screenGuardEnabled'] is bool
+            ? saved['screenGuardEnabled'] as bool
+            : _options.screenGuardEnabled,
       );
       setupLocations = LocalSetupLocations(
         gameDirectory: _storedPath(saved['gameDirectory']),
@@ -138,6 +152,7 @@ class RecorderController extends ChangeNotifier {
       _recentOutputDirectory = _storedPath(saved['recentOutputDirectory']);
       _finderDirectory = _storedPath(saved['finderDirectory']);
     }
+    await refreshScreenReferences();
     notifyListeners();
   }
 
@@ -162,6 +177,7 @@ class RecorderController extends ChangeNotifier {
       'customReplayCount': _options.customReplayCount,
       'videoMode': _options.videoMode.name,
       'captureFrameData': _options.captureFrameData,
+      'screenGuardEnabled': _options.screenGuardEnabled,
       'gameDirectory': setupLocations.gameDirectory,
       'replayDirectory': setupLocations.replayDirectory,
       'recentOutputs': List<String>.of(_recentOutputPaths),
@@ -384,6 +400,51 @@ class RecorderController extends ChangeNotifier {
       backend is FrameCaptureAwareNativeRecorderBackend &&
       (backend as FrameCaptureAwareNativeRecorderBackend).supportsFrameCapture;
 
+  bool get screenReferencesTaught => ScreenCheck.values
+      .every((check) => _screenReferenceStatus[check] == true);
+
+  Future<void> refreshScreenReferences() async {
+    for (final check in ScreenCheck.values) {
+      _screenReferenceStatus[check] = await _readScreenReference(check) != null;
+    }
+    notifyListeners();
+  }
+
+  Future<RgbImage?> readScreenReference(ScreenCheck check) =>
+      _readScreenReference(check);
+
+  Future<RgbImage?> _readScreenReference(ScreenCheck check) async {
+    try {
+      final bytes = await _screenReferenceStore.readBmp(check);
+      return bytes == null ? null : decodeBmpImage(bytes);
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<RgbImage> teachScreen(ScreenCheck check) async {
+    if (_isBusy) {
+      throw StateError('Screens cannot be taught while a batch is running.');
+    }
+    final source = screenThumbnailSource ??
+        (obsConnection is ObsThumbnailSource ? obsConnection : null);
+    if (source == null) {
+      throw StateError('Connect OBS before teaching a game screen.');
+    }
+    final image = await source.captureThumbnail();
+    if (_isBusy) {
+      throw StateError('Screens cannot be taught while a batch is running.');
+    }
+    final bytes = image.bmpBytes;
+    if (bytes == null) {
+      throw StateError('OBS did not return BMP bytes for the screen image.');
+    }
+    await _screenReferenceStore.writeBmp(check, bytes);
+    _screenReferenceStatus[check] = true;
+    notifyListeners();
+    return image;
+  }
+
   String get frameCaptureUnavailableReason {
     if (backend case final FrameCaptureAwareNativeRecorderBackend capable) {
       final detail = capable.frameCaptureUnsupportedReason?.trim();
@@ -508,6 +569,16 @@ class RecorderController extends ChangeNotifier {
         message: readiness.detail,
         source: RecorderBlockerSource.options,
         action: RecorderBlockerAction.openAdvancedOptions,
+      ));
+    }
+
+    if (_options.screenGuardEnabled && !screenReferencesTaught) {
+      add(const RecorderBlocker(
+        id: RecorderBlockerId.screenReferences,
+        label: 'Screen references',
+        message: 'Teach both game screens before enabling screen checks.',
+        source: RecorderBlockerSource.options,
+        action: RecorderBlockerAction.teachScreens,
       ));
     }
 
@@ -878,6 +949,23 @@ class RecorderController extends ChangeNotifier {
         organizer: organizer,
         onEvent: _onEngineEvent,
       );
+      final screenGuard = !_options.screenGuardEnabled
+          ? const NoopScreenGuard()
+          : obs is ObsThumbnailSource
+              ? ObsScreenGuard(
+                  source: obs as ObsThumbnailSource,
+                  references: _screenReferenceStore,
+                )
+              : const UnavailableScreenGuard(
+                  'The active OBS connection cannot capture screen thumbnails.',
+                );
+      if (engine case final ScreenGuardAwareRecordingEngine aware) {
+        aware.configureScreenGuard(screenGuard);
+      } else if (_options.screenGuardEnabled) {
+        throw StateError(
+          'The configured recording engine cannot verify the game screen.',
+        );
+      }
       if (frameCapture != null && engine is FrameCaptureAwareRecordingEngine) {
         engine.configureFrameCapture(frameCapture);
       }
