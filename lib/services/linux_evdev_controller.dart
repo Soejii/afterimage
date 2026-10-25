@@ -594,15 +594,14 @@ class LinuxEvdevMenuInput implements MenuInputPort, ClosableMenuInputPort {
     LinuxEvdevControllerDiscovery? discovery,
     LinuxEvdevDeviceFactory? factory,
     this.buttonHold = const Duration(milliseconds: 80),
-    this.buttonDelay = const Duration(milliseconds: 800),
     LinuxEvdevDelay? delay,
   })  : discovery = discovery ?? const LinuxEvdevControllerDiscovery(),
         factory = factory ?? const LinuxEvdevNativeDeviceFactory(),
         delay = delay ?? Future<void>.delayed {
-    if (buttonHold < Duration.zero || buttonDelay < Duration.zero) {
+    if (buttonHold < Duration.zero) {
       throw ArgumentError.value(
-        buttonHold < Duration.zero ? buttonHold : buttonDelay,
-        buttonHold < Duration.zero ? 'buttonHold' : 'buttonDelay',
+        buttonHold,
+        'buttonHold',
         'must not be negative',
       );
     }
@@ -611,7 +610,6 @@ class LinuxEvdevMenuInput implements MenuInputPort, ClosableMenuInputPort {
   final LinuxEvdevControllerDiscovery discovery;
   final LinuxEvdevDeviceFactory factory;
   final Duration buttonHold;
-  final Duration buttonDelay;
   final LinuxEvdevDelay delay;
 
   LinuxEvdevDevicePort? _device;
@@ -629,9 +627,9 @@ class LinuxEvdevMenuInput implements MenuInputPort, ClosableMenuInputPort {
     try {
       final device = await _ensureDevice();
       switch (action) {
-        case ReplayMenuAction.openReplay:
+        case ReplayMenuAction.openReplayMenu:
           await _tap(device);
-          await delay(buttonDelay);
+        case ReplayMenuAction.confirmMenuItem:
           await _tap(device);
         case ReplayMenuAction.exitToReplayList:
           await _tap(device);

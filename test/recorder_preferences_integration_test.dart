@@ -16,6 +16,7 @@ void main() {
       'inputMode': 'virtualController',
       'videoMode': 'combined',
       'captureFrameData': true,
+      'screenGuardEnabled': true,
       'outputDirectory': outputDirectory,
     });
     final controller = RecorderController(
@@ -30,6 +31,7 @@ void main() {
     expect(controller.options.inputMode, InputMode.controller);
     expect(controller.options.videoMode, VideoMode.combined);
     expect(controller.options.captureFrameData, isTrue);
+    expect(controller.options.screenGuardEnabled, isTrue);
     expect(controller.options.outputDirectory, outputDirectory);
     controller.dispose();
   });
@@ -81,6 +83,7 @@ void main() {
         videoMode: VideoMode.combined,
         outputDirectory: Directory.systemTemp.path,
         captureFrameData: true,
+        screenGuardEnabled: true,
       ),
     );
     await preferences.preferences.flush();
@@ -94,6 +97,7 @@ void main() {
       'customReplayCount': 8,
       'videoMode': 'combined',
       'captureFrameData': true,
+      'screenGuardEnabled': true,
       'gameDirectory': null,
       'replayDirectory': null,
       'recentOutputs': <String>[],

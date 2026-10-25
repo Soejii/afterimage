@@ -236,7 +236,8 @@ void main() {
           delay: (duration) async => delays.add(duration),
         );
 
-        await input.perform(ReplayMenuAction.openReplay);
+        await input.perform(ReplayMenuAction.openReplayMenu);
+        await input.perform(ReplayMenuAction.confirmMenuItem);
 
         expect(_decodeEvents(device.writes), [
           _event(LinuxEvdevEventType.key, LinuxEvdevEventCode.btnSouth, 1),
@@ -250,7 +251,6 @@ void main() {
         ]);
         expect(delays, [
           const Duration(milliseconds: 80),
-          const Duration(milliseconds: 800),
           const Duration(milliseconds: 80),
         ]);
       },

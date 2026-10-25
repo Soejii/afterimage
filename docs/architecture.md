@@ -3,7 +3,7 @@
 Afterimage uses a ports-and-adapters pattern. `lib/domain/recorder_contracts.dart`
 is the seam: the batch engine talks only to `ReplayMonitorPort`, `MenuInputPort`,
 `ObsRecorderPort`, `OutputOrganizerPort`, `SummaryWriterPort`, `FrameCapturePort`,
-and `ReplayClock`.
+`ScreenGuardPort`, and `ReplayClock`.
 Nothing in `lib/domain` or `lib/services/replay_batch_engine.dart` touches
 `dart:ffi`, process memory, or a socket. Add a capability by extending a
 contract, not by reaching into an adapter from the engine.
@@ -36,6 +36,12 @@ and closes OBS in its lifecycle and does not let close errors replace the
 primary `ReplayBatchResult`. Optional frame capture begins after `battleStarted`
 and ends before the result delay; capture failures are diagnostic-only and never
 change replay or recording outcomes.
+
+When screen checks are enabled, `ScreenGuardPort` verifies the replay-list
+header before the first confirm and the View Replay highlight after opening the
+replay menu, before the second confirm. Checks poll through `ReplayClock`; OBS
+screenshots and user-taught BMP references stay in the adapter layer. A failed
+or unavailable screen check never sends the next key.
 
 ## Platform adapters
 
@@ -86,6 +92,10 @@ Platform-neutral services live in `lib/services/` and are directly testable:
   its response and the matching RecordStateChanged stopped event arrive, in
   either order. A bounded timeout closes the connection without releasing a
   possibly unfinished recording to the output organizer.
+- `lib/services/obs_screen_guard.dart` captures read-only OBS thumbnails,
+  compares the required RGB regions with user-taught references, and stores the
+  original BMP bytes beside `preferences.json`. `lib/services/bmp_image.dart`
+  decodes supported BMP variants without a package dependency.
 - `lib/services/obs_config_discovery.dart` reads native Linux, Flatpak Linux, and
   Windows config locations without writing credentials to disk or logs.
 - `lib/services/setup_service.dart` searches Steam manifests and configured library folders,
@@ -160,6 +170,9 @@ turns red. They come from `AGENTS.md`'s safety boundaries.
 - **Frame capture is optional and off by default.** It reads raw values only,
   runs away from the UI and replay-monitor loop, and a capture error is recorded
   as a diagnostic without failing or truncating the replay or its OBS recording.
+- **A failed or unavailable screen check never sends the next key.** The
+  optional screen guard is off by default and needs both user-taught screen
+  references before it can be enabled for a batch.
 - **No silent input fallback.** An unavailable controller reports itself and
   keeps recording locked. It never degrades to keyboard.
 - **Nothing is overwritten.** The organizer moves with collision-checked names

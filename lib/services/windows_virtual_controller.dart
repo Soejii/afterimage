@@ -16,10 +16,8 @@ class WindowsVirtualControllerMapping {
   }) : sequences = _validateSequences(sequences ?? defaultSequences);
 
   static const Map<ReplayMenuAction, List<int>> defaultSequences = {
-    ReplayMenuAction.openReplay: <int>[
-      WindowsControllerButton.south,
-      WindowsControllerButton.south,
-    ],
+    ReplayMenuAction.openReplayMenu: <int>[WindowsControllerButton.south],
+    ReplayMenuAction.confirmMenuItem: <int>[WindowsControllerButton.south],
     ReplayMenuAction.exitToReplayList: <int>[
       WindowsControllerButton.south,
     ],

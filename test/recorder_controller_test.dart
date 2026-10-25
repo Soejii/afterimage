@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -9,6 +10,9 @@ import 'package:afterimage/presentation/recorder_blocker.dart';
 import 'package:afterimage/presentation/recorder_controller.dart';
 import 'package:afterimage/services/output_directory_preflight.dart';
 import 'package:afterimage/services/replay_batch_engine.dart';
+import 'package:afterimage/services/bmp_image.dart';
+import 'package:afterimage/services/obs_screen_guard.dart';
+import 'support/screen_test_support.dart';
 
 void main() {
   test('readiness checks each input mode and does not claim unsupported input',
@@ -266,6 +270,83 @@ void main() {
     controller.dispose();
   });
 
+  test('disabled screen checks configure a no-op guard', () async {
+    final output = await Directory.systemTemp.createTemp(
+      'afterimage-controller-screen-noop-test-',
+    );
+    addTearDown(() => output.delete(recursive: true));
+    final engine = _FakeEngine();
+    final controller = RecorderController(
+      backend: _FakeBackend(),
+      options: RecordingOptions(outputDirectory: output.path),
+      engineFactory: ({
+        required monitor,
+        required menuInput,
+        required obs,
+        required organizer,
+        required onEvent,
+      }) {
+        engine.onEvent = onEvent;
+        return engine;
+      },
+    )..setSetupReport(_readyReport());
+    await controller.refreshReadiness();
+
+    final run = controller.startBatch();
+    await _waitUntil(() => engine.startCalls == 1);
+    expect(engine.configuredScreenGuard, isA<NoopScreenGuard>());
+    engine.complete(const ReplayBatchResult(
+      outcome: ReplayBatchOutcome.completed,
+      replays: <ReplayResult>[],
+    ));
+    await run;
+    controller.dispose();
+  });
+
+  test('enabled screen checks configure the OBS guard after references load',
+      () async {
+    final output = await Directory.systemTemp.createTemp(
+      'afterimage-controller-screen-guard-test-',
+    );
+    addTearDown(() => output.delete(recursive: true));
+    final bytes = makeTestBmp(width: 192, height: 108);
+    final references = _FakeScreenReferenceStore()
+      ..values[ScreenCheck.replayList] = bytes
+      ..values[ScreenCheck.replayMenuViewHighlighted] = bytes;
+    final engine = _FakeEngine();
+    final controller = RecorderController(
+      backend: _FakeBackend(),
+      options: RecordingOptions(
+        outputDirectory: output.path,
+        screenGuardEnabled: true,
+      ),
+      screenReferenceStore: references,
+      engineFactory: ({
+        required monitor,
+        required menuInput,
+        required obs,
+        required organizer,
+        required onEvent,
+      }) {
+        engine.onEvent = onEvent;
+        return engine;
+      },
+    )..setSetupReport(_readyReport());
+    await controller.initialize();
+    await controller.refreshReadiness();
+    expect(controller.screenReferencesTaught, isTrue);
+
+    final run = controller.startBatch();
+    await _waitUntil(() => engine.startCalls == 1);
+    expect(engine.configuredScreenGuard, isA<ObsScreenGuard>());
+    engine.complete(const ReplayBatchResult(
+      outcome: ReplayBatchOutcome.completed,
+      replays: <ReplayResult>[],
+    ));
+    await run;
+    controller.dispose();
+  });
+
   test('capture setup failure reaches the engine as a failed port', () async {
     final capture = _RecordingCapture();
     final backend = _CaptureAwareBackend(capture)
@@ -476,11 +557,15 @@ class _BlockingOutputPreflight implements OutputDirectoryPreflight {
   }
 }
 
-class _FakeEngine implements FrameCaptureAwareRecordingEngine {
+class _FakeEngine
+    implements
+        FrameCaptureAwareRecordingEngine,
+        ScreenGuardAwareRecordingEngine {
   final Completer<ReplayBatchResult> _completion =
       Completer<ReplayBatchResult>();
   ReplayBatchEventSink? onEvent;
   FrameCapturePort? configuredCapture;
+  ScreenGuardPort? configuredScreenGuard;
   int startCalls = 0;
   int stopCalls = 0;
   bool _running = false;
@@ -491,6 +576,11 @@ class _FakeEngine implements FrameCaptureAwareRecordingEngine {
   @override
   void configureFrameCapture(FrameCapturePort port) {
     configuredCapture = port;
+  }
+
+  @override
+  void configureScreenGuard(ScreenGuardPort port) {
+    configuredScreenGuard = port;
   }
 
   @override
@@ -585,7 +675,7 @@ class _FakeInput implements MenuInputPort {
   Future<void> perform(ReplayMenuAction action) async {}
 }
 
-class _FakeObs implements ObsRecorderPort {
+class _FakeObs implements ObsRecorderPort, ObsThumbnailSource {
   @override
   Future<void> connect() async {}
 
@@ -601,6 +691,23 @@ class _FakeObs implements ObsRecorderPort {
 
   @override
   Future<void> close() async {}
+
+  @override
+  Future<RgbImage> captureThumbnail() async => decodeBmpImage(
+        makeTestBmp(width: 192, height: 108),
+      );
+}
+
+class _FakeScreenReferenceStore implements ScreenReferenceStore {
+  final Map<ScreenCheck, List<int>> values = {};
+
+  @override
+  Future<List<int>?> readBmp(ScreenCheck check) async => values[check];
+
+  @override
+  Future<void> writeBmp(ScreenCheck check, List<int> bytes) async {
+    values[check] = bytes;
+  }
 }
 
 class _FakeOrganizer implements OutputOrganizerPort {

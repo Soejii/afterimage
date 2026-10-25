@@ -20,6 +20,7 @@ enum RecorderBlockerId {
   replayLibrary,
   inputUnavailable,
   inputChecking,
+  screenReferences,
   outputFolder,
   replayCountUnavailable,
   replayCountInvalid,
@@ -48,6 +49,7 @@ enum RecorderBlockerAction {
   locateGame,
   locateReplays,
   openAdvancedOptions,
+  teachScreens,
 }
 
 class RecorderBlocker implements Comparable<RecorderBlocker> {

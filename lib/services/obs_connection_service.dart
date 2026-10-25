@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../domain/obs_models.dart';
+import 'bmp_image.dart';
 import 'obs_config_discovery.dart';
+import 'obs_screen_guard.dart';
 import 'obs_websocket_recorder.dart';
 
 /// Why Afterimage cannot currently drive OBS.
@@ -36,7 +38,8 @@ enum ObsSetupStage {
 
 /// One in-memory connection choice shared by setup, preview and recording.
 /// Credentials are never included in preferences, diagnostics or history.
-class ObsConnectionService extends ChangeNotifier implements ObsReadinessProbe {
+class ObsConnectionService extends ChangeNotifier
+    implements ObsReadinessProbe, ObsThumbnailSource {
   ObsConnectionService({
     this.discovery = const ObsWebSocketConfigDiscovery(),
     this.fallbackConfig = const ObsWebSocketConfig(),
@@ -216,6 +219,23 @@ class ObsConnectionService extends ChangeNotifier implements ObsReadinessProbe {
       await client.close();
       isChecking = false;
       _notify();
+    }
+  }
+
+  @override
+  Future<RgbImage> captureThumbnail() async {
+    final config = _selected;
+    if (config == null) {
+      throw const ObsConnectionException(
+        'Connect OBS before teaching a game screen.',
+      );
+    }
+    final client = recorderFactory(config);
+    try {
+      await client.connect();
+      return await client.captureThumbnail();
+    } finally {
+      await client.close();
     }
   }
 

@@ -15,6 +15,7 @@ const Set<String> recorderPreferenceKeys = <String>{
   'customReplayCount',
   'videoMode',
   'captureFrameData',
+  'screenGuardEnabled',
   'finderDirectory',
 };
 

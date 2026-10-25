@@ -103,6 +103,7 @@ class ReplayBatchTiming {
     this.startupDelay = const Duration(seconds: 5),
     this.menuDelay = const Duration(seconds: 2),
     this.actionDelay = const Duration(milliseconds: 800),
+    this.screenCheckTimeout = const Duration(seconds: 5),
     this.frameCaptureStopTimeout = const Duration(seconds: 3),
     this.absentReadWindow = const Duration(seconds: 3),
     this.listConfirmationPolls = 4,
@@ -116,6 +117,7 @@ class ReplayBatchTiming {
   final Duration startupDelay;
   final Duration menuDelay;
   final Duration actionDelay;
+  final Duration screenCheckTimeout;
   final Duration frameCaptureStopTimeout;
   final Duration absentReadWindow;
   final int listConfirmationPolls;

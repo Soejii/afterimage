@@ -2,7 +2,7 @@
 
 This file records what works in the current alpha and what is still unverified.
 
-Version `0.2.2+5` is an alpha desktop release:
+Version `0.3.0+6` is an alpha desktop release:
 
 - One Material 3 dark workspace screen that moves through four states:
   blocked, ready, running, and finished. While blocked it leads with a single
@@ -39,6 +39,10 @@ Version `0.2.2+5` is an alpha desktop release:
 - Linux optionally writes raw per-replay frame data to JSONL sidecars. The option
   is off by default and does not affect recording results; live GGST frame
   capture remains unverified. Windows frame capture is not implemented yet.
+- Optional OBS screen checks are implemented and off by default. Users teach
+  the replay-list and View Replay menu screens from their own game; failed or
+  unavailable checks prevent the next menu key. Live behavior remains
+  unverified on both Linux and Windows.
 - On Linux, when frame capture is enabled and a completed batch contains a capture
   sidecar, Afterimage can start the optional `ggst-input-tracker` notes finder in
   the background. The Notes page lists draft and applied previews, supports

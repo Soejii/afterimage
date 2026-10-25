@@ -31,9 +31,52 @@ abstract interface class ReplayMonitorGWorldPointerPort {
 /// Semantic actions keep the engine independent of keyboard and controller
 /// details. Each platform/input adapter maps these actions to its own device.
 enum ReplayMenuAction {
-  openReplay,
+  /// Opens the replay's context menu with one confirm press.
+  openReplayMenu,
+
+  /// Confirms the highlighted item in the context menu.
+  confirmMenuItem,
   exitToReplayList,
   selectNextReplay,
+}
+
+enum ScreenCheck {
+  replayList,
+  replayMenuViewHighlighted,
+}
+
+class ScreenCheckResult {
+  const ScreenCheckResult({
+    required this.matched,
+    required this.score,
+    this.error,
+  });
+
+  final bool matched;
+  final double score;
+  final Object? error;
+}
+
+abstract interface class ScreenGuardPort {
+  Future<ScreenCheckResult> check(ScreenCheck check);
+}
+
+class NoopScreenGuard implements ScreenGuardPort {
+  const NoopScreenGuard();
+
+  @override
+  Future<ScreenCheckResult> check(ScreenCheck check) async =>
+      const ScreenCheckResult(matched: true, score: 0);
+}
+
+class UnavailableScreenGuard implements ScreenGuardPort {
+  const UnavailableScreenGuard(this.detail);
+
+  final String detail;
+
+  @override
+  Future<ScreenCheckResult> check(ScreenCheck check) async =>
+      ScreenCheckResult(matched: false, score: 255, error: detail);
 }
 
 abstract interface class InputSafetyPort {
@@ -149,6 +192,12 @@ abstract interface class FrameCaptureAwareNativeRecorderBackend {
 abstract interface class FrameCaptureAwareRecordingEngine
     implements RecordingEngine {
   void configureFrameCapture(FrameCapturePort port);
+}
+
+/// Optional engine extension so existing engine factories remain compatible.
+abstract interface class ScreenGuardAwareRecordingEngine
+    implements RecordingEngine {
+  void configureScreenGuard(ScreenGuardPort port);
 }
 
 class FailedFrameCapturePort implements FrameCapturePort {
