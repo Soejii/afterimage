@@ -7,198 +7,56 @@ import 'package:afterimage/domain/notes_models.dart';
 import 'package:afterimage/services/notes_repository.dart';
 
 void main() {
-  group('notes cards', () {
-    test('split and join keep the preamble and card order', () {
-      const source = '# I-No notes\n\nintro\n\n'
-          '### blocked [[I-No 2S]]\n'
-          'lab: late 6P\n\n'
-          '### staggered [[I-No S Stroke the Big Tree]]\n'
-          'seen: 00:17\n';
+  group('sequence list', () {
+    test('parses cards, sequences, recordings, mixups and clips', () {
+      final document = SequenceDocument.fromJson(_document());
 
-      final document = splitNoteSection(source);
+      expect(document.opponent, 'May');
+      expect(document.strivelabsRecordings, '/game/ue4ss/recordings');
+      final card = document.cards.single;
+      expect(card.title, 'blocked S Mr. Dolphin Vertical');
+      expect(card.flags.single.reason, 'keeps losing: hit 5 of 8');
+      expect(
+          card.leadIns.map((leadIn) => leadIn.label), ['2K', 'string opener']);
+      final sequence = card.sequences.first;
+      expect(sequence.where, 'r3 · round 1 · 06:57.1');
+      expect(sequence.summary,
+          'after 2K · then 5H · you: block crouch · hit · -70');
+      expect(sequence.recording?.frames, 129);
+      expect(sequence.clip?.file, 'c1-s1.mp4');
+      expect(card.sequences.last.recording, isNull);
+      expect(card.sequences.last.recordingError, 'no stream');
+      expect(card.mixups.single.label, 'after 2K');
+      expect(card.mixups.single.files.map((file) => file.followUp),
+          ['5H', 'jump back']);
+    });
 
-      expect(document.preamble, '# I-No notes\n\nintro');
-      expect(document.cards, hasLength(2));
-      expect(document.toMarkdown(), source);
+    test('an unknown schema is refused', () {
       expect(
-        document.removeCard(0).toMarkdown(),
-        '# I-No notes\n\nintro\n\n'
-        '### staggered [[I-No S Stroke the Big Tree]]\n'
-        'seen: 00:17\n',
+        () => SequenceDocument.fromJson({..._document(), 'schema': 2}),
+        throwsFormatException,
       );
-      expect(
-        document
-            .replaceCard(0, const NoteCard('### edited\nnew body'))
-            .toMarkdown(),
-        '# I-No notes\n\nintro\n\n### edited\nnew body\n\n'
-        '### staggered [[I-No S Stroke the Big Tree]]\n'
-        'seen: 00:17\n',
-      );
+    });
+
+    test('only plain .txt names are safe to write', () {
+      LabRecording named(String name) =>
+          LabRecording(fileName: name, text: '', frames: 5);
+
+      expect(named('May - 2K then 5H r3 06m57.1s.txt').hasSafeFileName, isTrue);
+      for (final name in [
+        '../escape.txt',
+        'sub/dir.txt',
+        r'sub\dir.txt',
+        '.hidden.txt',
+        'not-text.sh',
+        '',
+      ]) {
+        expect(named(name).hasSafeFileName, isFalse, reason: name);
+      }
     });
   });
 
-  group('clip matching', () {
-    final hit = NoteClip.fromJson({
-      'file': 'hit.mp4',
-      'video_time': '00:54',
-      'answer': 'Ky 6P',
-      'outcome': 'hit',
-      'counter_hit': true,
-    });
-    final trade = NoteClip.fromJson({
-      'file': 'trade.mp4',
-      'video_time': '01:01',
-      'answer': 'Ky 5P',
-      'outcome': 'trade',
-    });
-    final index = ClipIndex(
-      video: '/tmp/replays.mp4',
-      situations: [
-        ClipSituation(
-          heading: '### exact [[I-No 2S]]',
-          entry: 'block',
-          posture: 'ground',
-          herMoveLink: 'I-No 2S',
-          clips: [trade, hit],
-        ),
-        ClipSituation(
-          heading: null,
-          entry: 'block',
-          posture: 'ground',
-          herMoveLink: 'I-No 5H',
-          clips: [hit],
-        ),
-        ClipSituation(
-          heading: null,
-          entry: 'stagger',
-          posture: 'ground',
-          herMoveLink: 'I-No S Stroke the Big Tree',
-          clips: [trade],
-        ),
-      ],
-      errors: const [],
-    );
-
-    test('exact heading wins and hits come first', () {
-      final clips = matchClipsForCard(
-        const NoteCard('### exact [[I-No 2S]]\nbody'),
-        index,
-      );
-      expect(clips.map((clip) => clip.file), ['hit.mp4', 'trade.mp4']);
-      expect(clips.first.caption(), '00:54 · Ky 6P · hit (CH)');
-    });
-
-    test('rule fallback distinguishes stagger from block', () {
-      expect(
-        matchClipsForCard(
-          const NoteCard('### blocked [[I-No 5H]]'),
-          index,
-        ).single.file,
-        'hit.mp4',
-      );
-      expect(
-        matchClipsForCard(
-          const NoteCard('### staggered [[I-No S Stroke the Big Tree]]'),
-          index,
-        ).single.file,
-        'trade.mp4',
-      );
-    });
-
-    test('cards without a matching situation have no clips', () {
-      expect(
-        matchClipsForCard(const NoteCard('### blocked [[I-No Sweep]]'), index),
-        isEmpty,
-      );
-    });
-  });
-
-  group('situation tables', () {
-    const body = 'she is -13 at range\n'
-        '\n'
-        '| her option | times | beats | loses to | you did |\n'
-        '| --- | --- | --- | --- | --- |\n'
-        '| [[Elphelt 2H]] | 2 | backdash | dash, [[Ky 2P]] | backdash hit x2 |\n'
-        '| no attack | 1 | untested | untested | dash won |\n'
-        '\n'
-        'habit: backdash 2 of 2 hit\n'
-        'lab: record MC > 2H\n'
-        'seen: batch_x 01:34, 03:39';
-
-    test('a card body splits into lines and one table with row options', () {
-      final blocks = parseNoteBody(body);
-
-      expect(blocks, hasLength(7));
-      expect((blocks[0] as NoteTextLine).text, 'she is -13 at range');
-      final table = blocks[2] as NoteTable;
-      expect(table.header,
-          ['her option', 'times', 'beats', 'loses to', 'you did']);
-      expect(table.rows.map((row) => row.option), ['Elphelt 2H', 'no attack']);
-      expect(table.rows.first.cells[3], 'dash, [[Ky 2P]]');
-      expect((blocks[4] as NoteTextLine).label, 'habit');
-      expect((blocks[4] as NoteTextLine).rest, 'backdash 2 of 2 hit');
-      expect((blocks[5] as NoteTextLine).label, 'lab');
-    });
-
-    test('a wikilink alias pipe inside a cell does not split the cell', () {
-      final table = parseNoteBody(
-        '| her option | times |\n'
-        '| --- | --- |\n'
-        '| [[Elphelt 2H|2H]] | 2 |',
-      ).single as NoteTable;
-
-      expect(table.rows.single.cells, ['[[Elphelt 2H|2H]]', '2']);
-      expect(table.rows.single.option, 'Elphelt 2H');
-    });
-
-    test('rows take the clips cut for their option', () {
-      NoteClip clip(String file, String? option, String? herNext) =>
-          NoteClip.fromJson({
-            'file': file,
-            'option': option,
-            'her_next': herNext,
-            'outcome': 'hit',
-          });
-      final clips = [
-        clip('a.mp4', 'Elphelt 2H', 'Elphelt 2H'),
-        clip('b.mp4', 'no attack', null),
-        clip('c.mp4', null, 'Elphelt 2H'),
-        clip('d.mp4', null, null),
-      ];
-
-      expect(clipsForOption(clips, 'Elphelt 2H').map((c) => c.file),
-          ['a.mp4', 'c.mp4']);
-      expect(clipsForOption(clips, 'no attack').map((c) => c.file),
-          ['b.mp4', 'd.mp4']);
-    });
-
-    test('a situation keeps every clip, not only four', () {
-      final clips = [
-        for (var index = 0; index < 9; index++)
-          NoteClip.fromJson({'file': '$index.mp4', 'outcome': 'hit'}),
-      ];
-      final index = ClipIndex(
-        video: null,
-        situations: [
-          ClipSituation(
-            heading: '### blocked [[Elphelt 2H]]',
-            entry: 'block',
-            posture: 'ground',
-            herMoveLink: 'Elphelt 2H',
-            clips: clips,
-          ),
-        ],
-        errors: const [],
-      );
-
-      expect(
-        matchClipsForCard(const NoteCard('### blocked [[Elphelt 2H]]'), index),
-        hasLength(9),
-      );
-    });
-  });
-
-  group('finder status and apply mapping', () {
+  group('finder status', () {
     test('running with a dead pid is failed, while other statuses parse', () {
       for (final state in [
         FinderRunState.done,
@@ -224,102 +82,291 @@ void main() {
       expect(missingPid.state, FinderRunState.failed);
       expect(missingPid.message, contains('stopped'));
     });
-
-    test('apply exit codes preserve the contract messages', () {
-      expect(
-        ApplySectionResult.fromExitCode(0, opponent: 'I-No').message,
-        'Applied to the I-No note.',
-      );
-      expect(
-        ApplySectionResult.fromExitCode(2, opponent: 'I-No').state,
-        ApplySectionState.changed,
-      );
-      expect(
-        ApplySectionResult.fromExitCode(3,
-                opponent: 'I-No', stderr: 'bad draft')
-            .message,
-        'bad draft',
-      );
-      expect(
-        ApplySectionResult.fromExitCode(1, opponent: 'I-No', stderr: 'io')
-            .state,
-        ApplySectionState.failed,
-      );
-    });
   });
 
   group('notes repository', () {
     late Directory root;
-    late NotePreview preview;
+    late Directory batch;
+    late Directory game;
 
     setUp(() async {
-      root = await Directory.systemTemp.createTemp('afterimage-notes-');
-      final directory = Directory('${root.path}/out/batch-new/I-No');
-      await directory.create(recursive: true);
-      await File('${directory.path}/section.md').writeAsString(
-        'preamble\n\n### blocked [[I-No 2S]]\nlab: test\n',
-      );
-      await File('${directory.path}/meta.json').writeAsString(jsonEncode({
-        'schema': 1,
-        'opponent': 'I-No',
-        'player': 'Ky',
-        'batch_label': 'batch-new',
-        'created_at': '2026-10-03T10:18:00+07:00',
-        'status': 'draft',
-      }));
-      preview = const NotePreview(
-        batchLabel: 'batch-new',
-        opponent: 'I-No',
-        directoryPath: '',
-        sectionPath: '',
-        metadata: null,
-        cardCount: 0,
-        modifiedAt: null,
-      );
+      root = await Directory.systemTemp.createTemp('afterimage-sequences-');
+      batch = await Directory('${root.path}/videos/batch-new')
+          .create(recursive: true);
+      game = await Directory('${root.path}/game/ue4ss').create(recursive: true);
     });
 
     tearDown(() async {
       if (await root.exists()) await root.delete(recursive: true);
     });
 
-    test('write is atomic and creates the original only once', () async {
-      final repository = NotesRepository(finderDirectory: root.path);
-      final listed = await repository.list();
-      preview = listed.single;
-      final original = File('${preview.directoryPath}/section.orig.md');
-      final legacyOriginal = File('${preview.sectionPath}.orig.md');
-      final first = await repository.read(preview);
+    Future<void> writeDocument(
+      String batchLabel,
+      String opponent,
+      Map<String, Object?> json,
+    ) async {
+      final directory =
+          Directory('${root.path}/finder/out/$batchLabel/$opponent');
+      await directory.create(recursive: true);
+      await File('${directory.path}/sequences.json')
+          .writeAsString(jsonEncode(json));
+    }
 
-      await repository.write(
-        preview,
-        first.document.replaceCard(0, const NoteCard('### edited\nnew text')),
-      );
-      final savedOriginal = await original.readAsString();
-      await repository.write(
-        preview,
-        (await repository.read(preview)).document.replaceCard(
-              0,
-              const NoteCard('### edited again'),
-            ),
-      );
-
-      expect(savedOriginal, contains('### blocked [[I-No 2S]]'));
-      expect(await original.readAsString(), savedOriginal);
-      expect(await legacyOriginal.exists(), isFalse);
-      expect(await File(preview.sectionPath).readAsString(),
-          'preamble\n\n### edited again\n');
-    });
-
-    test('legacy previews are listed after metadata-backed previews', () async {
-      final legacy = Directory('${root.path}/out/batch-old/Ky');
+    test('lists sequence lists newest first and skips broken ones', () async {
+      await writeDocument('batch-old', 'May', {
+        ..._document(),
+        'created_at': '2026-11-01T10:00:00+07:00',
+      });
+      await writeDocument('batch-new', 'May', _document());
+      await writeDocument('batch-bad', 'Sol', {'schema': 99});
+      final legacy = Directory('${root.path}/finder/out/batch-old/I-No');
       await legacy.create(recursive: true);
       await File('${legacy.path}/section.md').writeAsString('### old\n');
-      final repository = NotesRepository(finderDirectory: root.path);
+
+      final repository =
+          NotesRepository(finderDirectory: '${root.path}/finder');
       final listed = await repository.list();
 
-      expect(listed, hasLength(2));
-      expect(listed.first.isLegacy, isFalse);
-      expect(listed.last.isLegacy, isTrue);
+      expect(listed.map((preview) => preview.batchLabel),
+          ['batch-new', 'batch-old']);
+      expect(listed.first.cardCount, 1);
+      expect(listed.first.flaggedCount, 1);
+      final data = await repository.read(listed.first);
+      expect(data.document.cards.single.sequences, hasLength(2));
+    });
+
+    test('Save writes to the batch folder and StriveLabs', () async {
+      final document = SequenceDocument.fromJson({
+        ..._document(),
+        'batch_folder': batch.path,
+        'strivelabs_recordings': '${game.path}/recordings',
+      });
+      final repository = NotesRepository(finderDirectory: root.path);
+      final recording = document.cards.single.sequences.first.recording!;
+
+      final result = await repository.saveRecordings(document, [recording]);
+
+      final inBatch = File('${batch.path}/recordings/${recording.fileName}');
+      final inGame = File('${game.path}/recordings/${recording.fileName}');
+      expect(await inBatch.readAsString(), recording.text);
+      expect(await inGame.readAsString(), recording.text);
+      expect(result.strivelabsDirectory, '${game.path}/recordings');
+      expect(result.message, contains('StriveLabs recordings'));
+      // Only the recording is left behind, no temporary files.
+      expect(
+        Directory('${game.path}/recordings').listSync().map(
+              (entity) => entity.path.split('/').last,
+            ),
+        [recording.fileName],
+      );
+    });
+
+    test('Save without StriveLabs writes the batch folder only', () async {
+      final document = SequenceDocument.fromJson({
+        ..._document(),
+        'batch_folder': batch.path,
+        'strivelabs_recordings': '${root.path}/uninstalled/ue4ss/recordings',
+      });
+      final repository = NotesRepository(finderDirectory: root.path);
+      final files = [
+        for (final file in document.cards.single.mixups.single.files)
+          file.recording,
+      ];
+
+      final result = await repository.saveRecordings(document, files);
+
+      expect(result.strivelabsDirectory, isNull);
+      expect(result.message, contains('StriveLabs was not found'));
+      expect(Directory('${batch.path}/recordings').listSync(), hasLength(2));
+      expect(Directory('${root.path}/uninstalled').existsSync(), isFalse);
+    });
+
+    test('a StriveLabs failure still leaves the batch copy', () async {
+      // A file where the recordings folder should be: creating it fails.
+      await File('${game.path}/recordings').writeAsString('not a folder');
+      final document = SequenceDocument.fromJson({
+        ..._document(),
+        'batch_folder': batch.path,
+        'strivelabs_recordings': '${game.path}/recordings',
+      });
+      final repository = NotesRepository(finderDirectory: root.path);
+      final recording = document.cards.single.sequences.first.recording!;
+
+      final result = await repository.saveRecordings(document, [recording]);
+
+      expect(
+        await File('${batch.path}/recordings/${recording.fileName}')
+            .readAsString(),
+        recording.text,
+      );
+      expect(result.strivelabsDirectory, isNull);
+      expect(result.strivelabsError, isNotNull);
+      expect(result.message, contains('but not to StriveLabs'));
+    });
+
+    test("Save never writes into the finder's output folder", () async {
+      final out = await Directory('${root.path}/finder/out/batch-new/May')
+          .create(recursive: true);
+      final link = Link('${root.path}/alias');
+      await link.create('${root.path}/finder/out/batch-new');
+      final repository =
+          NotesRepository(finderDirectory: '${root.path}/finder');
+      final aimedAtOut = SequenceDocument.fromJson({
+        ..._document(),
+        'batch_folder': batch.path,
+        'strivelabs_recordings': '${link.path}/May/recordings',
+      });
+      final recording = aimedAtOut.cards.single.sequences.first.recording!;
+
+      final result = await repository.saveRecordings(aimedAtOut, [recording]);
+
+      expect(result.strivelabsDirectory, isNull);
+      expect(result.strivelabsError, contains("finder's output folder"));
+      expect(Directory('${out.path}/recordings').existsSync(), isFalse);
+
+      final batchInOut = SequenceDocument.fromJson({
+        ..._document(),
+        'batch_folder': out.path,
+      });
+      await expectLater(
+        repository.saveRecordings(batchInOut, [recording]),
+        throwsStateError,
+      );
+      expect(Directory('${out.path}/recordings').existsSync(), isFalse);
+    });
+
+    test('Save refuses unsafe names and a missing batch folder', () async {
+      final repository = NotesRepository(finderDirectory: root.path);
+      final document = SequenceDocument.fromJson({
+        ..._document(),
+        'batch_folder': batch.path,
+      });
+
+      await expectLater(
+        repository.saveRecordings(document, const [
+          LabRecording(fileName: '../escape.txt', text: 'x', frames: 5),
+        ]),
+        throwsFormatException,
+      );
+      expect(File('${batch.path}/escape.txt').existsSync(), isFalse);
+
+      final gone = SequenceDocument.fromJson({
+        ..._document(),
+        'batch_folder': '${root.path}/deleted-batch',
+      });
+      await expectLater(
+        repository.saveRecordings(
+          gone,
+          [gone.cards.single.sequences.first.recording!],
+        ),
+        throwsStateError,
+      );
     });
   });
 }
+
+Map<String, Object?> _document() => {
+      'schema': 1,
+      'opponent': 'May',
+      'player': 'Ky',
+      'batch_label': 'batch-new',
+      'batch_folder': '/videos/batch-new',
+      'created_at': '2026-11-09T23:00:00+07:00',
+      'strivelabs_recordings': '/game/ue4ss/recordings',
+      'warnings': <String>[],
+      'clip_errors': <String>[],
+      'cards': [
+        {
+          'id': 'c1',
+          'title': 'blocked S Mr. Dolphin Vertical',
+          'move': 'S Mr. Dolphin Vertical',
+          'posture': 'ground',
+          'entry': 'block',
+          'flagged': true,
+          'damage': 211,
+          'hits': 5,
+          'decided': 8,
+          'count': 2,
+          'flags': [
+            {
+              'kind': 'keeps_losing',
+              'reason': 'keeps losing: hit 5 of 8',
+              'player': null,
+              'count': 8,
+            },
+          ],
+          'lead_ins': [
+            {'move': '2K', 'count': 1},
+            {'move': null, 'count': 1},
+          ],
+          'sequences': [
+            {
+              'id': 'c1-s1',
+              'replay': 3,
+              'round': 1,
+              'video_time': '06:57.1',
+              'video_time_ms': 417100,
+              'lead_in': '2K',
+              'follow_up': '5H',
+              'answer': 'block crouch',
+              'outcome': 'hit',
+              'counter_hit': false,
+              'damage': 70,
+              'flags': ['keeps_losing'],
+              'recording': {
+                'file_name': 'May - 2K then S Mr. Dolphin Vertical then 5H.txt',
+                'text': '# header\n[1]+[K] W8\n',
+                'frames': 129,
+              },
+              'recording_error': null,
+              'clip': {
+                'file': 'c1-s1.mp4',
+                'poster': 'c1-s1.jpg',
+                'video_time': '06:57.1',
+                'outcome': 'hit',
+              },
+            },
+            {
+              'id': 'c1-s2',
+              'replay': 1,
+              'round': 2,
+              'video_time': '01:02.0',
+              'video_time_ms': 62000,
+              'lead_in': null,
+              'follow_up': 'jump back',
+              'answer': 'block',
+              'outcome': 'reset',
+              'counter_hit': false,
+              'damage': 0,
+              'flags': <String>[],
+              'recording': null,
+              'recording_error': 'no stream',
+              'clip': null,
+            },
+          ],
+          'mixups': [
+            {
+              'lead_in': '2K',
+              'files': [
+                {
+                  'file_name': 'May - mixup 1 of 2 (5H).txt',
+                  'text': '# one\nW10\n',
+                  'frames': 10,
+                  'follow_up': '5H',
+                  'count': 1,
+                  'sequence_id': 'c1-s1',
+                },
+                {
+                  'file_name': 'May - mixup 2 of 2 (jump back).txt',
+                  'text': '# two\nW12\n',
+                  'frames': 12,
+                  'follow_up': 'jump back',
+                  'count': 1,
+                  'sequence_id': 'c1-s2',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };

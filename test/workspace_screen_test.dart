@@ -11,7 +11,7 @@ import 'package:afterimage/presentation/screens/workspace_screen.dart';
 import 'package:afterimage/services/notes_repository.dart';
 
 void main() {
-  testWidgets('notes controls stay disabled while a card is being edited',
+  testWidgets('sequence controls stay disabled while recordings are saved',
       (tester) async {
     final controller = _DoneController();
     addTearDown(controller.dispose);
@@ -22,7 +22,7 @@ void main() {
           body: WorkspaceScreen(
             controller: controller,
             notesRepository: NotesRepository(finderDirectory: '/unused'),
-            notesEditing: true,
+            notesSaving: true,
             isRefreshing: false,
             onRefresh: () async {},
             onOpenNotes: (_) {},

@@ -55,7 +55,6 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
   String? _errorMessage;
   bool _showNotes = false;
   NotePreview? _selectedNote;
-  bool _notesEditing = false;
   bool _notesSaving = false;
 
   @override
@@ -97,7 +96,7 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
   void _onControllerChanged() => _syncObsPoll();
 
   void _openNotes([NotePreview? preview]) {
-    if (!mounted || _recorderController.isBusy || _notesEditing) return;
+    if (!mounted || _recorderController.isBusy || _notesSaving) return;
     setState(() {
       _showNotes = true;
       _selectedNote = preview;
@@ -109,7 +108,6 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
     setState(() {
       _showNotes = false;
       _selectedNote = null;
-      _notesEditing = false;
       _notesSaving = false;
     });
   }
@@ -117,11 +115,6 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
   void _backToNotesList() {
     if (!mounted) return;
     setState(() => _selectedNote = null);
-  }
-
-  void _onNotesEditingChanged(bool editing) {
-    if (!mounted) return;
-    setState(() => _notesEditing = editing);
   }
 
   void _onNotesSavingChanged(bool saving) {
@@ -187,7 +180,6 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
     if (!widget.enableWindowGuard) return scaffold;
     return RecordingWindowGuard(
       controller: _recorderController,
-      notesEditing: _notesEditing,
       notesSaving: _notesSaving,
       child: scaffold,
     );
@@ -202,11 +194,10 @@ class _AfterimageHomeShellState extends State<AfterimageHomeShell>
       notesRepository: finder?.available == true ? notesRepository : null,
       showNotes: _showNotes,
       selectedNote: _selectedNote,
-      notesEditing: _notesEditing,
+      notesSaving: _notesSaving,
       onOpenNotes: _openNotes,
       onBackToNotesList: _backToNotesList,
       onCloseNotes: _closeNotes,
-      onNotesEditingChanged: _onNotesEditingChanged,
       onNotesSavingChanged: _onNotesSavingChanged,
       isRefreshing: _isChecking || _recorderController.isBusy,
       onRefresh: _refreshChecks,

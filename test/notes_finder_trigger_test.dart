@@ -107,8 +107,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(
-        find.textContaining('The notes finder did not start.'), findsOneWidget);
+    expect(find.textContaining('The sequence finder did not start.'),
+        findsOneWidget);
     expect(
       find.text('Log: ${repository.runLogPath(controller.finderBatchLabel!)}'),
       findsOneWidget,

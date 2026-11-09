@@ -218,7 +218,7 @@ class _NotesStatusPanelState extends State<_NotesStatusPanel> {
             .toList(growable: false);
         _error = null;
         _missingRunMessage = missingTooLong
-            ? 'The notes finder did not start. See ${widget.repository.runLogPath(label)}.'
+            ? 'The sequence finder did not start. See ${widget.repository.runLogPath(label)}.'
             : null;
         _now = now;
       });
@@ -246,7 +246,7 @@ class _NotesStatusPanelState extends State<_NotesStatusPanel> {
       final message = finderError ??
           missingRunMessage ??
           run?.message ??
-          'The notes finder could not finish.';
+          'The sequence finder could not finish.';
       return Padding(
         padding: const EdgeInsets.only(top: 20),
         child: StatusSurface(
@@ -255,7 +255,7 @@ class _NotesStatusPanelState extends State<_NotesStatusPanel> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Notes failed: $message'),
+              Text('Sequences failed: $message'),
               const SizedBox(height: 5),
               Text(
                 'Log: ${widget.repository.runLogPath(label)}',
@@ -289,8 +289,8 @@ class _NotesStatusPanelState extends State<_NotesStatusPanel> {
                 Expanded(
                   child: Text(
                     elapsed == null
-                        ? 'Writing notes...'
-                        : 'Writing notes... ${formatElapsed(elapsed)}',
+                        ? 'Finding sequences...'
+                        : 'Finding sequences... ${formatElapsed(elapsed)}',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -307,17 +307,17 @@ class _NotesStatusPanelState extends State<_NotesStatusPanel> {
         padding: EdgeInsets.only(top: 20),
         child: StatusSurface(
           tone: StatusTone.blocked,
-          icon: Icons.notes_outlined,
-          child: Text('No situation came up often enough.'),
+          icon: Icons.playlist_play_rounded,
+          child: Text('No defensive situations in this batch.'),
         ),
       );
     }
 
-    final written = _previews.where((preview) => !preview.isLegacy).toList();
+    final written = _previews;
     final opponents = written.isNotEmpty
         ? written
             .map((preview) =>
-                '${preview.opponent} (${preview.cardCount} ${preview.cardCount == 1 ? 'situation' : 'situations'})')
+                '${preview.opponent} (${preview.flaggedCount} flagged of ${preview.cardCount})')
             .join(', ')
         : run.opponents
             .where((opponent) => opponent.status == 'written')
@@ -335,8 +335,8 @@ class _NotesStatusPanelState extends State<_NotesStatusPanel> {
               Expanded(
                 child: Text(
                   opponents.isEmpty
-                      ? 'No situation came up often enough.'
-                      : 'Notes ready: $opponents',
+                      ? 'No defensive situations in this batch.'
+                      : 'Sequences ready: $opponents',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: AfterimageTheme.readyText,
                     fontWeight: FontWeight.w700,

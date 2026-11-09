@@ -1,262 +1,344 @@
 import 'dart:convert';
 
-/// One `###` card from a finder section.
-class NoteCard {
-  const NoteCard(this.text, {this.id});
+// The finder's sequence list (contract: ggst-input-tracker
+// docs/sequences-contract.md). Afterimage reads it and writes recordings; it never
+// writes under the finder's `out/` folder.
 
-  final String text;
-  final String? id;
-
-  String get heading {
-    final line = text.replaceAll('\r\n', '\n').split('\n').first;
-    return line.startsWith('### ') ? line : '### $line';
-  }
-
-  String get body {
-    final lines = text.replaceAll('\r\n', '\n').split('\n');
-    return lines.length <= 1 ? '' : lines.skip(1).join('\n');
-  }
-
-  NoteCard copyWith({String? text}) => NoteCard(text ?? this.text, id: id);
-}
-
-/// The editable structure of one `section.md` file.
-class NoteSectionDocument {
-  const NoteSectionDocument({
-    required this.preamble,
-    required this.cards,
-  });
-
-  final String preamble;
-  final List<NoteCard> cards;
-
-  String toMarkdown() {
-    final parts = <String>[];
-    final cleanPreamble = _trimTrailingNewlines(preamble);
-    if (cleanPreamble.isNotEmpty) {
-      parts.add(cleanPreamble);
-    }
-    for (final card in cards) {
-      final text = _trimTrailingNewlines(card.text);
-      if (text.isNotEmpty) {
-        parts.add(text);
-      }
-    }
-    if (parts.isEmpty) {
-      return '\n';
-    }
-    return '${parts.join('\n\n')}\n';
-  }
-
-  NoteSectionDocument replaceCard(int index, NoteCard card) {
-    final next = List<NoteCard>.of(cards);
-    next[index] = card;
-    return NoteSectionDocument(preamble: preamble, cards: next);
-  }
-
-  NoteSectionDocument removeCard(int index) {
-    final next = List<NoteCard>.of(cards)..removeAt(index);
-    return NoteSectionDocument(preamble: preamble, cards: next);
-  }
-
-  NoteSectionDocument insertCard(int index, NoteCard card) {
-    final next = List<NoteCard>.of(cards);
-    final position = index.clamp(0, next.length).toInt();
-    next.insert(position, card);
-    return NoteSectionDocument(preamble: preamble, cards: next);
-  }
-}
-
-/// Splits a finder section while retaining all text before its first card.
-NoteSectionDocument splitNoteSection(String source) {
-  final normalized = source.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-  final lines = normalized.split('\n');
-  while (lines.length > 1 && lines.last.isEmpty) {
-    lines.removeLast();
-  }
-
-  final starts = <int>[];
-  for (var index = 0; index < lines.length; index++) {
-    if (lines[index].startsWith('### ')) {
-      starts.add(index);
-    }
-  }
-  if (starts.isEmpty) {
-    return NoteSectionDocument(
-      preamble: lines.join('\n'),
-      cards: const <NoteCard>[],
-    );
-  }
-
-  final preamble = _trimTrailingNewlines(lines.take(starts.first).join('\n'));
-  final cards = <NoteCard>[];
-  for (var index = 0; index < starts.length; index++) {
-    final start = starts[index];
-    final end = index + 1 < starts.length ? starts[index + 1] : lines.length;
-    cards
-        .add(NoteCard(lines.sublist(start, end).join('\n'), id: 'card-$start'));
-  }
-  return NoteSectionDocument(preamble: preamble, cards: cards);
-}
-
-String joinNoteSection(NoteSectionDocument document) => document.toMarkdown();
-
-String _trimTrailingNewlines(String value) =>
-    value.replaceFirst(RegExp(r'\n+$'), '');
-
-/// Metadata written by the finder beside a section.
-class NoteMetadata {
-  const NoteMetadata({
-    required this.opponent,
-    required this.player,
-    required this.batchLabel,
-    required this.batchFolder,
-    required this.notePath,
-    required this.createdAt,
-    required this.previous,
-    required this.status,
-    required this.appliedAt,
-  });
-
-  factory NoteMetadata.fromJson(Map<String, Object?> json) {
-    final created = DateTime.tryParse(json['created_at']?.toString() ?? '');
-    final applied = DateTime.tryParse(json['applied_at']?.toString() ?? '');
-    return NoteMetadata(
-      opponent: json['opponent']?.toString() ?? '',
-      player: json['player']?.toString() ?? '',
-      batchLabel: json['batch_label']?.toString() ?? '',
-      batchFolder: json['batch_folder']?.toString() ?? '',
-      notePath: json['note_path']?.toString() ?? '',
-      createdAt: created,
-      previous: json['previous'] is String ? json['previous'] as String : null,
-      status: json['status']?.toString() == 'applied'
-          ? NoteMetadataStatus.applied
-          : NoteMetadataStatus.draft,
-      appliedAt: applied,
-    );
-  }
-
-  final String opponent;
-  final String player;
-  final String batchLabel;
-  final String batchFolder;
-  final String notePath;
-  final DateTime? createdAt;
-  final String? previous;
-  final NoteMetadataStatus status;
-  final DateTime? appliedAt;
-
-  bool get isApplied => status == NoteMetadataStatus.applied;
-}
-
-enum NoteMetadataStatus { draft, applied }
-
-/// An entry in the notes list. Legacy entries intentionally have no metadata.
+/// One opponent's sequence list in the list of finder runs.
 class NotePreview {
   const NotePreview({
     required this.batchLabel,
     required this.opponent,
     required this.directoryPath,
-    required this.sectionPath,
-    required this.metadata,
+    required this.documentPath,
     required this.cardCount,
+    required this.flaggedCount,
+    required this.createdAt,
     required this.modifiedAt,
   });
 
   final String batchLabel;
   final String opponent;
   final String directoryPath;
-  final String sectionPath;
-  final NoteMetadata? metadata;
+  final String documentPath;
   final int cardCount;
+  final int flaggedCount;
+  final DateTime? createdAt;
   final DateTime? modifiedAt;
 
-  bool get isLegacy => metadata == null;
-  bool get isApplied => metadata?.isApplied ?? false;
-  DateTime? get createdAt => metadata?.createdAt ?? modifiedAt;
+  DateTime? get sortDate => createdAt ?? modifiedAt;
 }
 
-class NoteSectionData {
-  const NoteSectionData({
-    required this.preview,
-    required this.document,
-    required this.warnings,
-    required this.clipIndex,
-  });
+class NoteSequenceData {
+  const NoteSequenceData({required this.preview, required this.document});
 
   final NotePreview preview;
-  final NoteSectionDocument document;
+  final SequenceDocument document;
+}
+
+/// `sequences.json` for one opponent.
+class SequenceDocument {
+  const SequenceDocument({
+    required this.opponent,
+    required this.player,
+    required this.batchLabel,
+    required this.batchFolder,
+    required this.createdAt,
+    required this.strivelabsRecordings,
+    required this.warnings,
+    required this.clipErrors,
+    required this.cards,
+  });
+
+  factory SequenceDocument.fromJson(Map<String, Object?> json) {
+    final schema = json['schema'];
+    if (schema != 1) {
+      throw FormatException('Unknown sequence list schema: $schema');
+    }
+    return SequenceDocument(
+      opponent: json['opponent']?.toString() ?? '',
+      player: _optionalString(json['player']),
+      batchLabel: json['batch_label']?.toString() ?? '',
+      batchFolder: json['batch_folder']?.toString() ?? '',
+      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
+      strivelabsRecordings: _optionalString(json['strivelabs_recordings']),
+      warnings: _strings(json['warnings']),
+      clipErrors: _strings(json['clip_errors']),
+      cards: [
+        for (final value in _maps(json['cards'])) SequenceCard.fromJson(value),
+      ],
+    );
+  }
+
+  final String opponent;
+  final String? player;
+  final String batchLabel;
+  final String batchFolder;
+  final DateTime? createdAt;
+  final String? strivelabsRecordings;
   final List<String> warnings;
-  final ClipIndex? clipIndex;
+  final List<String> clipErrors;
+  final List<SequenceCard> cards;
 }
 
-class ClipIndex {
-  const ClipIndex({
-    required this.video,
-    required this.situations,
-    required this.errors,
+/// One situation: her last move, his posture and how he got there.
+class SequenceCard {
+  const SequenceCard({
+    required this.id,
+    required this.title,
+    required this.flagged,
+    required this.damage,
+    required this.hits,
+    required this.decided,
+    required this.count,
+    required this.flags,
+    required this.leadIns,
+    required this.sequences,
+    required this.mixups,
   });
 
-  factory ClipIndex.fromJson(Map<String, Object?> json) {
-    final rawSituations = json['situations'];
-    final situations = <ClipSituation>[];
-    if (rawSituations is List) {
-      for (final value in rawSituations) {
-        if (value is Map) {
-          situations.add(
-            ClipSituation.fromJson(Map<String, Object?>.from(value)),
-          );
-        }
-      }
-    }
-    final rawErrors = json['errors'];
-    return ClipIndex(
-      video: json['video']?.toString(),
-      situations: situations,
-      errors: rawErrors is List
-          ? rawErrors.map((value) => value.toString()).toList(growable: false)
-          : const <String>[],
+  factory SequenceCard.fromJson(Map<String, Object?> json) => SequenceCard(
+        id: json['id']?.toString() ?? '',
+        title: json['title']?.toString() ?? '',
+        flagged: json['flagged'] == true,
+        damage: _integer(json['damage']) ?? 0,
+        hits: _integer(json['hits']) ?? 0,
+        decided: _integer(json['decided']) ?? 0,
+        count: _integer(json['count']) ?? 0,
+        flags: [
+          for (final value in _maps(json['flags']))
+            SequenceFlag.fromJson(value),
+        ],
+        leadIns: [
+          for (final value in _maps(json['lead_ins']))
+            LeadInCount(
+              move: _optionalString(value['move']),
+              count: _integer(value['count']) ?? 0,
+            ),
+        ],
+        sequences: [
+          for (final value in _maps(json['sequences']))
+            LabSequence.fromJson(value),
+        ],
+        mixups: [
+          for (final value in _maps(json['mixups']))
+            SequenceMixup.fromJson(value),
+        ],
+      );
+
+  final String id;
+  final String title;
+  final bool flagged;
+  final int damage;
+  final int hits;
+  final int decided;
+  final int count;
+  final List<SequenceFlag> flags;
+  final List<LeadInCount> leadIns;
+  final List<LabSequence> sequences;
+  final List<SequenceMixup> mixups;
+}
+
+class SequenceFlag {
+  const SequenceFlag({
+    required this.kind,
+    required this.reason,
+    required this.player,
+  });
+
+  factory SequenceFlag.fromJson(Map<String, Object?> json) => SequenceFlag(
+        kind: json['kind']?.toString() ?? '',
+        reason: json['reason']?.toString() ?? '',
+        player: _optionalString(json['player']),
+      );
+
+  final String kind;
+  final String reason;
+  final String? player;
+}
+
+/// The move before her last move; `null` when her last move opened the string.
+class LeadInCount {
+  const LeadInCount({required this.move, required this.count});
+
+  final String? move;
+  final int count;
+
+  String get label => move ?? 'string opener';
+}
+
+/// One decision point and her inputs for it.
+class LabSequence {
+  const LabSequence({
+    required this.id,
+    required this.replay,
+    required this.round,
+    required this.videoTime,
+    required this.leadIn,
+    required this.followUp,
+    required this.answer,
+    required this.outcome,
+    required this.counterHit,
+    required this.damage,
+    required this.flags,
+    required this.recording,
+    required this.recordingError,
+    required this.clip,
+  });
+
+  factory LabSequence.fromJson(Map<String, Object?> json) {
+    final recording = json['recording'];
+    final clip = json['clip'];
+    return LabSequence(
+      id: json['id']?.toString() ?? '',
+      replay: _integer(json['replay']),
+      round: _integer(json['round']),
+      videoTime: json['video_time']?.toString() ?? '',
+      leadIn: _optionalString(json['lead_in']),
+      followUp: json['follow_up']?.toString() ?? '',
+      answer: json['answer']?.toString() ?? '',
+      outcome: json['outcome']?.toString() ?? '',
+      counterHit: json['counter_hit'] == true,
+      damage: _integer(json['damage']) ?? 0,
+      flags: _strings(json['flags']),
+      recording: recording is Map
+          ? LabRecording.fromJson(Map<String, Object?>.from(recording))
+          : null,
+      recordingError: _optionalString(json['recording_error']),
+      clip: clip is Map
+          ? NoteClip.fromJson(Map<String, Object?>.from(clip))
+          : null,
     );
   }
 
-  final String? video;
-  final List<ClipSituation> situations;
-  final List<String> errors;
+  final String id;
+  final int? replay;
+  final int? round;
+  final String videoTime;
+  final String? leadIn;
+  final String followUp;
+  final String answer;
+  final String outcome;
+  final bool counterHit;
+  final int damage;
+  final List<String> flags;
+  final LabRecording? recording;
+  final String? recordingError;
+  final NoteClip? clip;
+
+  /// `r3 · round 1 · 06:57.1`
+  String get where => [
+        if (replay != null) 'r$replay',
+        if (round != null) 'round $round',
+        if (videoTime.isNotEmpty) videoTime,
+      ].join(' · ');
+
+  /// `2K > S Mr. Dolphin Vertical` is on the card; this is what followed.
+  String get summary {
+    final parts = <String>[
+      if (leadIn != null) 'after $leadIn',
+      'then $followUp',
+      if (answer.isNotEmpty) 'you: $answer',
+      '$outcome${counterHit ? ' (CH)' : ''}',
+      if (damage > 0) '-$damage',
+    ];
+    return parts.join(' · ');
+  }
 }
 
-class ClipSituation {
-  const ClipSituation({
-    required this.heading,
-    required this.entry,
-    required this.posture,
-    required this.herMoveLink,
-    required this.clips,
+/// One StriveLabs `.txt` file ready to write.
+class LabRecording {
+  const LabRecording({
+    required this.fileName,
+    required this.text,
+    required this.frames,
   });
 
-  factory ClipSituation.fromJson(Map<String, Object?> json) {
-    final rawClips = json['clips'];
-    final clips = <NoteClip>[];
-    if (rawClips is List) {
-      for (final value in rawClips) {
-        if (value is Map) {
-          clips.add(NoteClip.fromJson(Map<String, Object?>.from(value)));
-        }
-      }
-    }
-    return ClipSituation(
-      heading: json['heading'] is String ? json['heading'] as String : null,
-      entry: json['entry']?.toString() ?? '',
-      posture: json['posture']?.toString() ?? '',
-      herMoveLink: json['her_move_link']?.toString(),
-      clips: clips,
-    );
-  }
+  factory LabRecording.fromJson(Map<String, Object?> json) => LabRecording(
+        fileName: json['file_name']?.toString() ?? '',
+        text: json['text']?.toString() ?? '',
+        frames: _integer(json['frames']) ?? 0,
+      );
 
-  final String? heading;
-  final String entry;
-  final String posture;
-  final String? herMoveLink;
-  final List<NoteClip> clips;
+  final String fileName;
+  final String text;
+  final int frames;
+
+  /// Only a plain `.txt` name is written: no folders, no hidden files.
+  bool get hasSafeFileName =>
+      fileName.isNotEmpty &&
+      fileName.endsWith('.txt') &&
+      !fileName.startsWith('.') &&
+      !fileName.contains('/') &&
+      !fileName.contains('\\') &&
+      !fileName.contains('\u0000');
+}
+
+/// Her options after one lead-in, one file each.
+class SequenceMixup {
+  const SequenceMixup({required this.leadIn, required this.files});
+
+  factory SequenceMixup.fromJson(Map<String, Object?> json) => SequenceMixup(
+        leadIn: _optionalString(json['lead_in']),
+        files: [
+          for (final value in _maps(json['files']))
+            MixupFile(
+              recording: LabRecording.fromJson(value),
+              followUp: value['follow_up']?.toString() ?? '',
+              count: _integer(value['count']) ?? 0,
+            ),
+        ],
+      );
+
+  final String? leadIn;
+  final List<MixupFile> files;
+
+  String get label => leadIn == null ? 'as an opener' : 'after $leadIn';
+}
+
+class MixupFile {
+  const MixupFile({
+    required this.recording,
+    required this.followUp,
+    required this.count,
+  });
+
+  final LabRecording recording;
+  final String followUp;
+  final int count;
+}
+
+/// Where Save wrote files, and whether StriveLabs got them too.
+class RecordingSaveResult {
+  const RecordingSaveResult({
+    required this.batchDirectory,
+    required this.strivelabsDirectory,
+    required this.fileNames,
+    this.strivelabsError,
+  });
+
+  final String batchDirectory;
+
+  /// `null` when StriveLabs was not found or could not be written.
+  final String? strivelabsDirectory;
+
+  /// Why the StriveLabs copy failed; the batch copy was still written.
+  final String? strivelabsError;
+  final List<String> fileNames;
+
+  String get message {
+    final what =
+        fileNames.length == 1 ? fileNames.single : '${fileNames.length} files';
+    if (strivelabsDirectory != null) {
+      return 'Saved $what to StriveLabs recordings and $batchDirectory.';
+    }
+    if (strivelabsError != null) {
+      return 'Saved $what to $batchDirectory, but not to StriveLabs: '
+          '$strivelabsError';
+    }
+    return 'Saved $what to $batchDirectory. StriveLabs was not found, so copy '
+        'it to ue4ss/recordings yourself.';
+  }
 }
 
 class NoteClip {
@@ -276,16 +358,14 @@ class NoteClip {
   });
 
   factory NoteClip.fromJson(Map<String, Object?> json) {
-    int? integer(Object? value) =>
-        value is num ? value.toInt() : int.tryParse('$value');
     return NoteClip(
       file: json['file']?.toString() ?? '',
       poster: json['poster']?.toString(),
-      replay: integer(json['replay']),
+      replay: _integer(json['replay']),
       videoTime: json['video_time']?.toString(),
-      videoTimeMs: integer(json['video_time_ms']),
-      startMs: integer(json['start_ms']),
-      endMs: integer(json['end_ms']),
+      videoTimeMs: _integer(json['video_time_ms']),
+      startMs: _integer(json['start_ms']),
+      endMs: _integer(json['end_ms']),
       herNext: json['her_next']?.toString(),
       answer: json['answer']?.toString(),
       outcome: json['outcome']?.toString() ?? '',
@@ -306,7 +386,7 @@ class NoteClip {
   final String outcome;
   final bool counterHit;
 
-  /// The table row this clip belongs to: her option, or `no attack`.
+  /// What she did after her last move.
   final String? option;
 
   String caption() {
@@ -319,158 +399,6 @@ class NoteClip {
     if (herNext != null && herNext!.isNotEmpty) parts.add('vs $herNext');
     return parts.join(' · ');
   }
-}
-
-/// Returns the clips attached to [card] under the contract's exact/fallback rules.
-List<NoteClip> matchClipsForCard(NoteCard card, ClipIndex? index) {
-  if (index == null) return const <NoteClip>[];
-  ClipSituation? exact;
-  for (final situation in index.situations) {
-    if (situation.heading == card.heading) {
-      exact = situation;
-      break;
-    }
-  }
-  final situation = exact ?? _fallbackSituation(card, index.situations);
-  if (situation == null) return const <NoteClip>[];
-
-  final indexed = situation.clips.asMap().entries.toList();
-  indexed.sort((left, right) {
-    final leftHit = left.value.outcome.toLowerCase() == 'hit';
-    final rightHit = right.value.outcome.toLowerCase() == 'hit';
-    if (leftHit != rightHit) return leftHit ? -1 : 1;
-    return left.key.compareTo(right.key);
-  });
-  return indexed.map((entry) => entry.value).toList(growable: false);
-}
-
-/// Name of the row for clips she answered with nothing.
-const noAttackOption = 'no attack';
-
-/// The clips cut for one table row (her option), in index order.
-List<NoteClip> clipsForOption(List<NoteClip> clips, String option) => [
-      for (final clip in clips)
-        if ((clip.option ?? clip.herNext ?? noAttackOption) == option) clip,
-    ];
-
-/// One piece of a card body: a text line or a markdown table.
-sealed class NoteBodyBlock {
-  const NoteBodyBlock();
-}
-
-/// A text line; `habit: ...` style lines expose their [label].
-class NoteTextLine extends NoteBodyBlock {
-  const NoteTextLine(this.text);
-
-  final String text;
-
-  static final _labelled = RegExp(r'^(habit|rps|lab|seen|holding):\s?(.*)$');
-
-  String? get label => _labelled.firstMatch(text)?.group(1);
-
-  String get rest => _labelled.firstMatch(text)?.group(2) ?? text;
-}
-
-class NoteTable extends NoteBodyBlock {
-  const NoteTable({required this.header, required this.rows});
-
-  final List<String> header;
-  final List<NoteTableRow> rows;
-}
-
-class NoteTableRow {
-  const NoteTableRow(this.cells);
-
-  final List<String> cells;
-
-  /// Her option: the first cell's wikilink target, or its plain text.
-  String get option {
-    final first = cells.isEmpty ? '' : cells.first;
-    final link = RegExp(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]').firstMatch(first);
-    return (link?.group(1) ?? first).trim();
-  }
-}
-
-/// Splits a card body into lines and tables. Consecutive `|` lines form a table;
-/// its first line is the header and `| --- |` separator lines are skipped.
-List<NoteBodyBlock> parseNoteBody(String body) {
-  final blocks = <NoteBodyBlock>[];
-  List<List<String>>? table;
-
-  void closeTable() {
-    final rows = table;
-    if (rows == null) return;
-    blocks.add(NoteTable(
-      header: rows.first,
-      rows: [for (final row in rows.skip(1)) NoteTableRow(row)],
-    ));
-    table = null;
-  }
-
-  for (final raw in body.replaceAll('\r\n', '\n').split('\n')) {
-    final line = raw.trimRight();
-    if (line.trimLeft().startsWith('|')) {
-      final cells = _tableCells(line);
-      if (cells.every((cell) => RegExp(r'^:?-{3,}:?$').hasMatch(cell))) {
-        continue;
-      }
-      (table ??= <List<String>>[]).add(cells);
-      continue;
-    }
-    closeTable();
-    blocks.add(NoteTextLine(line));
-  }
-  closeTable();
-  while (blocks.isNotEmpty &&
-      blocks.last is NoteTextLine &&
-      (blocks.last as NoteTextLine).text.isEmpty) {
-    blocks.removeLast();
-  }
-  return blocks;
-}
-
-List<String> _tableCells(String line) {
-  var text = line.trim();
-  if (text.startsWith('|')) text = text.substring(1);
-  if (text.endsWith('|')) text = text.substring(0, text.length - 1);
-  // Split on `|`, but not inside a `[[target|alias]]` wikilink.
-  final cells = <String>[];
-  final cell = StringBuffer();
-  var depth = 0;
-  for (var index = 0; index < text.length; index++) {
-    if (text.startsWith('[[', index)) {
-      depth++;
-    } else if (text.startsWith(']]', index) && depth > 0) {
-      depth--;
-    }
-    final char = text[index];
-    if (char == '|' && depth == 0) {
-      cells.add(cell.toString().trim());
-      cell.clear();
-    } else {
-      cell.write(char);
-    }
-  }
-  cells.add(cell.toString().trim());
-  return cells;
-}
-
-ClipSituation? _fallbackSituation(
-    NoteCard card, List<ClipSituation> situations) {
-  final stagger = card.heading.startsWith('### staggered');
-  final links = RegExp(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]')
-      .allMatches(card.heading)
-      .map((match) => match.group(1)!)
-      .toSet();
-  for (final situation in situations) {
-    if (situation.herMoveLink != null &&
-        links.contains(situation.herMoveLink) &&
-        ((stagger && situation.entry == 'stagger') ||
-            (!stagger && situation.entry == 'block'))) {
-      return situation;
-    }
-  }
-  return null;
 }
 
 enum FinderRunState { running, done, nothing, failed }
@@ -505,7 +433,7 @@ class FinderRunInfo {
     if (state == FinderRunState.running &&
         (pid == null || !(isPidAlive?.call(pid) ?? true))) {
       state = FinderRunState.failed;
-      message = 'The notes finder stopped before it finished.';
+      message = 'The sequence finder stopped before it finished.';
     }
     return FinderRunInfo(
       state: state ?? FinderRunState.failed,
@@ -551,60 +479,30 @@ List<FinderOpponentRun> _parseFinderOpponents(Object? raw) {
         FinderOpponentRun(
           name: value['name']?.toString() ?? '',
           status: value['status']?.toString() ?? '',
-          situations: value['situations'] is num
-              ? (value['situations'] as num).toInt()
-              : int.tryParse('${value['situations']}'),
+          situations: _integer(value['situations']),
           error: value['error']?.toString(),
         ),
   ];
 }
 
-enum ApplySectionState { applied, failed, changed, invalid }
+int? _integer(Object? value) => value is num
+    ? value.toInt()
+    : value == null
+        ? null
+        : int.tryParse('$value');
 
-class ApplySectionResult {
-  const ApplySectionResult({
-    required this.exitCode,
-    required this.state,
-    required this.message,
-  });
+String? _optionalString(Object? value) => value?.toString();
 
-  factory ApplySectionResult.fromExitCode(
-    int exitCode, {
-    required String opponent,
-    String stderr = '',
-  }) {
-    final error = stderr.trim();
-    return switch (exitCode) {
-      0 => ApplySectionResult(
-          exitCode: exitCode,
-          state: ApplySectionState.applied,
-          message: 'Applied to the $opponent note.',
-        ),
-      2 => ApplySectionResult(
-          exitCode: exitCode,
-          state: ApplySectionState.changed,
-          message:
-              "Your $opponent note's finder notes changed since this draft. Nothing was written.",
-        ),
-      3 => ApplySectionResult(
-          exitCode: exitCode,
-          state: ApplySectionState.invalid,
-          message: error.isEmpty ? 'The draft could not be applied.' : error,
-        ),
-      _ => ApplySectionResult(
-          exitCode: exitCode,
-          state: ApplySectionState.failed,
-          message: error.isEmpty ? 'The draft could not be applied.' : error,
-        ),
-    };
-  }
+List<String> _strings(Object? value) => value is List
+    ? value.map((item) => item.toString()).toList(growable: false)
+    : const <String>[];
 
-  final int exitCode;
-  final ApplySectionState state;
-  final String message;
-
-  bool get succeeded => state == ApplySectionState.applied;
-}
+List<Map<String, Object?>> _maps(Object? value) => value is List
+    ? [
+        for (final item in value)
+          if (item is Map) Map<String, Object?>.from(item),
+      ]
+    : const <Map<String, Object?>>[];
 
 /// Keeps JSON decoding at the edge of the application.
 Map<String, Object?> decodeObject(String source) {

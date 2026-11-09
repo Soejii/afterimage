@@ -9,6 +9,10 @@ import '../services/notes_repository.dart';
 import 'widgets/notes_clip_player.dart';
 import 'widgets/status_surface.dart';
 
+// The sequence list: the finder's situations per opponent, with Save and Save
+// mixup writing StriveLabs recordings. Code names keep "notes" from the page this
+// replaced.
+
 class NotesListPage extends StatefulWidget {
   const NotesListPage({
     super.key,
@@ -66,7 +70,7 @@ class _NotesListPageState extends State<NotesListPage> {
                 children: [
                   Expanded(
                     child: Text(
-                      'NOTES',
+                      'SEQUENCES',
                       style: theme.textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1.3,
@@ -83,7 +87,8 @@ class _NotesListPageState extends State<NotesListPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Draft notes from the replay batches. Legacy previews can be read, but not applied.',
+                'Defensive situations from your replay batches. Save one as a '
+                'StriveLabs recording to lab it.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -93,7 +98,7 @@ class _NotesListPageState extends State<NotesListPage> {
                 StatusSurface(
                   tone: StatusTone.failed,
                   icon: Icons.error_outline,
-                  child: Text('Notes could not be loaded: $_error'),
+                  child: Text('Sequences could not be loaded: $_error'),
                 )
               else if (_previews == null)
                 const Center(child: CircularProgressIndicator())
@@ -117,73 +122,58 @@ class _NotesListTile extends StatelessWidget {
   const _NotesListTile({required this.preview, required this.onOpen});
 
   final NotePreview preview;
-  final VoidCallback? onOpen;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final muted = preview.isLegacy;
-    final foreground = muted
-        ? theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.55)
-        : theme.colorScheme.onSurface;
     final date = formatNoteDate(preview.createdAt);
+    final cards = preview.cardCount;
+    final flagged = preview.flaggedCount;
     return Card(
-      key: ValueKey('notes-entry-${preview.sectionPath}'),
+      key: ValueKey('notes-entry-${preview.documentPath}'),
       margin: const EdgeInsets.only(bottom: 10),
-      child: Opacity(
-        opacity: muted ? 0.62 : 1,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 15, 14, 15),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      date == null
-                          ? preview.batchLabel
-                          : '${preview.batchLabel}  ·  $date',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: foreground,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 15, 14, 15),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    date == null
+                        ? preview.batchLabel
+                        : '${preview.batchLabel}  ·  $date',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
-                    const SizedBox(height: 5),
-                    Text(
-                      'vs ${preview.opponent}',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: foreground,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      preview.isLegacy
-                          ? 'made before the notes page; cannot be applied'
-                          : '${preview.cardCount} ${preview.cardCount == 1 ? 'situation' : 'situations'}  ·  ${preview.isApplied ? 'Applied' : 'Draft'}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: muted
-                            ? foreground
-                            : theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (onOpen != null)
-                TextButton(
-                  key: ValueKey(
-                    preview.isLegacy
-                        ? 'open-legacy-notes-entry'
-                        : 'open-notes-entry',
                   ),
-                  onPressed: onOpen,
-                  child: const Text('Open'),
-                ),
-            ],
-          ),
+                  const SizedBox(height: 5),
+                  Text(
+                    'vs ${preview.opponent}',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    '$cards ${cards == 1 ? 'situation' : 'situations'}'
+                    '  ·  $flagged flagged',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              key: const ValueKey('open-notes-entry'),
+              onPressed: onOpen,
+              child: const Text('Open'),
+            ),
+          ],
         ),
       ),
     );
@@ -196,8 +186,8 @@ class _EmptyNotes extends StatelessWidget {
   Widget build(BuildContext context) {
     return const StatusSurface(
       tone: StatusTone.blocked,
-      icon: Icons.notes_outlined,
-      child: Text('No notes have been generated yet.'),
+      icon: Icons.playlist_play_rounded,
+      child: Text('No sequences yet. They appear after a recorded batch.'),
     );
   }
 }
@@ -209,7 +199,6 @@ class NotesPage extends StatefulWidget {
     required this.preview,
     required this.onBack,
     this.playerFactory = createMediaKitClipPlayer,
-    this.onEditingChanged,
     this.onSavingChanged,
   });
 
@@ -217,7 +206,6 @@ class NotesPage extends StatefulWidget {
   final NotePreview preview;
   final VoidCallback onBack;
   final NotesClipPlayerSessionFactory playerFactory;
-  final ValueChanged<bool>? onEditingChanged;
   final ValueChanged<bool>? onSavingChanged;
 
   @override
@@ -225,16 +213,14 @@ class NotesPage extends StatefulWidget {
 }
 
 class _NotesPageState extends State<NotesPage> {
-  NoteSectionData? _data;
+  NoteSequenceData? _data;
   Object? _error;
-  int? _editingIndex;
-  TextEditingController? _editor;
   bool _saving = false;
-  bool _applying = false;
+  final Set<String> _saved = <String>{};
+  final Set<String> _expanded = <String>{};
   final Map<String, int> _selectedClips = <String, int>{};
   final Map<String, int> _playRequests = <String, int>{};
   String? _playingCard;
-  ApplySectionResult? _applyResult;
   ScaffoldMessengerState? _scaffoldMessenger;
 
   @override
@@ -257,7 +243,6 @@ class _NotesPageState extends State<NotesPage> {
         if (messenger.mounted) messenger.hideCurrentSnackBar();
       });
     }
-    _editor?.dispose();
     super.dispose();
   }
 
@@ -275,222 +260,34 @@ class _NotesPageState extends State<NotesPage> {
     }
   }
 
-  void _beginEdit(int index) {
+  Future<void> _save(String savedKey, List<LabRecording> recordings) async {
     final data = _data;
-    if (data == null ||
-        data.preview.isLegacy ||
-        _editingIndex != null ||
-        _saving) {
-      return;
-    }
-    _editor?.dispose();
-    _editor = TextEditingController(text: data.document.cards[index].text);
-    setState(() => _editingIndex = index);
-    widget.onEditingChanged?.call(true);
-  }
-
-  void _cancelEdit() {
-    if (_editingIndex == null) return;
-    _editor?.dispose();
-    _editor = null;
-    setState(() => _editingIndex = null);
-    widget.onEditingChanged?.call(false);
-  }
-
-  Future<void> _saveEdit() async {
-    final data = _data;
-    final index = _editingIndex;
-    final editor = _editor;
-    if (data == null || index == null || editor == null || _saving) return;
+    if (data == null || _saving || recordings.isEmpty) return;
     setState(() => _saving = true);
     widget.onSavingChanged?.call(true);
+    String message;
+    var succeeded = false;
     try {
-      final document = data.document.replaceCard(
-        index,
-        data.document.cards[index].copyWith(text: editor.text),
-      );
-      await widget.repository.write(widget.preview, document);
-      if (!mounted) {
-        widget.onSavingChanged?.call(false);
-        return;
-      }
-      _editor?.dispose();
-      _editor = null;
-      setState(() {
-        _data = NoteSectionData(
-          preview: data.preview,
-          document: document,
-          warnings: data.warnings,
-          clipIndex: data.clipIndex,
-        );
-        _editingIndex = null;
-        _saving = false;
-      });
-      widget.onEditingChanged?.call(false);
-      widget.onSavingChanged?.call(false);
+      final result =
+          await widget.repository.saveRecordings(data.document, recordings);
+      message = result.message;
+      succeeded = true;
     } on Object catch (error) {
-      if (!mounted) {
-        widget.onSavingChanged?.call(false);
-        return;
-      }
-      setState(() => _saving = false);
-      widget.onSavingChanged?.call(false);
-      _showError(error);
+      message = 'Could not save: $error';
     }
-  }
-
-  Future<void> _deleteCard(int index) async {
-    final data = _data;
-    if (data == null ||
-        data.preview.isLegacy ||
-        _editingIndex != null ||
-        _saving) {
-      return;
-    }
-    final deleted = data.document.cards[index];
-    final deletedKey = _cardKey(deleted, index);
-    setState(() => _saving = true);
-    widget.onSavingChanged?.call(true);
-    try {
-      final document = data.document.removeCard(index);
-      await widget.repository.write(widget.preview, document);
-      if (!mounted) {
-        widget.onSavingChanged?.call(false);
-        return;
-      }
-      setState(() {
-        _data = NoteSectionData(
-          preview: data.preview,
-          document: document,
-          warnings: data.warnings,
-          clipIndex: data.clipIndex,
-        );
-        _saving = false;
-        _selectedClips.remove(deletedKey);
-        if (_playingCard == deletedKey) _playingCard = null;
-      });
-      widget.onSavingChanged?.call(false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Situation deleted.'),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () => unawaited(_undoDelete(index, deleted)),
-          ),
-        ),
-      );
-    } on Object catch (error) {
-      if (!mounted) {
-        widget.onSavingChanged?.call(false);
-        return;
-      }
-      setState(() => _saving = false);
-      widget.onSavingChanged?.call(false);
-      _showError(error);
-    }
-  }
-
-  Future<void> _undoDelete(int index, NoteCard card) async {
+    widget.onSavingChanged?.call(false);
     if (!mounted) return;
-    final data = _data;
-    if (data == null || _editingIndex != null || _saving) return;
-    setState(() => _saving = true);
-    widget.onSavingChanged?.call(true);
-    try {
-      final document = data.document.insertCard(index, card);
-      await widget.repository.write(widget.preview, document);
-      if (!mounted) {
-        widget.onSavingChanged?.call(false);
-        return;
-      }
-      setState(() {
-        _data = NoteSectionData(
-          preview: data.preview,
-          document: document,
-          warnings: data.warnings,
-          clipIndex: data.clipIndex,
-        );
-        _saving = false;
-      });
-      widget.onSavingChanged?.call(false);
-    } on Object catch (error) {
-      if (!mounted) {
-        widget.onSavingChanged?.call(false);
-        return;
-      }
-      setState(() => _saving = false);
-      widget.onSavingChanged?.call(false);
-      _showError(error);
-    }
-  }
-
-  Future<void> _apply() async {
-    final data = _data;
-    if (data == null ||
-        data.preview.isLegacy ||
-        _editingIndex != null ||
-        _saving ||
-        data.preview.isApplied ||
-        _applying) {
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Apply notes?'),
-        content:
-            Text('Write these notes into the ${data.preview.opponent} note?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Apply'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    setState(() => _applying = true);
-    late ApplySectionResult result;
-    try {
-      result = await widget.repository.apply(data.preview);
-    } on Object catch (error) {
-      result = ApplySectionResult.fromExitCode(
-        1,
-        opponent: data.preview.opponent,
-        stderr: error.toString(),
-      );
-    }
-    if (!mounted) return;
-    if (result.succeeded) {
-      NoteSectionData? refreshedData;
-      try {
-        final refreshed = await widget.repository.refreshPreview(data.preview);
-        if (refreshed != null) {
-          try {
-            refreshedData = await widget.repository.read(refreshed);
-          } on Object {
-            // The successful apply message remains useful if metadata refresh fails.
-          }
-        }
-      } on Object {
-        // The successful apply message remains useful if metadata refresh fails.
-      }
-      if (!mounted) return;
-      if (refreshedData != null) _data = refreshedData;
-    }
     setState(() {
-      _applyResult = result;
-      _applying = false;
+      _saving = false;
+      if (succeeded) _saved.add(savedKey);
     });
-  }
-
-  void _showError(Object error) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Notes could not be saved: $error')),
+    _scaffoldMessenger?.hideCurrentSnackBar();
+    _scaffoldMessenger?.showSnackBar(
+      SnackBar(
+        key: ValueKey(succeeded ? 'save-done' : 'save-failed'),
+        content: Text(message),
+        duration: const Duration(seconds: 6),
+      ),
     );
   }
 
@@ -513,9 +310,7 @@ class _NotesPageState extends State<NotesPage> {
                 children: [
                   Expanded(
                     child: Text(
-                      data == null
-                          ? 'NOTES'
-                          : 'NOTES  ·  ${data.preview.batchLabel}  ·  vs ${data.preview.opponent}',
+                      'SEQUENCES  ·  ${widget.preview.batchLabel}  ·  vs ${widget.preview.opponent}',
                       style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.7,
@@ -523,12 +318,10 @@ class _NotesPageState extends State<NotesPage> {
                     ),
                   ),
                   OutlinedButton.icon(
-                    key: const ValueKey('discard-notes'),
-                    onPressed: _saving || _applying || _editingIndex != null
-                        ? null
-                        : widget.onBack,
+                    key: const ValueKey('back-from-sequences'),
+                    onPressed: _saving ? null : widget.onBack,
                     icon: const Icon(Icons.arrow_back_rounded),
-                    label: const Text('Discard'),
+                    label: const Text('Back'),
                   ),
                 ],
               ),
@@ -537,68 +330,29 @@ class _NotesPageState extends State<NotesPage> {
                 StatusSurface(
                   tone: StatusTone.failed,
                   icon: Icons.error_outline,
-                  child: Text('This notes draft could not be opened: $_error'),
+                  child: Text('These sequences could not be opened: $_error'),
                 )
               else if (data == null)
                 const Center(child: CircularProgressIndicator())
               else ...[
-                if (data.preview.isLegacy)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      'Made before the notes page; cannot be applied.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                if (data.warnings.isNotEmpty) ...[
-                  StatusSurface(
-                    tone: StatusTone.blocked,
-                    icon: Icons.warning_amber_rounded,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (final warning in data.warnings)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 3),
-                            child: Text(warning),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                for (var index = 0; index < data.document.cards.length; index++)
-                  _buildCard(context, data, index),
+                _PageNotices(document: data.document),
+                for (final card in data.document.cards)
+                  _buildCard(context, data, card),
                 if (data.document.cards.isEmpty)
                   const StatusSurface(
                     tone: StatusTone.blocked,
-                    icon: Icons.notes_outlined,
-                    child: Text('There are no situations left in this draft.'),
+                    icon: Icons.playlist_play_rounded,
+                    child: Text('No defensive situations in this batch.'),
                   ),
-                if (data.clipIndex?.errors.isNotEmpty == true) ...[
+                if (data.document.clipErrors.isNotEmpty) ...[
                   const SizedBox(height: 14),
                   Text(
-                    data.clipIndex!.errors.join('\n'),
+                    data.document.clipErrors.join('\n'),
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
-                const SizedBox(height: 22),
-                if (_applyResult != null)
-                  StatusSurface(
-                    tone: _applyResult!.succeeded
-                        ? StatusTone.ready
-                        : StatusTone.failed,
-                    icon: _applyResult!.succeeded
-                        ? Icons.check_circle_outline
-                        : Icons.error_outline,
-                    child: Text(_applyResult!.message),
-                  ),
-                const SizedBox(height: 14),
-                _buildApplyActions(data),
               ],
             ],
           ),
@@ -607,23 +361,23 @@ class _NotesPageState extends State<NotesPage> {
     );
   }
 
-  Widget _buildCard(BuildContext context, NoteSectionData data, int index) {
-    final card = data.document.cards[index];
-    final cardKey = _cardKey(card, index);
-    final editing = _editingIndex == index;
-    final locked = _editingIndex != null;
-    final legacy = data.preview.isLegacy;
-    final clips = matchClipsForCard(card, data.clipIndex);
-    final playerCardKey = card.id == null && data.document.cards.length == 1
-        ? null
-        : ValueKey('clip-player-$cardKey');
-    final selected = (_selectedClips[cardKey] ?? 0) < clips.length
-        ? _selectedClips[cardKey] ?? 0
-        : 0;
-    final blocks = parseNoteBody(card.body);
-    final hasTable = blocks.any((block) => block is NoteTable);
+  Widget _buildCard(
+    BuildContext context,
+    NoteSequenceData data,
+    SequenceCard card,
+  ) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final expanded = card.flagged || _expanded.contains(card.id);
+    final clipIndexes = <int>[
+      for (var index = 0; index < card.sequences.length; index++)
+        if (card.sequences[index].clip != null) index,
+    ];
+    final selected = _selectedClips[card.id] ?? clipIndexes.firstOrNull;
+    final selectedClip =
+        selected == null ? null : card.sequences[selected].clip;
     return Card(
-      key: ValueKey('note-card-${card.id ?? index}'),
+      key: ValueKey('sequence-card-${card.id}'),
       margin: const EdgeInsets.only(bottom: 14),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 16, 18, 17),
@@ -634,98 +388,81 @@ class _NotesPageState extends State<NotesPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: _NoteHeadingText(heading: card.heading),
+                  child: Text(
+                    card.title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: AfterimageTheme.accent,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
-                if (!editing && !legacy) ...[
-                  TextButton(
-                    key: ValueKey('edit-note-$index'),
-                    onPressed:
-                        locked || _saving ? null : () => _beginEdit(index),
-                    child: const Text('Edit'),
+                Text(
+                  [
+                    '${card.count} ${card.count == 1 ? 'time' : 'times'}',
+                    if (card.decided > 0) 'hit ${card.hits} of ${card.decided}',
+                    if (card.damage > 0) '${card.damage} damage',
+                  ].join('  ·  '),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: muted,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
-                  TextButton(
-                    key: ValueKey('delete-note-$index'),
-                    onPressed:
-                        locked || _saving ? null : () => _deleteCard(index),
-                    child: const Text('Delete'),
-                  ),
-                ],
+                ),
               ],
             ),
-            const SizedBox(height: 10),
-            if (editing)
-              TextField(
-                key: const ValueKey('note-edit-field'),
-                controller: _editor,
-                autofocus: true,
-                readOnly: _saving,
-                maxLines: null,
-                minLines: 8,
-                textCapitalization: TextCapitalization.sentences,
-              )
-            else
-              _NoteBody(
-                blocks: blocks,
-                clips: clips,
-                selected: clips.isEmpty ? null : clips[selected],
-                cardKey: cardKey,
-                onPlay: (clip) => setState(() {
-                  _selectedClips[cardKey] = clips.indexOf(clip);
-                  _playRequests[cardKey] = (_playRequests[cardKey] ?? 0) + 1;
-                  _playingCard = cardKey;
-                }),
-              ),
-            if (editing) ...[
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    key: const ValueKey('cancel-note-edit'),
-                    onPressed: _saving ? null : _cancelEdit,
-                    child: const Text('Cancel'),
+            for (final flag in card.flags)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  flag.player == null
+                      ? flag.reason
+                      : '${flag.reason} (${flag.player})',
+                  key: ValueKey('flag-${card.id}-${flag.kind}'),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: AfterimageTheme.blockedText,
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    key: const ValueKey('save-note-edit'),
-                    onPressed: _saving ? null : _saveEdit,
-                    child: const Text('Save'),
-                  ),
-                ],
-              ),
-            ],
-            if (!editing && clips.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              if (!hasTable)
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  children: [
-                    for (var clipIndex = 0;
-                        clipIndex < clips.length;
-                        clipIndex++)
-                      ChoiceChip(
-                        key: ValueKey('clip-chip-$cardKey-$clipIndex'),
-                        label: Text(clips[clipIndex].caption()),
-                        selected: selected == clipIndex,
-                        onSelected: (_) => setState(() {
-                          _selectedClips[cardKey] = clipIndex;
-                          _playingCard = null;
-                        }),
-                      ),
-                  ],
                 ),
-              NotesClipPlayer(
-                playerCardKey: playerCardKey,
-                clip: clips[selected],
-                filePath: _clipPath(data.preview, clips[selected]),
-                playerFactory: widget.playerFactory,
-                playRequest: _playRequests[cardKey] ?? 0,
-                pauseRequested: _playingCard != null && _playingCard != cardKey,
-                onStarted: () {
-                  if (mounted) setState(() => _playingCard = cardKey);
-                },
               ),
+            if (card.leadIns.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'lead-ins: ${card.leadIns.map((leadIn) => '${leadIn.label} x${leadIn.count}').join(', ')}',
+                  style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                ),
+              ),
+            for (var index = 0; index < card.mixups.length; index++)
+              _buildMixup(card, index),
+            if (!expanded)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  key: ValueKey('show-sequences-${card.id}'),
+                  onPressed: () => setState(() => _expanded.add(card.id)),
+                  child: Text(
+                    'Show ${card.sequences.length} '
+                    '${card.sequences.length == 1 ? 'sequence' : 'sequences'}',
+                  ),
+                ),
+              )
+            else ...[
+              const SizedBox(height: 10),
+              for (var index = 0; index < card.sequences.length; index++)
+                _buildSequence(card, index, selected == index),
+              if (selectedClip != null) ...[
+                const SizedBox(height: 12),
+                NotesClipPlayer(
+                  playerCardKey: ValueKey('clip-player-${card.id}'),
+                  clip: selectedClip,
+                  filePath: _clipPath(data.preview, selectedClip),
+                  playerFactory: widget.playerFactory,
+                  playRequest: _playRequests[card.id] ?? 0,
+                  pauseRequested:
+                      _playingCard != null && _playingCard != card.id,
+                  onStarted: () {
+                    if (mounted) setState(() => _playingCard = card.id);
+                  },
+                ),
+              ],
             ],
           ],
         ),
@@ -733,37 +470,99 @@ class _NotesPageState extends State<NotesPage> {
     );
   }
 
-  Widget _buildApplyActions(NoteSectionData data) {
-    if (data.preview.isLegacy) return const SizedBox.shrink();
-    final applied = data.preview.isApplied || _applyResult?.succeeded == true;
-    final appliedAt = data.preview.metadata?.appliedAt;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        if (applied)
-          Text(
-            'Applied ${formatNoteDate(appliedAt) ?? 'just now'}',
-            key: const ValueKey('notes-applied'),
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: AfterimageTheme.ready,
-                  fontWeight: FontWeight.w700,
-                ),
-          )
-        else
-          FilledButton.icon(
-            key: const ValueKey('apply-notes'),
-            onPressed:
-                _applying || _saving || _editingIndex != null ? null : _apply,
-            icon: _applying
-                ? const SizedBox(
-                    width: 17,
-                    height: 17,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.check_rounded),
-            label: Text('Apply to ${data.preview.opponent} note'),
+  Widget _buildMixup(SequenceCard card, int index) {
+    final mixup = card.mixups[index];
+    final theme = Theme.of(context);
+    final savedKey = 'mixup-${card.id}-$index';
+    final options =
+        mixup.files.map((file) => '${file.followUp} x${file.count}').join(', ');
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'mixup ${mixup.label}: $options',
+              style: theme.textTheme.bodyMedium,
+            ),
           ),
-      ],
+          const SizedBox(width: 10),
+          _SaveButton(
+            buttonKey: ValueKey('save-mixup-${card.id}-$index'),
+            label: 'Save mixup (${mixup.files.length})',
+            saved: _saved.contains(savedKey),
+            onPressed: _saving
+                ? null
+                : () => unawaited(_save(
+                      savedKey,
+                      [for (final file in mixup.files) file.recording],
+                    )),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSequence(SequenceCard card, int index, bool selected) {
+    final sequence = card.sequences[index];
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final recording = sequence.recording;
+    return Container(
+      key: ValueKey('sequence-${sequence.id}'),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(6, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: selected ? AfterimageTheme.panelRaised : null,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            key: ValueKey('play-${sequence.id}'),
+            tooltip: sequence.clip == null ? 'No clip' : 'Play clip',
+            onPressed: sequence.clip == null
+                ? null
+                : () => setState(() {
+                      _selectedClips[card.id] = index;
+                      _playRequests[card.id] =
+                          (_playRequests[card.id] ?? 0) + 1;
+                      _playingCard = card.id;
+                    }),
+            icon: const Icon(Icons.play_arrow_rounded),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  sequence.where,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: muted,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Text(sequence.summary, style: theme.textTheme.bodyMedium),
+                if (recording == null && sequence.recordingError != null)
+                  Text(
+                    'cannot save: ${sequence.recordingError}',
+                    style: theme.textTheme.labelSmall?.copyWith(color: muted),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          _SaveButton(
+            buttonKey: ValueKey('save-${sequence.id}'),
+            label: recording == null ? 'Save' : 'Save (${recording.frames}f)',
+            saved: _saved.contains(sequence.id),
+            onPressed: recording == null || _saving
+                ? null
+                : () => unawaited(_save(sequence.id, [recording])),
+          ),
+        ],
+      ),
     );
   }
 
@@ -771,310 +570,77 @@ class _NotesPageState extends State<NotesPage> {
     final clipsDirectory = _joinPath(preview.directoryPath, 'clips');
     return _joinPath(clipsDirectory, clip.file);
   }
-
-  String _cardKey(NoteCard card, int index) => card.id ?? '$index';
 }
 
-/// A situation card body: lines, labelled lines and the her-option table.
-class _NoteBody extends StatelessWidget {
-  const _NoteBody({
-    required this.blocks,
-    required this.clips,
-    required this.selected,
-    required this.cardKey,
-    required this.onPlay,
+class _SaveButton extends StatelessWidget {
+  const _SaveButton({
+    required this.buttonKey,
+    required this.label,
+    required this.saved,
+    required this.onPressed,
   });
 
-  final List<NoteBodyBlock> blocks;
-  final List<NoteClip> clips;
-  final NoteClip? selected;
-  final String cardKey;
-  final ValueChanged<NoteClip> onPlay;
+  final Key buttonKey;
+  final String label;
+  final bool saved;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      key: buttonKey,
+      onPressed: onPressed,
+      icon:
+          Icon(saved ? Icons.check_rounded : Icons.save_alt_rounded, size: 18),
+      label: Text(saved ? 'Saved' : label),
+    );
+  }
+}
+
+class _PageNotices extends StatelessWidget {
+  const _PageNotices({required this.document});
+
+  final SequenceDocument document;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final base = theme.textTheme.bodyMedium?.copyWith(
-      color: theme.colorScheme.onSurface,
-      height: 1.45,
-    );
-    final link = base?.copyWith(
-      color: AfterimageTheme.accent,
-      fontWeight: FontWeight.w700,
-    );
+    final strivelabs = document.strivelabsRecordings;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final block in blocks)
-          switch (block) {
-            NoteTable() => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: _SituationTable(
-                  table: block,
-                  clips: clips,
-                  selected: selected,
-                  cardKey: cardKey,
-                  onPlay: onPlay,
-                ),
-              ),
-            NoteTextLine(text: '') => const SizedBox(height: 6),
-            NoteTextLine() => Padding(
-                padding: const EdgeInsets.only(bottom: 3),
-                child: _labelledLine(theme, block, base, link),
-              ),
-          },
-      ],
-    );
-  }
-
-  Widget _labelledLine(
-    ThemeData theme,
-    NoteTextLine line,
-    TextStyle? base,
-    TextStyle? link,
-  ) {
-    final label = line.label;
-    if (label == null) {
-      return Text.rich(
-        TextSpan(
-          children: _wikilinkSpans(line.text, baseStyle: base, linkStyle: link),
-        ),
-      );
-    }
-    final subtle = label == 'seen';
-    final textStyle = subtle
-        ? base?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-            fontStyle: FontStyle.italic,
-          )
-        : base;
-    final labelColor = switch (label) {
-      'holding' => AfterimageTheme.ready,
-      'seen' => theme.colorScheme.onSurfaceVariant,
-      _ => AfterimageTheme.accent,
-    };
-    return Text.rich(
-      TextSpan(
-        children: [
-          TextSpan(
-            text: '${label.toUpperCase()}  ',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: labelColor,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.8,
-            ),
-          ),
-          ..._wikilinkSpans(
-            line.rest,
-            baseStyle: textStyle,
-            linkStyle: subtle ? textStyle : link,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Her options after the situation, one row each, with that row's clips.
-class _SituationTable extends StatelessWidget {
-  const _SituationTable({
-    required this.table,
-    required this.clips,
-    required this.selected,
-    required this.cardKey,
-    required this.onPlay,
-  });
-
-  final NoteTable table;
-  final List<NoteClip> clips;
-  final NoteClip? selected;
-  final String cardKey;
-  final ValueChanged<NoteClip> onPlay;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final columns = table.header.length;
-    final cellStyle = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurface,
-      height: 1.35,
-    );
-    final linkStyle = cellStyle?.copyWith(
-      color: AfterimageTheme.accent,
-      fontWeight: FontWeight.w700,
-    );
-    final divider = BorderSide(color: theme.colorScheme.outlineVariant);
-
-    Widget cell(String text, {TextStyle? style, TextStyle? links}) => Padding(
-          padding: const EdgeInsets.fromLTRB(6, 7, 6, 7),
-          child: Text.rich(
-            TextSpan(
-              children: _wikilinkSpans(
-                text,
-                baseStyle: style ?? cellStyle,
-                linkStyle: links ?? linkStyle,
-              ),
-            ),
-          ),
-        );
-
-    return Table(
-      key: ValueKey('situation-table-$cardKey'),
-      defaultVerticalAlignment: TableCellVerticalAlignment.top,
-      columnWidths: {
-        for (var column = 0; column < columns; column++)
-          column: switch (table.header[column].toLowerCase()) {
-            'times' => const IntrinsicColumnWidth(),
-            'you did' => const FlexColumnWidth(1.6),
-            'her option' => const FlexColumnWidth(1.15),
-            _ => const FlexColumnWidth(1.3),
-          },
-        columns: const IntrinsicColumnWidth(),
-      },
-      children: [
-        TableRow(
-          decoration: BoxDecoration(border: Border(bottom: divider)),
-          children: [
-            for (final title in table.header)
-              cell(
-                title.toUpperCase(),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.6,
-                ),
-              ),
-            cell(
-              'CLIPS',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.6,
-              ),
-            ),
-          ],
-        ),
-        for (final row in table.rows) _row(theme, row, columns, cell, divider),
-      ],
-    );
-  }
-
-  TableRow _row(
-    ThemeData theme,
-    NoteTableRow row,
-    int columns,
-    Widget Function(String, {TextStyle? style, TextStyle? links}) cell,
-    BorderSide divider,
-  ) {
-    final rowClips = clipsForOption(clips, row.option);
-    final active = selected != null && rowClips.contains(selected);
-    final cells = [
-      for (var column = 0; column < columns; column++)
-        column < row.cells.length ? row.cells[column] : '',
-    ];
-    final optionStyle = theme.textTheme.bodySmall?.copyWith(
-      color: AfterimageTheme.accent,
-      fontWeight: FontWeight.w800,
-      height: 1.35,
-    );
-    return TableRow(
-      decoration: BoxDecoration(
-        color: active ? theme.colorScheme.surfaceContainerHighest : null,
-        border: Border(bottom: divider),
-      ),
-      children: [
-        for (var column = 0; column < columns; column++)
-          column == 0
-              ? cell(cells[column], style: optionStyle, links: optionStyle)
-              : cell(cells[column]),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(2, 3, 2, 3),
-          child: Wrap(
-            spacing: 2,
-            runSpacing: 2,
-            children: [
-              for (final clip in rowClips)
-                Tooltip(
-                  message: clip.caption(),
-                  child: TextButton.icon(
-                    key: ValueKey('row-clip-$cardKey-${clip.file}'),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      minimumSize: const Size(0, 30),
-                      foregroundColor: identical(clip, selected)
-                          ? AfterimageTheme.accentStrong
-                          : clip.outcome == 'hit'
-                              ? theme.colorScheme.error
-                              : theme.colorScheme.onSurfaceVariant,
-                    ),
-                    onPressed: () => onPlay(clip),
-                    icon: const Icon(Icons.play_arrow_rounded, size: 16),
-                    label: Text(clip.videoTime ?? clip.file),
+        if (document.warnings.isNotEmpty) ...[
+          StatusSurface(
+            tone: StatusTone.blocked,
+            icon: Icons.warning_amber_rounded,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final warning in document.warnings)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    child: Text(warning),
                   ),
-                ),
-            ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        Text(
+          strivelabs == null
+              ? 'StriveLabs was not found. Save writes to the batch folder only.'
+              : 'Save writes to StriveLabs recordings and the batch folder. '
+                  'In game: F5, Recordings, Load into Game\'s Slot N, Player '
+                  'Side = the dummy\'s side.',
+          key: const ValueKey('strivelabs-notice'),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
+        const SizedBox(height: 16),
       ],
     );
   }
-}
-
-class _NoteHeadingText extends StatelessWidget {
-  const _NoteHeadingText({required this.heading});
-
-  final String heading;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final text = heading.replaceFirst(RegExp(r'^### '), '');
-    return Text.rich(
-      TextSpan(
-        children: _wikilinkSpans(
-          text,
-          baseStyle: theme.textTheme.titleMedium?.copyWith(
-            color: AfterimageTheme.accent,
-            fontWeight: FontWeight.w800,
-          ),
-          linkStyle: theme.textTheme.titleMedium?.copyWith(
-            color: AfterimageTheme.accent,
-            fontWeight: FontWeight.w800,
-            decoration: TextDecoration.underline,
-            decorationColor: AfterimageTheme.accentStrong,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-List<InlineSpan> _wikilinkSpans(
-  String text, {
-  TextStyle? baseStyle,
-  TextStyle? linkStyle,
-}) {
-  final spans = <InlineSpan>[];
-  final expression = RegExp(r'\[\[([^\]|]+)(?:\|([^\]]+))?\]\]');
-  var cursor = 0;
-  for (final match in expression.allMatches(text)) {
-    if (match.start > cursor) {
-      spans.add(TextSpan(
-          text: text.substring(cursor, match.start), style: baseStyle));
-    }
-    spans.add(
-      TextSpan(
-        text: match.group(2) ?? match.group(1),
-        style: linkStyle,
-      ),
-    );
-    cursor = match.end;
-  }
-  if (cursor < text.length) {
-    spans.add(TextSpan(text: text.substring(cursor), style: baseStyle));
-  }
-  return spans;
 }
 
 String? formatNoteDate(DateTime? value) {

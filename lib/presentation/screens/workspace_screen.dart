@@ -30,11 +30,10 @@ class WorkspaceScreen extends StatelessWidget {
     this.notesRepository,
     this.showNotes = false,
     this.selectedNote,
-    this.notesEditing = false,
+    this.notesSaving = false,
     this.onOpenNotes,
     this.onBackToNotesList,
     this.onCloseNotes,
-    this.onNotesEditingChanged,
     this.onNotesSavingChanged,
   });
 
@@ -50,11 +49,12 @@ class WorkspaceScreen extends StatelessWidget {
   final NotesRepository? notesRepository;
   final bool showNotes;
   final NotePreview? selectedNote;
-  final bool notesEditing;
+
+  /// Recordings are being written; leaving the page waits for that.
+  final bool notesSaving;
   final ValueChanged<NotePreview?>? onOpenNotes;
   final VoidCallback? onBackToNotesList;
   final VoidCallback? onCloseNotes;
-  final ValueChanged<bool>? onNotesEditingChanged;
   final ValueChanged<bool>? onNotesSavingChanged;
 
   @override
@@ -76,7 +76,7 @@ class WorkspaceScreen extends StatelessWidget {
               controller: controller,
               notesAvailable:
                   notesRepository != null && phase != RecorderPhase.running,
-              notesEditing: notesEditing,
+              notesSaving: notesSaving,
               onOpenNotes: () => onOpenNotes?.call(null),
             ),
             Expanded(
@@ -107,11 +107,10 @@ class WorkspaceScreen extends StatelessWidget {
         );
       }
       return NotesPage(
-        key: ValueKey('notes-page-view-${selected.sectionPath}'),
+        key: ValueKey('notes-page-view-${selected.documentPath}'),
         repository: notesRepository!,
         preview: selected,
         onBack: onBackToNotesList ?? () {},
-        onEditingChanged: onNotesEditingChanged,
         onSavingChanged: onNotesSavingChanged,
       );
     }
@@ -145,7 +144,7 @@ class WorkspaceScreen extends StatelessWidget {
           key: const ValueKey('done-view'),
           controller: controller,
           notesRepository: notesRepository,
-          onOpenNotes: notesEditing ? null : () => onOpenNotes?.call(null),
+          onOpenNotes: notesSaving ? null : () => onOpenNotes?.call(null),
         );
     }
   }
@@ -156,14 +155,14 @@ class _WorkspaceHeader extends StatelessWidget {
     required this.phase,
     required this.controller,
     required this.notesAvailable,
-    required this.notesEditing,
+    required this.notesSaving,
     required this.onOpenNotes,
   });
 
   final RecorderPhase phase;
   final RecorderController controller;
   final bool notesAvailable;
-  final bool notesEditing;
+  final bool notesSaving;
   final VoidCallback onOpenNotes;
 
   @override
@@ -182,9 +181,9 @@ class _WorkspaceHeader extends StatelessWidget {
           if (notesAvailable)
             TextButton.icon(
               key: const ValueKey('open-notes'),
-              onPressed: notesEditing ? null : onOpenNotes,
-              icon: const Icon(Icons.notes_outlined),
-              label: const Text('Notes'),
+              onPressed: notesSaving ? null : onOpenNotes,
+              icon: const Icon(Icons.playlist_play_rounded),
+              label: const Text('Sequences'),
             ),
           if (notesAvailable) const SizedBox(width: 8),
           PhaseIndicator(phase: phase, controller: controller),
