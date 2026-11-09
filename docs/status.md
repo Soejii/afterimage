@@ -47,11 +47,14 @@ Version `0.3.1+7` is an alpha desktop release:
   unavailable checks prevent the next menu key. Live behavior remains
   unverified on both Linux and Windows.
 - On Linux, when frame capture is enabled and a completed batch contains a capture
-  sidecar, Afterimage can start the optional `ggst-input-tracker` notes finder in
-  the background. The Notes page lists draft and applied previews, supports
-  editing, deleting, undo, atomic draft writes, applying through the finder, and
-  in-app muted clip playback. Finder output and end-to-end notes application are
-  still unverified against a live batch; the Windows entry points remain hidden.
+  sidecar, Afterimage can start the optional `ggst-input-tracker` sequence finder
+  in the background. The Sequences page lists each opponent's defensive
+  situations (flagged ones first, with the reason), plays a clip of each
+  sequence, and saves the opponent's inputs for a sequence (Save) or for every
+  option after one lead-in (Save mixup) as StriveLabs `.txt` recordings in the
+  batch folder and, when StriveLabs is installed, its `recordings` folder.
+  Loading those files into the training dummy through StriveLabs is unverified;
+  the Windows entry points remain hidden.
 - OBS WebSocket v5 control now supports localhost configuration discovery,
   Hello/Identify authentication, request timeouts, request failures, and safe
   close handling. Setup marks OBS ready only after this protocol and idle-state
