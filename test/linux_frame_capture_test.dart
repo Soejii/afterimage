@@ -194,6 +194,51 @@ void main() {
       expect((row['e']! as List<Map<String, Object?>>).single['own'], 0);
     });
 
+    test('reads each seat replay stream position when the manager is known',
+        () {
+      final memory = _frameMemory()
+        ..putUint32(_peerTable + 0x10, 3716)
+        ..putUint32(_peerTable + _peerStride + 0x10, 3717);
+
+      final withManager = decodeLinuxFrameRow(
+        memory: memory,
+        gWorldPointerAddress: _gWorld,
+        expectedFrame: 1234,
+        elapsedMicros: 1,
+        replayManagerAddress: _replayManager,
+      ).row!;
+      final withoutManager = decodeLinuxFrameRow(
+        memory: memory,
+        gWorldPointerAddress: _gWorld,
+        expectedFrame: 1234,
+        elapsedMicros: 1,
+      ).row!;
+
+      expect(withManager['rp'], [3716, 3717],
+          reason: 'rp is the read head solid position per seat.');
+      expect(withoutManager.containsKey('rp'), isTrue);
+      expect(withoutManager['rp'], isNull);
+    });
+
+    test('an unreadable replay manager leaves rp null and keeps the row', () {
+      final memory = _frameMemory()
+        ..failingAddresses.add(_peerTable + 0x10)
+        ..putUint16(_engine + 0x3868 + 0x2, 0x1ff);
+
+      final read = decodeLinuxFrameRow(
+        memory: memory,
+        gWorldPointerAddress: _gWorld,
+        expectedFrame: 1234,
+        elapsedMicros: 1,
+        replayManagerAddress: _replayManager,
+      );
+
+      expect(read.readError, isFalse,
+          reason: 'A bad manager address must not cost frame rows.');
+      expect(read.row!['rp'], isNull);
+      expect(read.row!['in'], [0x1ff, 0]);
+    });
+
     test('a GameFrame change during decoding marks the row torn', () {
       final memory = _frameMemory()..frameReadValues = [1234, 1235];
 
@@ -264,6 +309,181 @@ void main() {
     expect(sink.flushCalls, 3,
         reason: 'The loop flushes periodically and once after its footer.');
     expect(time.requestedDelays, everyElement(const Duration(milliseconds: 1)));
+  });
+
+  group('replay input stream', () {
+    test('the manager pattern matches GetReplayManager and resolves lea - 8',
+        () {
+      final code = <int>[
+        0x90, // unrelated byte before the function
+        0x48, 0x8D, 0x05, 0x10, 0x00, 0x00, 0x00, // lea rax,[rip+0x10]
+        0xC3,
+        ...List<int>.filled(8, 0xCC),
+        0x48, 0x63, 0xC1,
+      ];
+
+      final offset = ggstReplayManagerPattern.find(code);
+
+      expect(offset, 1);
+      expect(resolveReplayManagerAddress(0x1000, 0x10), 0x1000 + 7 + 0x10 - 8);
+    });
+
+    test('a cached manager is reused only for the same game process', () {
+      expect(
+        reusableReplayManager(
+          cachedProcessId: 41,
+          cachedAddress: 0x144615b10,
+          processId: 41,
+        ),
+        0x144615b10,
+      );
+      expect(
+        reusableReplayManager(
+          cachedProcessId: 41,
+          cachedAddress: 0x144615b10,
+          processId: 42,
+        ),
+        isNull,
+        reason: 'A restarted game must be scanned again.',
+      );
+      expect(
+        reusableReplayManager(
+          cachedProcessId: null,
+          cachedAddress: null,
+          processId: 41,
+        ),
+        isNull,
+      );
+    });
+
+    test('reads each seat up to its zero terminator and sums held frames', () {
+      final memory = _FakeMemory()
+        ..putPointer(_peerTable, _seat1Buffer)
+        ..putPointer(_peerTable + _peerStride, _seat2Buffer)
+        ..putWords(_seat1Buffer, [0x00020025, 0x00040005, 0, 0x00090115])
+        ..putWords(_seat2Buffer, [0x00060012, 0]);
+
+      final row = readLinuxReplayInputStream(
+        memory: memory,
+        replayManagerAddress: _replayManager,
+        maxEntries: 8,
+      );
+
+      expect(row, {
+        'type': 'inputs',
+        'seats': [
+          [0x00020025, 0x00040005],
+          [0x00060012],
+        ],
+        'frames': [6, 6],
+        'error': null,
+      });
+    });
+
+    test('a seat without a buffer reads as an empty stream', () {
+      final memory = _FakeMemory()..putPointer(_peerTable, 0);
+
+      final row = readLinuxReplayInputStream(
+        memory: memory,
+        replayManagerAddress: _replayManager,
+        maxEntries: 4,
+      );
+
+      expect(row['seats'], [<int>[], <int>[]]);
+      expect(row['frames'], [0, 0]);
+    });
+
+    test('the loop writes the stop-time stream before the footer', () async {
+      final time = _FakeCaptureTime(stopAfterDelays: 3);
+      final source = _FakeInputStreamSource(
+        frames: [100, 101],
+        reads: {
+          100: const LinuxFrameRowRead(row: {'type': 'frame', 'f': 100}),
+          101: const LinuxFrameRowRead(row: {'type': 'frame', 'f': 101}),
+        },
+        streams: [_inputs(frames: 50), _inputs(frames: 90)],
+      );
+      final sink = _FakeCaptureSink();
+
+      await _loop(source, sink, time).run(shouldStop: () => time.stopRequested);
+
+      expect(sink.lines.map((line) => line['type']),
+          ['header', 'frame', 'frame', 'inputs', 'footer']);
+      expect(sink.lines[3]['frames'], [90, 90],
+          reason: 'The stream read at stop is preferred.');
+      expect(source.streamReads, 2,
+          reason: 'One snapshot at the first row, one read at stop.');
+    });
+
+    test(
+        'the loop falls back to the first-row snapshot when the stop read fails',
+        () async {
+      final time = _FakeCaptureTime(stopAfterDelays: 2);
+      final source = _FakeInputStreamSource(
+        frames: [100],
+        reads: {
+          100: const LinuxFrameRowRead(row: {'type': 'frame', 'f': 100}),
+        },
+        streams: [_inputs(frames: 50), null],
+      );
+      final sink = _FakeCaptureSink();
+
+      await _loop(source, sink, time).run(shouldStop: () => time.stopRequested);
+
+      final inputs = sink.lines.singleWhere((line) => line['type'] == 'inputs');
+      expect(inputs['frames'], [50, 50]);
+      expect(inputs['error'], isNull);
+    });
+
+    test('an empty stream is never written as a success', () async {
+      final time = _FakeCaptureTime(stopAfterDelays: 2);
+      final source = _FakeInputStreamSource(
+        frames: [100],
+        reads: {
+          100: const LinuxFrameRowRead(row: {'type': 'frame', 'f': 100}),
+        },
+        streams: [
+          null,
+          {
+            'type': 'inputs',
+            'seats': [<int>[], <int>[]],
+            'frames': [0, 0],
+            'error': null,
+          },
+        ],
+      );
+      final sink = _FakeCaptureSink();
+
+      await _loop(source, sink, time).run(shouldStop: () => time.stopRequested);
+
+      final inputs = sink.lines.singleWhere((line) => line['type'] == 'inputs');
+      expect(inputs['error'], isNotNull,
+          reason: 'Neither read gave usable inputs, so the row must say so.');
+      expect(inputs['frames'], [0, 0],
+          reason: 'What was read is kept for diagnosis.');
+    });
+
+    test('the loop reports the error when no stream could be read', () async {
+      final time = _FakeCaptureTime(stopAfterDelays: 2);
+      final source = _FakeInputStreamSource(
+        frames: [100],
+        reads: {
+          100: const LinuxFrameRowRead(row: {'type': 'frame', 'f': 100}),
+        },
+        streams: [null, null],
+      );
+      final sink = _FakeCaptureSink();
+
+      final result = await _loop(source, sink, time)
+          .run(shouldStop: () => time.stopRequested);
+
+      final inputs = sink.lines.singleWhere((line) => line['type'] == 'inputs');
+      expect(inputs['seats'], isNull);
+      expect(inputs['error'], contains('synthetic stream failure'));
+      expect(result.rows, 1,
+          reason: 'A stream failure never costs frame rows.');
+      expect(sink.lines.last['type'], 'footer');
+    });
   });
 
   test('frame capture version is tied to the pubspec version', () {
@@ -413,6 +633,36 @@ const int _bbs1 = 0x50000;
 const int _bbs2 = 0x51000;
 const int _boxes1 = 0x60000;
 const String _entity1Hex = '30000';
+const int _replayManager = 0x70000;
+const int _peerTable = _replayManager + 0xD5438;
+const int _peerStride = 0x28;
+const int _seat1Buffer = 0x200000;
+const int _seat2Buffer = 0x210000;
+
+Map<String, Object?> _inputs({required int frames}) => {
+      'type': 'inputs',
+      'seats': [
+        [frames << 16],
+        [frames << 16],
+      ],
+      'frames': [frames, frames],
+      'error': null,
+    };
+
+LinuxFrameCaptureLoop _loop(
+  LinuxFrameCaptureSource source,
+  LinuxFrameCaptureLineSink sink,
+  _FakeCaptureTime time,
+) =>
+    LinuxFrameCaptureLoop(
+      replayIndex: 1,
+      source: source,
+      sink: sink,
+      elapsed: () => time.now,
+      delay: time.delay,
+      startedUtc: '2026-11-09T00:00:00Z',
+      afterimageVersion: '0.3.0',
+    );
 
 _FakeMemory _frameMemory({int entityCount = 0}) {
   final memory = _FakeMemory()
@@ -518,6 +768,7 @@ void _writeEntity(
 
 class _FakeMemory implements LinuxMemorySession {
   final Map<int, List<int>> _regions = {};
+  final Set<int> failingAddresses = {};
   List<int>? frameReadValues;
   int? _frameAddress;
 
@@ -530,6 +781,9 @@ class _FakeMemory implements LinuxMemorySession {
 
   @override
   List<int> readBytes(int address, int length) {
+    if (failingAddresses.contains(address)) {
+      throw const OSError('synthetic unreadable address');
+    }
     if (frameReadValues != null && address == _frameAddress) {
       final values = frameReadValues!;
       if (values.isNotEmpty) {
@@ -567,6 +821,10 @@ class _FakeMemory implements LinuxMemorySession {
 
   void putInt32(int address, int value) =>
       putBytes(address, _intBytes(value, 4, signed: true));
+
+  void putWords(int address, List<int> words) => putBytes(address, [
+        for (final word in words) ..._intBytes(word, 4, signed: false),
+      ]);
 
   void putString(int address, String value, int maxLength) {
     final codes = value.codeUnits.take(maxLength).toList();
@@ -621,6 +879,26 @@ class _FakeCaptureSource implements LinuxFrameCaptureSource {
   @override
   LinuxFrameRowRead readRow(int expectedFrame, int elapsedMicros) =>
       reads[expectedFrame] ?? const LinuxFrameRowRead();
+}
+
+class _FakeInputStreamSource extends _FakeCaptureSource
+    implements LinuxFrameCaptureInputStreamSource {
+  _FakeInputStreamSource({
+    required super.frames,
+    required super.reads,
+    required this.streams,
+  });
+
+  /// One entry per read; null throws, as a failed memory read would.
+  final List<Map<String, Object?>?> streams;
+  int streamReads = 0;
+
+  @override
+  Map<String, Object?> readInputStream() {
+    final next = streams[streamReads++];
+    if (next == null) throw StateError('synthetic stream failure');
+    return next;
+  }
 }
 
 class _ReadFailureCaptureSource

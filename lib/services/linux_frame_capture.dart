@@ -21,6 +21,34 @@ const int linuxEngineEntityCountOffset = 0x910;
 const int linuxMaxEntityCount = 107;
 const int linuxEntityParentObjectOffset = 0x2C0;
 
+/// Replay input stream layout. The replay manager holds one input stream per
+/// seat for the whole match, loaded when the replay starts. Each peer is a
+/// buffer pointer, a read head and a write head (cursor, count, solid; uint32)
+/// and two more uint32 fields. `solid` is the absolute replay frame; unlike
+/// `GameFrame`, it does not reset during a replay. Measured live 2026-11-09.
+const int linuxReplayPeersOffset = 0xD5438;
+const int linuxReplayPeerStride = 0x28;
+const int linuxReplayReadHeadSolidOffset = 0x10;
+const int linuxReplaySeatCount = 2;
+
+/// One seat's inline buffer holds 36000 uint32 entries (0x23280 bytes).
+const int linuxReplayStreamMaxEntries = 36000;
+
+/// `GetReplayManager`: `lea rax,[rip+disp32]; ret`, int3 padding, and the
+/// next function's `movsxd rax,ecx`.
+final LinuxBytePattern ggstReplayManagerPattern = LinuxBytePattern(
+  bytes: <int>[
+    0x48, 0x8D, 0x05, 0x00, 0x00, 0x00, 0x00, 0xC3, //
+    0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, //
+    0x48, 0x63, 0xC1,
+  ],
+  mask: 'xxx????xxxxxxxxxxxx',
+);
+
+/// The manager object starts 8 bytes before the address the `lea` loads.
+int resolveReplayManagerAddress(int instructionAddress, int displacement) =>
+    instructionAddress + 7 + displacement - 8;
+
 const int _linuxPointerSize = 8;
 const Duration _linuxFrameCaptureStopTimeout = Duration(seconds: 3);
 
@@ -48,6 +76,12 @@ abstract interface class LinuxFrameCaptureSource {
 /// ordinary missing engine or player pointers.
 abstract interface class LinuxFrameCaptureSourceDiagnostics {
   bool get lastReadFailed;
+}
+
+/// Sources that can read the replay's own input stream. The read may throw;
+/// the loop records the error and never lets it cost frame rows.
+abstract interface class LinuxFrameCaptureInputStreamSource {
+  Map<String, Object?> readInputStream();
 }
 
 abstract interface class LinuxFrameCaptureLineSink {
@@ -115,6 +149,10 @@ class LinuxFrameCaptureLoop {
     final diagnostics = source is LinuxFrameCaptureSourceDiagnostics
         ? source as LinuxFrameCaptureSourceDiagnostics
         : null;
+    final streamSource = source is LinuxFrameCaptureInputStreamSource
+        ? source as LinuxFrameCaptureInputStreamSource
+        : null;
+    Map<String, Object?>? streamSnapshot;
 
     while (!shouldStop()) {
       polls++;
@@ -138,6 +176,10 @@ class LinuxFrameCaptureLoop {
           await sink.writeLine(candidate.row!);
           rows++;
           previousFrame = frame;
+          if (streamSource != null && rows == 1) {
+            // A fallback in case the replay is gone by the time capture stops.
+            streamSnapshot = _readStream(streamSource);
+          }
         }
       }
 
@@ -147,6 +189,12 @@ class LinuxFrameCaptureLoop {
         lastFlush = now;
       }
       await delay(const Duration(milliseconds: 1));
+    }
+
+    if (streamSource != null) {
+      await sink.writeLine(
+        _chooseStream(_readStream(streamSource), streamSnapshot),
+      );
     }
 
     await sink.writeLine(<String, Object?>{
@@ -169,6 +217,109 @@ class LinuxFrameCaptureLoop {
   }
 }
 
+Map<String, Object?> _readStream(LinuxFrameCaptureInputStreamSource source) {
+  try {
+    return source.readInputStream();
+  } on Object catch (error) {
+    return <String, Object?>{
+      'type': 'inputs',
+      'seats': null,
+      'frames': null,
+      'error': error.toString(),
+    };
+  }
+}
+
+/// Prefers the read at stop, then the first-row snapshot. When neither is
+/// usable the row still carries what was read, but never as a success.
+Map<String, Object?> _chooseStream(
+  Map<String, Object?> atStop,
+  Map<String, Object?>? snapshot,
+) {
+  if (_streamIsUsable(atStop)) return atStop;
+  if (snapshot != null && _streamIsUsable(snapshot)) return snapshot;
+  if (atStop['error'] != null) return atStop;
+  return <String, Object?>{
+    ...atStop,
+    'error': 'The replay input stream was empty.',
+  };
+}
+
+bool _streamIsUsable(Map<String, Object?> row) {
+  final frames = row['frames'];
+  return row['error'] == null &&
+      frames is List &&
+      frames.isNotEmpty &&
+      frames.every((value) => value is int && value > 0);
+}
+
+/// Reads both seats' raw replay input words up to each stream's zero
+/// terminator. Words after the terminator are stale data from an earlier,
+/// longer replay. Raw words are kept undecoded: high 16 bits are frames held,
+/// low 16 bits are flags. The write head stays 0 during a replay, so it is not
+/// used as the length.
+Map<String, Object?> readLinuxReplayInputStream({
+  required LinuxMemorySession memory,
+  required int replayManagerAddress,
+  int maxEntries = linuxReplayStreamMaxEntries,
+}) {
+  final seats = <List<int>>[];
+  final frames = <int>[];
+  for (var seat = 0; seat < linuxReplaySeatCount; seat++) {
+    final buffer = _readPointer(
+      memory,
+      replayManagerAddress +
+          linuxReplayPeersOffset +
+          seat * linuxReplayPeerStride,
+    );
+    final words = <int>[];
+    var held = 0;
+    if (buffer != 0) {
+      final bytes = memory.readBytes(buffer, maxEntries * 4);
+      for (var offset = 0; offset + 4 <= bytes.length; offset += 4) {
+        final word = bytes[offset] |
+            (bytes[offset + 1] << 8) |
+            (bytes[offset + 2] << 16) |
+            (bytes[offset + 3] << 24);
+        if (word == 0) break;
+        words.add(word);
+        held += word >> 16;
+      }
+    }
+    seats.add(words);
+    frames.add(held);
+  }
+  return <String, Object?>{
+    'type': 'inputs',
+    'seats': seats,
+    'frames': frames,
+    'error': null,
+  };
+}
+
+/// Each seat's replay stream position, or null. A wrong manager address (for
+/// example after a game patch) must only empty this field, never cost the row.
+List<int>? _readReplayPositions(
+  LinuxMemorySession memory,
+  int? replayManagerAddress,
+) {
+  if (replayManagerAddress == null) return null;
+  try {
+    return <int>[
+      for (var seat = 0; seat < linuxReplaySeatCount; seat++)
+        _readUint32(
+          memory,
+          replayManagerAddress +
+              linuxReplayPeersOffset +
+              seat * linuxReplayPeerStride +
+              linuxReplayReadHeadSolidOffset,
+        ),
+    ];
+  } on Object {
+    return null;
+  }
+}
+
 /// Decodes raw GGST memory into one contract row. The function performs no IO
 /// besides reads through [memory], so it can be exercised with a byte-map fake.
 LinuxFrameRowRead decodeLinuxFrameRow({
@@ -176,6 +327,7 @@ LinuxFrameRowRead decodeLinuxFrameRow({
   required int gWorldPointerAddress,
   required int expectedFrame,
   required int elapsedMicros,
+  int? replayManagerAddress,
 }) {
   final state = _readEngineState(memory, gWorldPointerAddress);
   if (state == null) return const LinuxFrameRowRead();
@@ -204,6 +356,7 @@ LinuxFrameRowRead decodeLinuxFrameRow({
     _readPlayer(memory, state.player2),
   ];
   final entities = _readEntities(memory, state);
+  final replayPositions = _readReplayPositions(memory, replayManagerAddress);
 
   final finalFrame =
       _readUint32(memory, state.engine + linuxEngineGameFrameOffset);
@@ -217,6 +370,7 @@ LinuxFrameRowRead decodeLinuxFrameRow({
       'f': initialFrame,
       't': elapsedMicros,
       'in': inputs,
+      'rp': replayPositions,
       'p': players,
       'e': entities,
     },
@@ -233,6 +387,11 @@ class LinuxFrameCapture implements FrameCapturePort, AbortableFrameCapturePort {
   final Duration stopTimeout;
   _LinuxFrameCaptureWorker? _worker;
 
+  /// The replay manager found by an earlier replay of this game process, so
+  /// only the first capture pays for the module scan (about 0.2 s).
+  int? _replayManagerProcessId;
+  int? _replayManagerAddress;
+
   @override
   Future<void> start({
     required int replayIndex,
@@ -248,6 +407,12 @@ class LinuxFrameCapture implements FrameCapturePort, AbortableFrameCapturePort {
       outputPath: outputPath,
       gWorldPointerAddress: gWorldPointerAddress,
       stopTimeout: stopTimeout,
+      knownReplayManagerProcessId: _replayManagerProcessId,
+      knownReplayManagerAddress: _replayManagerAddress,
+      onReplayManager: (processId, address) {
+        _replayManagerProcessId = processId;
+        _replayManagerAddress = address;
+      },
     );
     _worker = worker;
     try {
@@ -305,6 +470,9 @@ class _LinuxFrameCaptureWorker {
     required this.outputPath,
     required this.gWorldPointerAddress,
     required this.stopTimeout,
+    required this.knownReplayManagerProcessId,
+    required this.knownReplayManagerAddress,
+    required this.onReplayManager,
   });
 
   final String processName;
@@ -312,6 +480,9 @@ class _LinuxFrameCaptureWorker {
   final String outputPath;
   final int? gWorldPointerAddress;
   final Duration stopTimeout;
+  final int? knownReplayManagerProcessId;
+  final int? knownReplayManagerAddress;
+  final void Function(int processId, int address) onReplayManager;
   final Completer<SendPort> _ready = Completer<SendPort>();
   final Completer<FrameCaptureResult> _completed =
       Completer<FrameCaptureResult>();
@@ -340,6 +511,8 @@ class _LinuxFrameCaptureWorker {
         replayIndex,
         outputPath,
         gWorldPointerAddress,
+        knownReplayManagerProcessId,
+        knownReplayManagerAddress,
       ],
       onError: errors.sendPort,
       onExit: responses.sendPort,
@@ -426,6 +599,12 @@ class _LinuxFrameCaptureWorker {
       case 'fileCreated':
         final path = message['path'];
         if (path is String) _createdOutputPath = path;
+      case 'replayManager':
+        final processId = message['processId'];
+        final address = message['address'];
+        if (processId is int && address is int) {
+          onReplayManager(processId, address);
+        }
       case 'done':
         _exitTracker.markDone();
         final result = message['result'];
@@ -481,6 +660,8 @@ void _linuxFrameCaptureIsolateEntry(List<Object?> args) {
   final replayIndex = args[2] as int;
   final outputPath = args[3] as String;
   final gWorldPointerAddress = args[4] as int?;
+  final knownReplayManagerProcessId = args[5] as int?;
+  final knownReplayManagerAddress = args[6] as int?;
   final commands = ReceivePort();
   final stopwatch = Stopwatch()..start();
   var stopRequested = false;
@@ -503,6 +684,8 @@ void _linuxFrameCaptureIsolateEntry(List<Object?> args) {
       replayIndex: replayIndex,
       outputPath: outputPath,
       gWorldPointerAddress: gWorldPointerAddress,
+      knownReplayManagerProcessId: knownReplayManagerProcessId,
+      knownReplayManagerAddress: knownReplayManagerAddress,
       elapsed: () => stopwatch.elapsed,
       shouldStop: () => stopRequested,
       endReason: () => stopReason,
@@ -570,6 +753,8 @@ Future<void> _runLinuxFrameCaptureIsolate({
   required int replayIndex,
   required String outputPath,
   required int? gWorldPointerAddress,
+  required int? knownReplayManagerProcessId,
+  required int? knownReplayManagerAddress,
   required Duration Function() elapsed,
   required bool Function() shouldStop,
   required FrameCaptureEndReason Function() endReason,
@@ -594,6 +779,19 @@ Future<void> _runLinuxFrameCaptureIsolate({
       final displacement = decodeSignedInt32(memory.readBytes(hit + 8, 4));
       resolvedAddress = resolveRipRelativeAddress(hit, displacement);
     }
+    final replayManagerAddress = reusableReplayManager(
+          cachedProcessId: knownReplayManagerProcessId,
+          cachedAddress: knownReplayManagerAddress,
+          processId: memory.processId,
+        ) ??
+        _findReplayManager(memory, processName);
+    if (replayManagerAddress != null) {
+      parent.send(<String, Object?>{
+        'type': 'replayManager',
+        'processId': memory.processId,
+        'address': replayManagerAddress,
+      });
+    }
 
     sink = await LinuxFrameCaptureFileSink.create(outputPath);
     parent.send(<String, Object?>{
@@ -603,6 +801,7 @@ Future<void> _runLinuxFrameCaptureIsolate({
     final source = _LinuxProcessFrameSource(
       memory: memory,
       gWorldPointerAddress: resolvedAddress,
+      replayManagerAddress: replayManagerAddress,
     );
     final result = await runLinuxFrameCaptureSession(
       replayIndex: replayIndex,
@@ -642,6 +841,34 @@ Future<void> _runLinuxFrameCaptureIsolate({
   } finally {
     memory?.close();
     commands.close();
+  }
+}
+
+/// A cached manager address is reused only for the same game process; a
+/// restarted game is scanned again.
+int? reusableReplayManager({
+  required int? cachedProcessId,
+  required int? cachedAddress,
+  required int processId,
+}) =>
+    cachedProcessId == processId ? cachedAddress : null;
+
+/// The replay manager is optional: without it, rows carry `rp: null` and the
+/// input stream row reports why. Frame capture itself never depends on it.
+int? _findReplayManager(LinuxMemorySession memory, String processName) {
+  try {
+    final hit = const LinuxPatternScanner()
+        .scan(
+          module: memory.moduleFromName(processName),
+          pattern: ggstReplayManagerPattern,
+          read: memory.readBytes,
+        )
+        .address;
+    if (hit == null) return null;
+    final displacement = decodeSignedInt32(memory.readBytes(hit + 3, 4));
+    return resolveReplayManagerAddress(hit, displacement);
+  } on Object {
+    return null;
   }
 }
 
@@ -695,15 +922,32 @@ class LinuxFrameCaptureFileSink implements LinuxFrameCaptureClosableLineSink {
 }
 
 class _LinuxProcessFrameSource
-    implements LinuxFrameCaptureSource, LinuxFrameCaptureSourceDiagnostics {
+    implements
+        LinuxFrameCaptureSource,
+        LinuxFrameCaptureSourceDiagnostics,
+        LinuxFrameCaptureInputStreamSource {
   _LinuxProcessFrameSource({
     required this.memory,
     required this.gWorldPointerAddress,
+    required this.replayManagerAddress,
   });
 
   final LinuxMemorySession memory;
   final int gWorldPointerAddress;
+  final int? replayManagerAddress;
   bool _lastReadFailed = false;
+
+  @override
+  Map<String, Object?> readInputStream() {
+    final manager = replayManagerAddress;
+    if (manager == null) {
+      throw StateError('The GGST replay manager signature was not found.');
+    }
+    return readLinuxReplayInputStream(
+      memory: memory,
+      replayManagerAddress: manager,
+    );
+  }
 
   @override
   bool get lastReadFailed => _lastReadFailed;
@@ -731,6 +975,7 @@ class _LinuxProcessFrameSource
         gWorldPointerAddress: gWorldPointerAddress,
         expectedFrame: expectedFrame,
         elapsedMicros: elapsedMicros,
+        replayManagerAddress: replayManagerAddress,
       );
     } on Object {
       return const LinuxFrameRowRead(readError: true);
