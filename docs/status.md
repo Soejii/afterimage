@@ -2,7 +2,7 @@
 
 This file records what works in the current alpha and what is still unverified.
 
-Version `0.3.2+8` is an alpha desktop release:
+Version `0.3.3+9` is an alpha desktop release:
 
 - One Material 3 dark workspace screen that moves through four states:
   blocked, ready, running, and finished. While blocked it leads with a single
@@ -49,8 +49,9 @@ Version `0.3.2+8` is an alpha desktop release:
 - On Linux, when frame capture is enabled and a completed batch contains a capture
   sidecar, Afterimage can start the optional `ggst-input-tracker` sequence finder
   in the background. The Sequences page lists each opponent's defensive
-  situations (flagged ones first, with the reason), plays a clip of each
-  sequence, and saves the opponent's inputs for a sequence (Save) or for every
+  situations (flagged ones first, with the reason, in character names), a
+  small card per guard-crushing move, plays a clip of a sequence directly under
+  its row, and saves the opponent's inputs for a sequence (Save) or for every
   option after one lead-in (Save mixup) as StriveLabs `.txt` recordings in the
   batch folder and, when StriveLabs is installed, its `recordings` folder.
   Loading those files into the training dummy through StriveLabs is unverified;
