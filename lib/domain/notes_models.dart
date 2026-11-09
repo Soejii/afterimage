@@ -85,6 +85,7 @@ class SequenceDocument {
 class SequenceCard {
   const SequenceCard({
     required this.id,
+    this.kind = 'situation',
     required this.title,
     required this.flagged,
     required this.damage,
@@ -95,11 +96,16 @@ class SequenceCard {
     required this.leadIns,
     required this.sequences,
     required this.mixups,
+    this.header,
+    this.leadInText,
   });
 
   factory SequenceCard.fromJson(Map<String, Object?> json) => SequenceCard(
         id: json['id']?.toString() ?? '',
+        kind: json['kind']?.toString() ?? 'situation',
         title: json['title']?.toString() ?? '',
+        header: _optionalString(json['header']),
+        leadInText: _optionalString(json['lead_in_text']),
         flagged: json['flagged'] == true,
         damage: _integer(json['damage']) ?? 0,
         hits: _integer(json['hits']) ?? 0,
@@ -127,7 +133,14 @@ class SequenceCard {
       );
 
   final String id;
+
+  /// `situation`, or `guard_crush` for the small guard-crush card (v0.3.3).
+  final String kind;
   final String title;
+
+  /// Display text from the finder (v0.3.3); `null` in older lists.
+  final String? header;
+  final String? leadInText;
   final bool flagged;
   final int damage;
   final int hits;
@@ -137,6 +150,8 @@ class SequenceCard {
   final List<LeadInCount> leadIns;
   final List<LabSequence> sequences;
   final List<SequenceMixup> mixups;
+
+  bool get isGuardCrush => kind == 'guard_crush';
 }
 
 class SequenceFlag {
@@ -184,6 +199,8 @@ class LabSequence {
     required this.recording,
     required this.recordingError,
     required this.clip,
+    this.line,
+    this.result,
   });
 
   factory LabSequence.fromJson(Map<String, Object?> json) {
@@ -208,10 +225,17 @@ class LabSequence {
       clip: clip is Map
           ? NoteClip.fromJson(Map<String, Object?>.from(clip))
           : null,
+      line: _optionalString(json['line']),
+      result: _optionalString(json['result']),
     );
   }
 
   final String id;
+
+  /// `2K > S Mr. Dolphin Vertical > 5H` and `Ky crouch-blocked · May hit Ky
+  /// (70 damage)` from the finder (v0.3.3); `null` in older lists.
+  final String? line;
+  final String? result;
   final int? replay;
   final int? round;
   final String videoTime;
@@ -276,10 +300,15 @@ class LabRecording {
 
 /// Her options after one lead-in, one file each.
 class SequenceMixup {
-  const SequenceMixup({required this.leadIn, required this.files});
+  const SequenceMixup({
+    required this.leadIn,
+    required this.files,
+    this.heading,
+  });
 
   factory SequenceMixup.fromJson(Map<String, Object?> json) => SequenceMixup(
         leadIn: _optionalString(json['lead_in']),
+        heading: _optionalString(json['label']),
         files: [
           for (final value in _maps(json['files']))
             MixupFile(
@@ -292,6 +321,9 @@ class SequenceMixup {
 
   final String? leadIn;
   final List<MixupFile> files;
+
+  /// `May's mixup after 2K > S Mr. Dolphin Vertical:` from the finder (v0.3.3).
+  final String? heading;
 
   String get label => leadIn == null ? 'as an opener' : 'after $leadIn';
 }
