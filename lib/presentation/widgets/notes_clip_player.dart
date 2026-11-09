@@ -155,6 +155,7 @@ class NotesClipPlayer extends StatefulWidget {
     this.onStarted,
     this.playerCardKey,
     this.playRequest = 0,
+    this.playOnOpen = false,
   });
 
   final NoteClip clip;
@@ -166,6 +167,10 @@ class NotesClipPlayer extends StatefulWidget {
 
   /// Bumped by the page to start this clip, e.g. from a table row's play button.
   final int playRequest;
+
+  /// Start playing as soon as the player is shown (it opens from a row's play
+  /// button).
+  final bool playOnOpen;
 
   @override
   State<NotesClipPlayer> createState() => _NotesClipPlayerState();
@@ -191,6 +196,17 @@ class _NotesClipPlayerState extends State<NotesClipPlayer> {
   Future<NotesClipPlayerSession?>? _opening;
   // Bumped by every play, pause and outside pause: a pending play is cancelled.
   int _request = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.playOnOpen) {
+      // After this frame, like a play request: the page is mid-build now.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_play());
+      });
+    }
+  }
 
   @override
   void didUpdateWidget(covariant NotesClipPlayer oldWidget) {

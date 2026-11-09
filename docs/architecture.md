@@ -129,7 +129,8 @@ the finder found StriveLabs and its `ue4ss` folder still exists, to StriveLabs'
 with a path separator or a leading dot is refused. The game itself is never
 written. Clip playback is behind `NotesClipPlayerSession`, which keeps media_kit
 and libmpv out of widget tests and disposes a session when its player leaves the
-scroll viewport or its page closes.
+scroll viewport or its page closes. The page keeps at most one player open, under
+the sequence row that opened it; opening another row disposes the previous one.
 
 ## Presentation
 

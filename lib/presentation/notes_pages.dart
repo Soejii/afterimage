@@ -218,9 +218,8 @@ class _NotesPageState extends State<NotesPage> {
   bool _saving = false;
   final Set<String> _saved = <String>{};
   final Set<String> _expanded = <String>{};
-  final Map<String, int> _selectedClips = <String, int>{};
-  final Map<String, int> _playRequests = <String, int>{};
-  String? _playingCard;
+  // The one sequence whose clip is open, under its row; null when none is.
+  String? _openSequence;
   ScaffoldMessengerState? _scaffoldMessenger;
 
   @override
@@ -368,19 +367,25 @@ class _NotesPageState extends State<NotesPage> {
   ) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    final expanded = card.flagged || _expanded.contains(card.id);
-    final clipIndexes = <int>[
-      for (var index = 0; index < card.sequences.length; index++)
-        if (card.sequences[index].clip != null) index,
-    ];
-    final selected = _selectedClips[card.id] ?? clipIndexes.firstOrNull;
-    final selectedClip =
-        selected == null ? null : card.sequences[selected].clip;
+    final crush = card.isGuardCrush;
+    final expanded = card.flagged || crush || _expanded.contains(card.id);
+    final header = card.header ??
+        [
+          '${card.count} ${card.count == 1 ? 'time' : 'times'}',
+          if (card.decided > 0) 'hit ${card.hits} of ${card.decided}',
+          if (card.damage > 0) '${card.damage} damage',
+        ].join('  ·  ');
+    final leadIns = card.leadInText ??
+        (card.leadIns.isEmpty
+            ? null
+            : 'lead-ins: ${card.leadIns.map((leadIn) => '${leadIn.label} x${leadIn.count}').join(', ')}');
     return Card(
       key: ValueKey('sequence-card-${card.id}'),
       margin: const EdgeInsets.only(bottom: 14),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 17),
+        padding: crush
+            ? const EdgeInsets.fromLTRB(18, 12, 18, 10)
+            : const EdgeInsets.fromLTRB(18, 16, 18, 17),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -390,18 +395,20 @@ class _NotesPageState extends State<NotesPage> {
                 Expanded(
                   child: Text(
                     card.title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: AfterimageTheme.accent,
+                    style: (crush
+                            ? theme.textTheme.titleSmall
+                            : theme.textTheme.titleMedium)
+                        ?.copyWith(
+                      color: crush
+                          ? AfterimageTheme.blockedText
+                          : AfterimageTheme.accent,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
+                const SizedBox(width: 12),
                 Text(
-                  [
-                    '${card.count} ${card.count == 1 ? 'time' : 'times'}',
-                    if (card.decided > 0) 'hit ${card.hits} of ${card.decided}',
-                    if (card.damage > 0) '${card.damage} damage',
-                  ].join('  ·  '),
+                  header,
                   style: theme.textTheme.labelMedium?.copyWith(
                     color: muted,
                     fontFeatures: const [FontFeature.tabularFigures()],
@@ -422,11 +429,11 @@ class _NotesPageState extends State<NotesPage> {
                   ),
                 ),
               ),
-            if (card.leadIns.isNotEmpty)
+            if (leadIns != null)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
-                  'lead-ins: ${card.leadIns.map((leadIn) => '${leadIn.label} x${leadIn.count}').join(', ')}',
+                  leadIns,
                   style: theme.textTheme.bodySmall?.copyWith(color: muted),
                 ),
               ),
@@ -445,23 +452,21 @@ class _NotesPageState extends State<NotesPage> {
                 ),
               )
             else ...[
-              const SizedBox(height: 10),
-              for (var index = 0; index < card.sequences.length; index++)
-                _buildSequence(card, index, selected == index),
-              if (selectedClip != null) ...[
-                const SizedBox(height: 12),
-                NotesClipPlayer(
-                  playerCardKey: ValueKey('clip-player-${card.id}'),
-                  clip: selectedClip,
-                  filePath: _clipPath(data.preview, selectedClip),
-                  playerFactory: widget.playerFactory,
-                  playRequest: _playRequests[card.id] ?? 0,
-                  pauseRequested:
-                      _playingCard != null && _playingCard != card.id,
-                  onStarted: () {
-                    if (mounted) setState(() => _playingCard = card.id);
-                  },
-                ),
+              SizedBox(height: crush ? 6 : 10),
+              for (final sequence in card.sequences) ...[
+                _buildSequence(sequence),
+                if (_openSequence == sequence.id && sequence.clip != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 2, 0, 12),
+                    child: NotesClipPlayer(
+                      key: ValueKey('clip-${sequence.id}'),
+                      playerCardKey: ValueKey('clip-player-${sequence.id}'),
+                      clip: sequence.clip!,
+                      filePath: _clipPath(data.preview, sequence.clip!),
+                      playerFactory: widget.playerFactory,
+                      playOnOpen: true,
+                    ),
+                  ),
               ],
             ],
           ],
@@ -476,15 +481,27 @@ class _NotesPageState extends State<NotesPage> {
     final savedKey = 'mixup-${card.id}-$index';
     final options =
         mixup.files.map((file) => '${file.followUp} x${file.count}').join(', ');
+    final heading = mixup.heading;
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              'mixup ${mixup.label}: $options',
-              style: theme.textTheme.bodyMedium,
-            ),
+            child: heading == null
+                ? Text(
+                    'mixup ${mixup.label}: $options',
+                    style: theme.textTheme.bodyMedium,
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(heading, style: theme.textTheme.bodyMedium),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 14, top: 2),
+                        child: Text(options, style: theme.textTheme.bodyMedium),
+                      ),
+                    ],
+                  ),
           ),
           const SizedBox(width: 10),
           _SaveButton(
@@ -503,33 +520,36 @@ class _NotesPageState extends State<NotesPage> {
     );
   }
 
-  Widget _buildSequence(SequenceCard card, int index, bool selected) {
-    final sequence = card.sequences[index];
+  Widget _buildSequence(LabSequence sequence) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final recording = sequence.recording;
+    final open = _openSequence == sequence.id;
+    final line = sequence.line;
+    final result = sequence.result;
     return Container(
       key: ValueKey('sequence-${sequence.id}'),
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.fromLTRB(6, 4, 4, 4),
       decoration: BoxDecoration(
-        color: selected ? AfterimageTheme.panelRaised : null,
+        color: open ? AfterimageTheme.panelRaised : null,
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
         children: [
           IconButton(
             key: ValueKey('play-${sequence.id}'),
-            tooltip: sequence.clip == null ? 'No clip' : 'Play clip',
+            tooltip: sequence.clip == null
+                ? 'No clip'
+                : open
+                    ? 'Close clip'
+                    : 'Play clip',
             onPressed: sequence.clip == null
                 ? null
-                : () => setState(() {
-                      _selectedClips[card.id] = index;
-                      _playRequests[card.id] =
-                          (_playRequests[card.id] ?? 0) + 1;
-                      _playingCard = card.id;
-                    }),
-            icon: const Icon(Icons.play_arrow_rounded),
+                : () => setState(
+                      () => _openSequence = open ? null : sequence.id,
+                    ),
+            icon: Icon(open ? Icons.stop_rounded : Icons.play_arrow_rounded),
           ),
           const SizedBox(width: 4),
           Expanded(
@@ -543,7 +563,14 @@ class _NotesPageState extends State<NotesPage> {
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-                Text(sequence.summary, style: theme.textTheme.bodyMedium),
+                if (line != null && result != null) ...[
+                  Text(line, style: theme.textTheme.bodyMedium),
+                  Text(
+                    result,
+                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                  ),
+                ] else
+                  Text(sequence.summary, style: theme.textTheme.bodyMedium),
                 if (recording == null && sequence.recordingError != null)
                   Text(
                     'cannot save: ${sequence.recordingError}',
@@ -585,14 +612,29 @@ class _SaveButton extends StatelessWidget {
   final bool saved;
   final VoidCallback? onPressed;
 
+  /// One width for every Save button, so they line up down the page whatever
+  /// the frame count in the label.
+  static const double width = 172;
+
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      key: buttonKey,
-      onPressed: onPressed,
-      icon:
-          Icon(saved ? Icons.check_rounded : Icons.save_alt_rounded, size: 18),
-      label: Text(saved ? 'Saved' : label),
+    return SizedBox(
+      width: width,
+      child: OutlinedButton.icon(
+        key: buttonKey,
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        ),
+        icon: Icon(
+          saved ? Icons.check_rounded : Icons.save_alt_rounded,
+          size: 18,
+        ),
+        label: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(saved ? 'Saved' : label, maxLines: 1),
+        ),
+      ),
     );
   }
 }

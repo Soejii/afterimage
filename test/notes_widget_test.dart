@@ -182,7 +182,8 @@ void main() {
         return session;
       },
     )));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('clip-player-c1')));
+    await _pumpUntilFound(tester, find.byKey(const ValueKey('play-c1-s2')));
+    expect(find.byType(NotesClipPlayer), findsNothing);
     expect(opened, isEmpty);
 
     await tester.ensureVisible(find.byKey(const ValueKey('play-c1-s2')));
@@ -532,6 +533,125 @@ void main() {
 
     expect(sessions, hasLength(2));
     expect(sessions[1].pauseCalls, pausesOfB + 1);
+  });
+
+  // v0.3.3: the clip opens under the tapped row; one player on the page.
+  testWidgets('the clip opens under the tapped row, moves, and closes',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final sessions = <_FakeClipSession>[];
+    final directory = _createTempDirectory('afterimage-row-clips');
+    Directory('${directory.path}/clips').createSync();
+    for (final name in ['c1-s1.mp4', 'c1-s2.mp4', 'c1-s3.mp4', 'c2-s1.mp4']) {
+      File('${directory.path}/clips/$name').createSync();
+    }
+    addTearDown(() => _deleteTempEntity(directory));
+    final preview = _preview(directory: directory.path);
+
+    await tester.pumpWidget(_app(NotesPage(
+      repository: _FakeNotesRepository(preview, _data(preview)),
+      preview: preview,
+      onBack: () {},
+      playerFactory: (_) {
+        final session = _FakeClipSession();
+        sessions.add(session);
+        return session;
+      },
+    )));
+    await _pumpUntilFound(tester, find.byKey(const ValueKey('play-c1-s2')));
+    expect(find.byType(NotesClipPlayer), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('play-c1-s2')));
+    await _settleIo(
+        tester, () => sessions.isNotEmpty && sessions.last.playCalls == 1);
+    final player = find.byKey(const ValueKey('clip-player-c1-s2'));
+    expect(player, findsOneWidget);
+    expect(sessions.single.playCalls, 1);
+    final row = tester.getRect(find.byKey(const ValueKey('sequence-c1-s2')));
+    final next = tester.getRect(find.byKey(const ValueKey('sequence-c1-s3')));
+    final box = tester.getRect(player);
+    expect(box.top, greaterThanOrEqualTo(row.bottom));
+    expect(box.bottom, lessThanOrEqualTo(next.top));
+
+    await tester.tap(find.byKey(const ValueKey('play-c1-s1')));
+    await _settleIo(
+        tester, () => sessions.length == 2 && sessions.last.playCalls == 1);
+    expect(find.byKey(const ValueKey('clip-player-c1-s2')), findsNothing);
+    expect(find.byKey(const ValueKey('clip-player-c1-s1')), findsOneWidget);
+    expect(find.byType(NotesClipPlayer), findsOneWidget);
+    expect(sessions.first.disposeCalls, 1);
+
+    await tester.tap(find.byKey(const ValueKey('play-c1-s1')));
+    await tester.pump();
+    expect(find.byType(NotesClipPlayer), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('show-sequences-c2')));
+    await tester.tap(find.byKey(const ValueKey('show-sequences-c2')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('play-c1-s3')));
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const ValueKey('play-c2-s1')));
+    await tester.tap(find.byKey(const ValueKey('play-c2-s1')));
+    await tester.pump();
+    expect(find.byType(NotesClipPlayer), findsOneWidget);
+    expect(find.byKey(const ValueKey('clip-player-c2-s1')), findsOneWidget);
+    await _settleIo(tester, () => false);
+  });
+
+  testWidgets('Save buttons have one width whatever the frame count',
+      (tester) async {
+    final preview = _preview(directory: '/out/batch-a/May');
+    await tester.pumpWidget(_app(NotesPage(
+      repository: _FakeNotesRepository(preview, _dataV033(preview)),
+      preview: preview,
+      onBack: () {},
+      playerFactory: (_) => _FakeClipSession(),
+    )));
+    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s1')));
+
+    expect(find.text('Save (95f)'), findsOneWidget);
+    expect(find.text('Save (798f)'), findsOneWidget);
+    final widths = {
+      for (final key in ['save-c1-s1', 'save-c1-s2', 'save-mixup-c1-0'])
+        tester.getSize(find.byKey(ValueKey(key))).width,
+    };
+    expect(widths, hasLength(1));
+  });
+
+  testWidgets('finder display text is shown as written, with names',
+      (tester) async {
+    final preview = _preview(directory: '/out/batch-a/May');
+    await tester.pumpWidget(_app(NotesPage(
+      repository: _FakeNotesRepository(preview, _dataV033(preview)),
+      preview: preview,
+      onBack: () {},
+      playerFactory: (_) => _FakeClipSession(),
+    )));
+    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s1')));
+
+    expect(find.text("Ky blocked May's j.H"), findsOneWidget);
+    expect(
+        find.text('5 times · May hit Ky 1 time · 78 damage'), findsOneWidget);
+    expect(
+      find.text(
+          "What May did before j.H: S Mr. Dolphin Horizontal x2, nothing x2, 2S x1"),
+      findsOneWidget,
+    );
+    expect(find.text("May's mixup after S Mr. Dolphin Horizontal > j.H:"),
+        findsOneWidget);
+    expect(find.text('Ground Throw x1, f.S x1'), findsOneWidget);
+    expect(find.text('S Mr. Dolphin Horizontal > j.H > Ground Throw'),
+        findsOneWidget);
+    expect(find.text('Ky crouch-blocked · May hit Ky (78 damage)'),
+        findsOneWidget);
+    expect(find.text('r2 · round 1 · 04:17.2'), findsWidgets);
+    // A guard-crush card is never collapsed.
+    expect(find.text("May's 6H guard-crushed Ky"), findsOneWidget);
+    expect(find.byKey(const ValueKey('save-c2-s1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('show-sequences-c2')), findsNothing);
+    expect(find.text('May guard-crushed Ky (59 damage)'), findsOneWidget);
   });
 }
 
@@ -883,3 +1003,107 @@ Directory _createTempDirectory(String prefix) {
 void _deleteTempEntity(FileSystemEntity entity) {
   if (entity.existsSync()) entity.deleteSync(recursive: true);
 }
+
+Map<String, Object?> _sequenceV033(
+  String id, {
+  required int frames,
+  required String line,
+  required String result,
+}) =>
+    {
+      ..._sequence(id,
+          recording: {..._recording('May - $id.txt'), 'frames': frames}),
+      'video_time': '04:17.2',
+      'line': line,
+      'answer': 'Ky crouch-blocked',
+      'result': result,
+    };
+
+NoteSequenceData _dataV033(NotePreview preview) => NoteSequenceData(
+      preview: preview,
+      document: SequenceDocument.fromJson({
+        'schema': 1,
+        'opponent': 'May',
+        'player': 'Ky',
+        'batch_label': 'batch-a',
+        'batch_folder': '/videos/batch-a',
+        'created_at': '2026-11-09T23:00:00+07:00',
+        'strivelabs_recordings': '/game/ue4ss/recordings',
+        'warnings': <String>[],
+        'clip_errors': <String>[],
+        'cards': [
+          {
+            'id': 'c1',
+            'kind': 'situation',
+            'title': "Ky blocked May's j.H",
+            'flagged': true,
+            'damage': 78,
+            'hits': 1,
+            'decided': 3,
+            'count': 5,
+            'header': '5 times · May hit Ky 1 time · 78 damage',
+            'lead_in_text':
+                'What May did before j.H: S Mr. Dolphin Horizontal x2, nothing x2, 2S x1',
+            'flags': <Object?>[],
+            'lead_ins': [
+              {'move': 'S Mr. Dolphin Horizontal', 'count': 2},
+            ],
+            'sequences': [
+              _sequenceV033('c1-s1',
+                  frames: 95,
+                  line: 'S Mr. Dolphin Horizontal > j.H > Ground Throw',
+                  result: 'Ky crouch-blocked · May hit Ky (78 damage)'),
+              _sequenceV033('c1-s2',
+                  frames: 798,
+                  line: 'S Mr. Dolphin Horizontal > j.H > f.S',
+                  result: 'Ky crouch-blocked · May kept pressure'),
+            ],
+            'mixups': [
+              {
+                'lead_in': 'S Mr. Dolphin Horizontal',
+                'label': "May's mixup after S Mr. Dolphin Horizontal > j.H:",
+                'files': [
+                  {
+                    ..._recording('May - mixup 1 of 2 (Ground Throw).txt'),
+                    'follow_up': 'Ground Throw',
+                    'count': 1,
+                  },
+                  {
+                    ..._recording('May - mixup 2 of 2 (f.S).txt'),
+                    'follow_up': 'f.S',
+                    'count': 1,
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            'id': 'c2',
+            'kind': 'guard_crush',
+            'title': "May's 6H guard-crushed Ky",
+            'flagged': false,
+            'damage': 59,
+            'hits': 1,
+            'decided': 0,
+            'count': 1,
+            'header': '1 time · 59 damage',
+            'lead_in_text': 'What May did before 6H: j.H x1',
+            'flags': <Object?>[],
+            'lead_ins': [
+              {'move': 'j.H', 'count': 1},
+            ],
+            'sequences': [
+              {
+                ..._sequenceV033('c2-s1',
+                    frames: 74,
+                    line: 'j.H > 6H',
+                    result: 'May guard-crushed Ky (59 damage)'),
+                'answer': '',
+                'outcome': 'guard_crush',
+              },
+            ],
+            'mixups': <Object?>[],
+          },
+        ],
+      }),
+    );

@@ -109,7 +109,9 @@ option is off by default and is not yet available on Windows.
 On Linux, the optional sequence finder can run after a completed batch when frame
 capture is enabled. It reads the `ggst-input-tracker` checkout at
 `~/CODE/ggst-input-tracker` by default and lists the defensive situations from
-the batch on the **Sequences** page, with a clip per sequence. **Save** writes
+the batch on the **Sequences** page, plus a small card for each move that
+guard-crushed you. Tapping a sequence's play button opens its clip directly under
+that row (one clip open at a time). **Save** writes
 the opponent's inputs as a StriveLabs recording (`.txt`) to the batch folder's
 `recordings` folder and, when StriveLabs is installed in GGST, to its
 `ue4ss/recordings` folder; **Save mixup** writes one file per option the
