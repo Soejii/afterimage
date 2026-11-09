@@ -155,7 +155,7 @@ void main() {
       // Only the recording is left behind, no temporary files.
       expect(
         Directory('${game.path}/recordings').listSync().map(
-              (entity) => entity.path.split('/').last,
+              (entity) => entity.path.split(RegExp(r'[\\/]')).last,
             ),
         [recording.fileName],
       );
