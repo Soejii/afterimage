@@ -59,7 +59,9 @@ The Linux adapter lives in `lib/services/linux_process_memory.dart`,
 `linux_evdev_controller.dart`, `linux_frame_capture.dart`, and
 `linux_native_backend.dart`. Frame capture owns a separate read-only memory
 session in a background isolate and writes raw frame rows to per-replay JSONL
-sidecars. It uses
+sidecars. It also locates the replay manager, records each seat's replay
+stream position on every row, and writes both seats' raw replay input words
+once before the footer; a missing manager only leaves those fields empty. It uses
 read-only process memory, targeted gamescope XTest input, and an existing
 controller evdev node selected from the processes in GGST's Wine prefix. See
 [`linux-runtime.md`](linux-runtime.md) and
