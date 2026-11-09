@@ -2,34 +2,20 @@ import 'dart:io';
 
 import '../domain/notes_models.dart';
 
-class NotesProcessResult {
-  const NotesProcessResult({
-    required this.exitCode,
-    this.stdout = '',
-    this.stderr = '',
-  });
-
-  final int exitCode;
-  final String stdout;
-  final String stderr;
-}
-
-typedef NotesProcessRunner = Future<NotesProcessResult> Function(
-  String executable,
-  List<String> arguments,
-);
-
-/// Reads finder output and owns the only writes Afterimage makes under `out/`.
+/// Reads the finder's sequence lists and writes the recordings Suji saves.
+///
+/// Afterimage never writes under the finder's `out/` folder. Recordings go to the
+/// batch folder and, when the finder found it, StriveLabs' recordings folder.
 class NotesRepository {
   NotesRepository({
     required this.finderDirectory,
-    NotesProcessRunner? processRunner,
     bool Function(int pid)? pidAlive,
-  })  : _processRunner = processRunner ?? _runProcess,
-        _pidAlive = pidAlive ?? _processAlive;
+  }) : _pidAlive = pidAlive ?? _processAlive;
+
+  static const documentName = 'sequences.json';
+  static const batchRecordingsFolder = 'recordings';
 
   final String finderDirectory;
-  final NotesProcessRunner _processRunner;
   final bool Function(int pid) _pidAlive;
 
   Directory get outDirectory => Directory(_join(finderDirectory, 'out'));
@@ -48,33 +34,37 @@ class NotesRepository {
       final batchLabel = _basename(batchEntity.path);
       await for (final opponentEntity in batchEntity.list(followLinks: false)) {
         if (opponentEntity is! Directory) continue;
-        final section = File(_join(opponentEntity.path, 'section.md'));
-        if (!await section.exists()) continue;
-        final sectionText = await section.readAsString();
-        final document = splitNoteSection(sectionText);
-        final metadata = await _readMetadata(opponentEntity);
-        final stat = await section.stat();
+        final file = File(_join(opponentEntity.path, documentName));
+        if (!await file.exists()) continue;
+        SequenceDocument document;
+        try {
+          document = SequenceDocument.fromJson(
+            decodeObject(await file.readAsString()),
+          );
+        } on Object {
+          // A list from an older or broken run is left out, not shown half-read.
+          continue;
+        }
+        final stat = await file.stat();
         previews.add(
           NotePreview(
             batchLabel: batchLabel,
-            opponent: metadata?.opponent.isNotEmpty == true
-                ? metadata!.opponent
+            opponent: document.opponent.isNotEmpty
+                ? document.opponent
                 : _basename(opponentEntity.path),
             directoryPath: opponentEntity.path,
-            sectionPath: section.path,
-            metadata: metadata,
+            documentPath: file.path,
             cardCount: document.cards.length,
+            flaggedCount: document.cards.where((card) => card.flagged).length,
+            createdAt: document.createdAt,
             modifiedAt: stat.modified,
           ),
         );
       }
     }
     previews.sort((left, right) {
-      if (left.isLegacy != right.isLegacy) {
-        return left.isLegacy ? 1 : -1;
-      }
-      final leftDate = left.createdAt;
-      final rightDate = right.createdAt;
+      final leftDate = left.sortDate;
+      final rightDate = right.sortDate;
       if (leftDate == null && rightDate != null) return 1;
       if (leftDate != null && rightDate == null) return -1;
       if (leftDate != null && rightDate != null) {
@@ -88,83 +78,92 @@ class NotesRepository {
     return previews;
   }
 
-  Future<NoteSectionData> read(NotePreview preview) async {
-    final section = File(preview.sectionPath);
-    final document = splitNoteSection(await section.readAsString());
-    final warningsFile = File(_join(preview.directoryPath, 'warnings.txt'));
-    final warnings = await warningsFile.exists()
-        ? (await warningsFile.readAsLines())
-            .where((line) => line.trim().isNotEmpty)
-            .toList(growable: false)
-        : const <String>[];
-    final clipsFile = File(
-      _join(_join(preview.directoryPath, 'clips'), 'index.json'),
-    );
-    ClipIndex? clipIndex;
-    if (await clipsFile.exists()) {
-      try {
-        clipIndex =
-            ClipIndex.fromJson(decodeObject(await clipsFile.readAsString()));
-      } on Object {
-        // A broken clip index should not hide the editable notes.
+  Future<NoteSequenceData> read(NotePreview preview) async {
+    final file = File(preview.documentPath);
+    final document =
+        SequenceDocument.fromJson(decodeObject(await file.readAsString()));
+    return NoteSequenceData(preview: preview, document: document);
+  }
+
+  /// Writes [recordings] to `<batch>/recordings/` and, when StriveLabs was found
+  /// and its `ue4ss` folder still exists, to StriveLabs' recordings folder.
+  Future<RecordingSaveResult> saveRecordings(
+    SequenceDocument document,
+    List<LabRecording> recordings,
+  ) async {
+    if (recordings.isEmpty) {
+      throw ArgumentError('Nothing to save.');
+    }
+    for (final recording in recordings) {
+      if (!recording.hasSafeFileName) {
+        throw FormatException(
+          'Refused an unsafe recording file name: ${recording.fileName}',
+        );
       }
     }
-    return NoteSectionData(
-      preview: preview,
-      document: document,
-      warnings: warnings,
-      clipIndex: clipIndex,
+    if (document.batchFolder.isEmpty) {
+      throw StateError('The sequence list does not name its batch folder.');
+    }
+    final batchFolder = Directory(document.batchFolder);
+    if (!await batchFolder.exists()) {
+      throw StateError('The batch folder is gone: ${document.batchFolder}');
+    }
+    if (await _insideFinderOutput(batchFolder.path)) {
+      throw StateError(
+        "Refused to save into the finder's output folder: ${batchFolder.path}",
+      );
+    }
+    final batchRecordings =
+        Directory(_join(document.batchFolder, batchRecordingsFolder));
+    await batchRecordings.create(recursive: true);
+    // The batch copy comes first and must succeed; StriveLabs is a convenience.
+    for (final recording in recordings) {
+      await _atomicWrite(
+        File(_join(batchRecordings.path, recording.fileName)),
+        recording.text,
+      );
+    }
+
+    String? strivelabsDirectory;
+    String? strivelabsError;
+    final strivelabsPath = document.strivelabsRecordings;
+    if (strivelabsPath != null && strivelabsPath.isNotEmpty) {
+      final candidate = Directory(strivelabsPath);
+      try {
+        if (await candidate.parent.exists()) {
+          if (await _insideFinderOutput(candidate.parent.path)) {
+            throw StateError(
+              "the StriveLabs folder is inside the finder's output folder",
+            );
+          }
+          await candidate.create();
+          for (final recording in recordings) {
+            await _atomicWrite(
+              File(_join(candidate.path, recording.fileName)),
+              recording.text,
+            );
+          }
+          strivelabsDirectory = candidate.path;
+        }
+      } on Object catch (error) {
+        strivelabsError = error.toString();
+      }
+    }
+    return RecordingSaveResult(
+      batchDirectory: batchRecordings.path,
+      strivelabsDirectory: strivelabsDirectory,
+      strivelabsError: strivelabsError,
+      fileNames: [for (final recording in recordings) recording.fileName],
     );
   }
 
-  Future<NotePreview?> refreshPreview(NotePreview preview) async {
-    final previews = await list();
-    for (final candidate in previews) {
-      if (candidate.sectionPath == preview.sectionPath) return candidate;
-    }
-    return null;
-  }
-
-  /// Saves the whole section after making the one-time original backup.
-  Future<void> write(NotePreview preview, NoteSectionDocument document) async {
-    final target = File(preview.sectionPath);
-    if (!await target.exists()) {
-      throw StateError('The notes draft is no longer on disk.');
-    }
-    final original = File(_join(preview.directoryPath, 'section.orig.md'));
-    if (!await original.exists()) {
-      await target.copy(original.path);
-    }
-    await _atomicWrite(target, document.toMarkdown());
-  }
-
-  Future<ApplySectionResult> apply(NotePreview preview) async {
-    final script =
-        File(_join(_join(finderDirectory, 'scripts'), 'apply_section.py'));
-    if (!await script.exists()) {
-      return ApplySectionResult.fromExitCode(
-        1,
-        opponent: preview.opponent,
-        stderr: 'The notes apply script is not available.',
-      );
-    }
-    try {
-      final result = await _processRunner(
-        '/usr/bin/python3',
-        <String>[script.path, preview.directoryPath],
-      );
-      return ApplySectionResult.fromExitCode(
-        result.exitCode,
-        opponent: preview.opponent,
-        stderr: result.stderr,
-      );
-    } on Object catch (error) {
-      return ApplySectionResult.fromExitCode(
-        1,
-        opponent: preview.opponent,
-        stderr: error.toString(),
-      );
-    }
+  /// True when [path] (an existing directory) resolves into the finder's `out/`.
+  Future<bool> _insideFinderOutput(String path) async {
+    if (!await outDirectory.exists()) return false;
+    final root = await outDirectory.resolveSymbolicLinks();
+    final target = await Directory(path).resolveSymbolicLinks();
+    return target == root ||
+        target.startsWith('$root${Platform.pathSeparator}');
   }
 
   Future<FinderRunInfo?> readRun(String batchLabel) async {
@@ -181,70 +180,28 @@ class NotesRepository {
         startedAt: null,
         finishedAt: null,
         opponents: const <FinderOpponentRun>[],
-        message: 'The notes status could not be read: $error',
+        message: 'The sequence finder status could not be read: $error',
       );
-    }
-  }
-
-  Future<NoteMetadata?> _readMetadata(Directory directory) async {
-    final file = File(_join(directory.path, 'meta.json'));
-    if (!await file.exists()) return null;
-    try {
-      return NoteMetadata.fromJson(decodeObject(await file.readAsString()));
-    } on Object {
-      return null;
     }
   }
 
   Future<void> _atomicWrite(File target, String contents) async {
     final temporary = File(
-      '${target.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
+      '${target.parent.path}${Platform.pathSeparator}'
+      '.${_basename(target.path)}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
     );
-    await temporary.writeAsString(contents, flush: true);
     try {
+      await temporary.writeAsString(contents, flush: true);
       await temporary.rename(target.path);
-    } on FileSystemException {
-      if (!await target.exists()) rethrow;
-      final backup = File(
-        '${target.path}.bak-$pid-${DateTime.now().microsecondsSinceEpoch}',
-      );
-      await target.rename(backup.path);
-      try {
-        await temporary.rename(target.path);
-        try {
-          await backup.delete();
-        } on FileSystemException {
-          // The replacement is valid. Keep a recoverable backup if cleanup is blocked.
-        }
-      } on Object {
-        try {
-          await backup.rename(target.path);
-        } on Object {
-          // The old file remains at the backup path for manual recovery.
-        }
-        rethrow;
-      }
     } finally {
       if (await temporary.exists()) {
         try {
           await temporary.delete();
         } on FileSystemException {
-          // Keep a failed temporary document for recovery.
+          // A leftover hidden temporary file is harmless.
         }
       }
     }
-  }
-
-  static Future<NotesProcessResult> _runProcess(
-    String executable,
-    List<String> arguments,
-  ) async {
-    final result = await Process.run(executable, arguments);
-    return NotesProcessResult(
-      exitCode: result.exitCode,
-      stdout: result.stdout.toString(),
-      stderr: result.stderr.toString(),
-    );
   }
 
   static bool _processAlive(int processId) =>

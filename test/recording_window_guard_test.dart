@@ -7,34 +7,7 @@ import 'package:afterimage/presentation/recorder_controller.dart';
 import 'package:afterimage/presentation/widgets/recording_window_guard.dart';
 
 void main() {
-  testWidgets('close asks before discarding an open notes edit',
-      (tester) async {
-    final controller = RecorderController(backend: _NoopBackend());
-    addTearDown(controller.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: RecordingWindowGuard(
-          controller: controller,
-          notesEditing: true,
-          child: const SizedBox.shrink(),
-        ),
-      ),
-    );
-
-    tester
-        .state<RecordingWindowGuardState>(
-          find.byType(RecordingWindowGuard),
-        )
-        .onWindowClose();
-    await tester.pump();
-
-    expect(find.text('Discard your unsaved edit?'), findsOneWidget);
-    expect(find.text('Keep editing'), findsOneWidget);
-    expect(find.text('Discard edit and close'), findsOneWidget);
-    await tester.tap(find.text('Keep editing'));
-  });
-
-  testWidgets('close asks while a notes save is in flight', (tester) async {
+  testWidgets('close asks while recordings are being saved', (tester) async {
     final controller = RecorderController(backend: _NoopBackend());
     addTearDown(controller.dispose);
     await tester.pumpWidget(
@@ -54,8 +27,9 @@ void main() {
         .onWindowClose();
     await tester.pump();
 
-    expect(find.text('Discard your unsaved edit?'), findsOneWidget);
-    await tester.tap(find.text('Keep editing'));
+    expect(find.text('Recordings are still being saved'), findsOneWidget);
+    expect(find.text('Close anyway'), findsOneWidget);
+    await tester.tap(find.text('Keep open'));
   });
 }
 

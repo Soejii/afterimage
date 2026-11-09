@@ -11,12 +11,10 @@ class RecordingWindowGuard extends StatefulWidget {
     super.key,
     required this.controller,
     required this.child,
-    this.notesEditing = false,
     this.notesSaving = false,
   });
   final RecorderController controller;
   final Widget child;
-  final bool notesEditing;
   final bool notesSaving;
 
   @override
@@ -57,21 +55,21 @@ class RecordingWindowGuardState extends State<RecordingWindowGuard>
     _closing = true;
     try {
       final controller = widget.controller;
-      if (widget.notesEditing || widget.notesSaving) {
+      if (widget.notesSaving) {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Discard your unsaved edit?'),
+            title: const Text('Recordings are still being saved'),
             content: const Text(
-                'Afterimage will close without keeping the current notes edit.'),
+                'Afterimage may close before the recordings are written.'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('Keep editing'),
+                child: const Text('Keep open'),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('Discard edit and close'),
+                child: const Text('Close anyway'),
               ),
             ],
           ),

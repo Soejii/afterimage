@@ -106,12 +106,15 @@ On Linux, expand **Replay controls** and select **Save frame data for analysis**
 to also write one raw `.frames.jsonl` log per replay in the batch folder. This
 option is off by default and is not yet available on Windows.
 
-On Linux, the optional notes finder can run after a completed batch when frame
+On Linux, the optional sequence finder can run after a completed batch when frame
 capture is enabled. It reads the `ggst-input-tracker` checkout at
-`~/CODE/ggst-input-tracker` by default, writes draft notes under that checkout's
-`out` folder, and exposes them in Afterimage for review, clip playback, and
-explicit application to the matching vault note. The finder and its scripts must
-be installed separately; live finder and notes application remain unverified.
+`~/CODE/ggst-input-tracker` by default and lists the defensive situations from
+the batch on the **Sequences** page, with a clip per sequence. **Save** writes
+the opponent's inputs as a StriveLabs recording (`.txt`) to the batch folder's
+`recordings` folder and, when StriveLabs is installed in GGST, to its
+`ue4ss/recordings` folder; **Save mixup** writes one file per option the
+opponent used after the same lead-in. The finder must be installed separately;
+loading the recordings in game is unverified.
 
 Keep Afterimage, OBS, and GGST open while a batch runs, and do not use the
 replay menu yourself during recording. **Stop safely** keeps whatever has

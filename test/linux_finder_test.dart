@@ -8,7 +8,7 @@ void main() {
   test('prepends local bin to PATH with the PATH list separator', () async {
     final root = await Directory.systemTemp.createTemp('afterimage-finder-');
     addTearDown(() => root.delete(recursive: true));
-    await File('${root.path}/scripts/write_theory.py').create(recursive: true);
+    await File('${root.path}/scripts/lab_sequences.py').create(recursive: true);
     Map<String, String>? startedEnvironment;
     final finder = LinuxFinder(
       finderDirectory: root.path,

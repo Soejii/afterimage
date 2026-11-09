@@ -33,7 +33,7 @@ class LinuxFinder implements FinderPort {
   final LinuxFinderProcessStarter _processStarter;
 
   String get scriptPath =>
-      _join(_join(finderDirectory, 'scripts'), 'write_theory.py');
+      _join(_join(finderDirectory, 'scripts'), 'lab_sequences.py');
 
   @override
   bool get available => _isLinux && File(scriptPath).existsSync();

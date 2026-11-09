@@ -111,20 +111,25 @@ Platform-neutral services live in `lib/services/` and are directly testable:
   `lib/services/recorder_preferences.dart` provide platform-neutral output and
   preference services.
 
-The optional notes finder is another process boundary. `FinderPort` in
+The optional sequence finder is another process boundary. `FinderPort` in
 `lib/domain/finder_contracts.dart` exposes only the detached batch-start action;
-`LinuxFinder` owns the Linux command, finder path, minimal `PATH` addition, and
-`run.log` redirection. `NotesRepository` reads finder output and performs the
-explicit section write and apply operations. `RecorderController` starts the
+`LinuxFinder` owns the Linux command (`scripts/lab_sequences.py` in the finder
+checkout), finder path, minimal `PATH` addition, and `run.log` redirection.
+`NotesRepository` reads the finder's `sequences.json` files and performs the only
+writes: the StriveLabs recordings Suji saves. `RecorderController` starts the
 finder only after a completed Linux batch has produced at least one frame-capture
 sidecar, so finder failures cannot change the recording result. Windows keeps the
-notes entry points hidden because this adapter is Linux-only.
+sequence entry points hidden because this adapter is Linux-only. Code names still
+say "notes" from the page the sequence list replaced.
 
-Notes section editing stays behind atomic replacement. The first edit copies the
-finder draft to `section.orig.md`; subsequent edits replace only `section.md` and
-never overwrite the original. Clip playback is behind
-`NotesClipPlayerSession`, which keeps media_kit and libmpv out of widget tests and
-disposes a session when its player leaves the scroll viewport or its page closes.
+Afterimage never writes under the finder's `out/` folder. Save writes a recording
+atomically (hidden temporary file, then rename) to `<batch>/recordings/` and, when
+the finder found StriveLabs and its `ue4ss` folder still exists, to StriveLabs'
+`recordings/` folder. A recording file name must be a plain `.txt` name; anything
+with a path separator or a leading dot is refused. The game itself is never
+written. Clip playback is behind `NotesClipPlayerSession`, which keeps media_kit
+and libmpv out of widget tests and disposes a session when its player leaves the
+scroll viewport or its page closes.
 
 ## Presentation
 

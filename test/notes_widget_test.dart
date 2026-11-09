@@ -12,412 +12,208 @@ import 'package:afterimage/presentation/widgets/notes_clip_player.dart';
 import 'package:afterimage/services/notes_repository.dart';
 
 void main() {
-  late NotePreview preview;
-  late NoteSectionData data;
+  testWidgets('flagged cards show flags, lead-ins and mixups; others collapse',
+      (tester) async {
+    final preview = _preview(directory: '/out/batch-a/May');
+    final repository = _FakeNotesRepository(preview, _data(preview));
 
-  setUp(() {
-    preview = _preview(
-      batchLabel: 'batch-new',
-      opponent: 'I-No',
-      sectionPath: '/out/batch-new/I-No/section.md',
-    );
-    data = NoteSectionData(
+    await tester.pumpWidget(_app(NotesPage(
+      repository: repository,
       preview: preview,
-      document: const NoteSectionDocument(
-        preamble: '',
-        cards: [NoteCard('### blocked [[I-No 2S]]\nlab: late 6P')],
-      ),
-      warnings: const <String>[],
-      clipIndex: null,
-    );
-  });
-
-  testWidgets('page shows cards and apply, delete then undo restores the card',
-      (tester) async {
-    final repository = _FakeNotesRepository(preview, data);
-    await tester.pumpWidget(_app(
-      NotesPage(repository: repository, preview: preview, onBack: () {}),
-    ));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('note-card-0')));
-
-    expect(find.byKey(const ValueKey('apply-notes')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('delete-note-0')));
+      onBack: () {},
+      playerFactory: (_) => _FakeClipSession(),
+    )));
     await _pumpUntilFound(
-      tester,
-      find.text('There are no situations left in this draft.'),
-    );
-    expect(find.text('Undo'), findsOneWidget);
+        tester, find.byKey(const ValueKey('sequence-card-c1')));
 
-    tester.widget<SnackBarAction>(find.byType(SnackBarAction)).onPressed();
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('note-card-0')));
-  });
-
-  testWidgets('apply confirms, maps success, and replaces the button',
-      (tester) async {
-    final repository = _FakeNotesRepository(preview, data);
-    await tester.pumpWidget(_app(
-      NotesPage(repository: repository, preview: preview, onBack: () {}),
-    ));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('note-card-0')));
-
-    await tester.tap(find.byKey(const ValueKey('apply-notes')));
-    await _pumpUntilFound(tester, find.text('Apply notes?'));
-    await tester.tap(find.text('Apply').last);
-    await _pumpUntilFound(tester, find.text('Applied to the I-No note.'));
-
-    expect(find.byKey(const ValueKey('notes-applied')), findsOneWidget);
-    expect(find.byKey(const ValueKey('apply-notes')), findsNothing);
-  });
-
-  testWidgets('apply is disabled while editing and does not run',
-      (tester) async {
-    final repository = _FakeNotesRepository(preview, data);
-    await tester.pumpWidget(_app(
-      NotesPage(repository: repository, preview: preview, onBack: () {}),
-    ));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('note-card-0')));
-
-    await tester.tap(find.byKey(const ValueKey('edit-note-0')));
+    expect(find.text('blocked S Mr. Dolphin Vertical'), findsOneWidget);
+    expect(find.text('keeps losing: hit 2 of 3'), findsOneWidget);
+    expect(find.text('lead-ins: 2K x2, string opener x1'), findsOneWidget);
+    expect(find.text('mixup after 2K: 5H x1, jump back x1'), findsOneWidget);
+    expect(find.byKey(const ValueKey('save-c1-s1')), findsOneWidget);
+    // The unflagged card starts collapsed.
+    expect(find.byKey(const ValueKey('save-c2-s1')), findsNothing);
+    await tester.ensureVisible(find.byKey(const ValueKey('show-sequences-c2')));
+    await tester.tap(find.byKey(const ValueKey('show-sequences-c2')));
     await tester.pump();
-
-    final apply = tester.widget<FilledButton>(
-      find.byKey(const ValueKey('apply-notes')),
-    );
-    expect(apply.onPressed, isNull);
-    await tester.tap(find.byKey(const ValueKey('apply-notes')));
-    await tester.pump();
-
-    expect(find.text('Apply notes?'), findsNothing);
-    expect(repository.applyCalls, 0);
+    expect(find.byKey(const ValueKey('save-c2-s1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('strivelabs-notice')), findsOneWidget);
   });
 
-  testWidgets('editing locks other cards and preserves typed text',
+  testWidgets('Save writes that sequence and says where it went',
       (tester) async {
-    final twoCardData = NoteSectionData(
+    final preview = _preview(directory: '/out/batch-a/May');
+    final repository = _FakeNotesRepository(preview, _data(preview));
+    final saving = <bool>[];
+
+    await tester.pumpWidget(_app(NotesPage(
+      repository: repository,
       preview: preview,
-      document: NoteSectionDocument(
-        preamble: data.document.preamble,
-        cards: [
-          ...data.document.cards,
-          const NoteCard('### second\nsecond body'),
-        ],
-      ),
-      warnings: data.warnings,
-      clipIndex: data.clipIndex,
-    );
-    final repository = _FakeNotesRepository(preview, twoCardData);
-    await tester.pumpWidget(_app(
-      NotesPage(repository: repository, preview: preview, onBack: () {}),
-    ));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('note-card-1')));
-
-    await tester.tap(find.byKey(const ValueKey('edit-note-0')));
+      onBack: () {},
+      onSavingChanged: saving.add,
+      playerFactory: (_) => _FakeClipSession(),
+    )));
+    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s1')));
+    await tester.tap(find.byKey(const ValueKey('save-c1-s1')));
     await tester.pump();
-    await tester.enterText(
-        find.byKey(const ValueKey('note-edit-field')), 'typed');
+    await tester.pump();
 
-    expect(
-      tester
-          .widget<TextButton>(find.byKey(const ValueKey('edit-note-1')))
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<TextButton>(find.byKey(const ValueKey('delete-note-1')))
-          .onPressed,
-      isNull,
-    );
-    expect(
-      tester
-          .widget<TextField>(find.byKey(const ValueKey('note-edit-field')))
-          .controller!
-          .text,
-      'typed',
-    );
+    expect(repository.saved, hasLength(1));
+    expect(repository.saved.single.map((r) => r.fileName), ['May - first.txt']);
+    expect(saving, [true, false]);
+    expect(find.byKey(const ValueKey('save-done')), findsOneWidget);
+    expect(find.textContaining('Saved May - first.txt'), findsOneWidget);
+    expect(find.text('Saved'), findsOneWidget);
   });
 
-  testWidgets('discard does not leave the page while editing', (tester) async {
-    var backCalls = 0;
-    await tester.pumpWidget(_app(
-      NotesPage(
-        repository: _FakeNotesRepository(preview, data),
-        preview: preview,
-        onBack: () => backCalls++,
-      ),
-    ));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('note-card-0')));
+  testWidgets('Save mixup writes every file of that mixup', (tester) async {
+    final preview = _preview(directory: '/out/batch-a/May');
+    final repository = _FakeNotesRepository(preview, _data(preview));
 
-    await tester.tap(find.byKey(const ValueKey('edit-note-0')));
-    await tester.pump();
-    expect(
-      tester
-          .widget<OutlinedButton>(find.byKey(const ValueKey('discard-notes')))
-          .onPressed,
-      isNull,
-    );
-    await tester.tap(find.byKey(const ValueKey('discard-notes')));
-    await tester.pump();
-
-    expect(backCalls, 0);
-    expect(find.byKey(const ValueKey('note-edit-field')), findsOneWidget);
-  });
-
-  testWidgets('editor is read-only during a slow save', (tester) async {
-    final repository = _FakeNotesRepository(preview, data)
-      ..writeCompleter = Completer<void>();
-    await tester.pumpWidget(_app(
-      NotesPage(repository: repository, preview: preview, onBack: () {}),
-    ));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('note-card-0')));
-
-    await tester.tap(find.byKey(const ValueKey('edit-note-0')));
-    await tester.pump();
-    await tester.enterText(
-        find.byKey(const ValueKey('note-edit-field')), 'edited');
-    await tester.tap(find.byKey(const ValueKey('save-note-edit')));
-    await tester.pump();
-
-    final field = tester.widget<TextField>(
-      find.byKey(const ValueKey('note-edit-field')),
-    );
-    expect(field.readOnly, isTrue);
-    await tester.enterText(
-        find.byKey(const ValueKey('note-edit-field')), 'mutated');
-    expect(field.controller!.text, 'edited');
-
-    repository.writeCompleter!.complete();
-    await _pumpUntilFound(tester, find.text('edited'));
-  });
-
-  testWidgets('undo after the page is disposed does not update its state',
-      (tester) async {
-    final repository = _FakeNotesRepository(preview, data);
-    await tester.pumpWidget(_app(
-      NotesPage(repository: repository, preview: preview, onBack: () {}),
-    ));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('note-card-0')));
-
-    await tester.tap(find.byKey(const ValueKey('delete-note-0')));
+    await tester.pumpWidget(_app(NotesPage(
+      repository: repository,
+      preview: preview,
+      onBack: () {},
+      playerFactory: (_) => _FakeClipSession(),
+    )));
     await _pumpUntilFound(
-      tester,
-      find.text('There are no situations left in this draft.'),
-    );
-    final undo = tester.widget<SnackBarAction>(find.byType(SnackBarAction));
-
-    await tester.pumpWidget(_app(const SizedBox.shrink()));
+        tester, find.byKey(const ValueKey('save-mixup-c1-0')));
+    await tester.tap(find.byKey(const ValueKey('save-mixup-c1-0')));
     await tester.pump();
-    undo.onPressed();
     await tester.pump();
 
-    expect(tester.takeException(), isNull);
-    expect(repository.writeCalls, 1);
+    expect(repository.saved.single.map((r) => r.fileName), [
+      'May - mixup 1 of 2 (5H).txt',
+      'May - mixup 2 of 2 (jump back).txt',
+    ]);
   });
 
-  testWidgets('clip playback is lazy and uses the player seam', (tester) async {
-    final session = _FakeClipSession();
-    var factoryCalls = 0;
-    final clipDirectory = _createTempDirectory('afterimage-lazy-clips');
-    Directory('${clipDirectory.path}/clips').createSync();
-    File('${clipDirectory.path}/clips/s1-1.mp4').createSync();
-    addTearDown(() => _deleteTempEntity(clipDirectory));
-    final clipPreview = _preview(
-      batchLabel: 'batch-lazy',
-      opponent: 'I-No',
-      sectionPath: '${clipDirectory.path}/section.md',
+  testWidgets('a sequence without a recording cannot be saved and says why',
+      (tester) async {
+    final preview = _preview(directory: '/out/batch-a/May');
+    final repository = _FakeNotesRepository(preview, _data(preview));
+
+    await tester.pumpWidget(_app(NotesPage(
+      repository: repository,
+      preview: preview,
+      onBack: () {},
+      playerFactory: (_) => _FakeClipSession(),
+    )));
+    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s3')));
+
+    expect(
+      tester
+          .widget<OutlinedButton>(find.byKey(const ValueKey('save-c1-s3')))
+          .onPressed,
+      isNull,
     );
-    final clipData = NoteSectionData(
-      preview: clipPreview,
-      document: data.document,
-      warnings: const <String>[],
-      clipIndex: const ClipIndex(
-        video: null,
-        situations: [
-          ClipSituation(
-            heading: '### blocked [[I-No 2S]]',
-            entry: 'block',
-            posture: 'ground',
-            herMoveLink: 'I-No 2S',
-            clips: [
-              NoteClip(
-                file: 's1-1.mp4',
-                poster: null,
-                replay: 1,
-                videoTime: '00:54',
-                videoTimeMs: 54989,
-                startMs: 53489,
-                endMs: 57100,
-                herNext: null,
-                answer: 'Ky 5P',
-                outcome: 'hit',
-                counterHit: true,
-              ),
-            ],
-          ),
-        ],
-        errors: <String>[],
-      ),
+    expect(
+      find.text('cannot save: this capture has no replay input stream'),
+      findsOneWidget,
     );
-    final repository = _FakeNotesRepository(clipPreview, clipData);
-
-    await tester.pumpWidget(_app(
-      NotesPage(
-        repository: repository,
-        preview: clipPreview,
-        onBack: () {},
-        playerFactory: (_) {
-          factoryCalls++;
-          return session;
-        },
-      ),
-    ));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('clip-player')));
-
-    expect(session.created, isFalse);
-    expect(factoryCalls, 0);
-    await tester.ensureVisible(find.byKey(const ValueKey('clip-play')));
-    await tester.tap(find.byKey(const ValueKey('clip-play')));
-    await _flushIo(tester);
-    await tester.pump();
-    expect(factoryCalls, 1);
-    expect(session.playCalls, 1);
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump();
-    expect(session.disposeCalls, 1);
   });
 
-  testWidgets('a table card plays the clip of the row that was tapped',
+  testWidgets('saves are locked while one runs, and a failure is shown',
+      (tester) async {
+    final preview = _preview(directory: '/out/batch-a/May');
+    final repository = _FakeNotesRepository(preview, _data(preview))
+      ..gate = Completer<void>()
+      ..failWith = StateError('disk full');
+
+    await tester.pumpWidget(_app(NotesPage(
+      repository: repository,
+      preview: preview,
+      onBack: () {},
+      playerFactory: (_) => _FakeClipSession(),
+    )));
+    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s1')));
+    await tester.tap(find.byKey(const ValueKey('save-c1-s1')));
+    await tester.pump();
+
+    for (final key in ['save-c1-s1', 'save-c1-s2', 'save-mixup-c1-0']) {
+      expect(
+        tester.widget<OutlinedButton>(find.byKey(ValueKey(key))).onPressed,
+        isNull,
+        reason: '$key while saving',
+      );
+    }
+    expect(
+      tester
+          .widget<OutlinedButton>(
+              find.byKey(const ValueKey('back-from-sequences')))
+          .onPressed,
+      isNull,
+    );
+    repository.gate!.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('save-failed')), findsOneWidget);
+    expect(find.textContaining('disk full'), findsOneWidget);
+    expect(find.text('Saved'), findsNothing);
+    expect(
+      tester
+          .widget<OutlinedButton>(find.byKey(const ValueKey('save-c1-s1')))
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('clip playback is lazy and plays the sequence that was tapped',
       (tester) async {
     final opened = <String>[];
     final sessions = <_FakeClipSession>[];
-    final clipDirectory = _createTempDirectory('afterimage-table-clips');
-    Directory('${clipDirectory.path}/clips').createSync();
-    for (final name in ['s1-1.mp4', 's1-2.mp4']) {
-      File('${clipDirectory.path}/clips/$name').createSync();
+    final directory = _createTempDirectory('afterimage-sequence-clips');
+    Directory('${directory.path}/clips').createSync();
+    for (final name in ['c1-s1.mp4', 'c1-s2.mp4']) {
+      File('${directory.path}/clips/$name').createSync();
     }
-    addTearDown(() => _deleteTempEntity(clipDirectory));
-    final preview = _preview(
-      batchLabel: 'batch-table',
-      opponent: 'Elphelt',
-      sectionPath: '${clipDirectory.path}/section.md',
-    );
-    const heading = '### blocked [[Elphelt Miss Charlotte]]';
-    NoteClip clip(String file, String time, String option) => NoteClip(
-          file: file,
-          poster: null,
-          replay: 1,
-          videoTime: time,
-          videoTimeMs: 1000,
-          startMs: 0,
-          endMs: 3000,
-          herNext: option == 'no attack' ? null : option,
-          answer: 'backdash',
-          outcome: 'hit',
-          counterHit: false,
-          option: option,
-        );
-    final tableData = NoteSectionData(
+    addTearDown(() => _deleteTempEntity(directory));
+    final preview = _preview(directory: directory.path);
+
+    await tester.pumpWidget(_app(NotesPage(
+      repository: _FakeNotesRepository(preview, _data(preview)),
       preview: preview,
-      document: splitNoteSection(
-        '$heading\n'
-        'she is -13 at range\n\n'
-        '| her option | times | beats | loses to | you did |\n'
-        '| --- | --- | --- | --- | --- |\n'
-        '| [[Elphelt 2H]] | 2 | backdash | dash | backdash hit x2 |\n'
-        '| no attack | 1 | untested | untested | dash won |\n\n'
-        'habit: backdash got hit\n',
-      ),
-      warnings: const <String>[],
-      clipIndex: ClipIndex(
-        video: null,
-        situations: [
-          ClipSituation(
-            heading: heading,
-            entry: 'block',
-            posture: 'ground',
-            herMoveLink: 'Elphelt Miss Charlotte',
-            clips: [
-              clip('s1-1.mp4', '03:39', 'Elphelt 2H'),
-              clip('s1-2.mp4', '01:34', 'no attack'),
-            ],
-          ),
-        ],
-        errors: const <String>[],
-      ),
-    );
+      onBack: () {},
+      playerFactory: (path) {
+        opened.add(path.split(RegExp(r'[\\/]')).last);
+        final session = _FakeClipSession();
+        sessions.add(session);
+        return session;
+      },
+    )));
+    await _pumpUntilFound(tester, find.byKey(const ValueKey('clip-player-c1')));
+    expect(opened, isEmpty);
 
-    await tester.pumpWidget(_app(
-      NotesPage(
-        repository: _FakeNotesRepository(preview, tableData),
-        preview: preview,
-        onBack: () {},
-        playerFactory: (path) {
-          opened.add(path.split(RegExp(r'[\\/]')).last);
-          final session = _FakeClipSession();
-          sessions.add(session);
-          return session;
-        },
-      ),
-    ));
-    Finder keyed(String prefix, [String suffix = '']) => find.byWidgetPredicate(
-          (widget) =>
-              widget.key is ValueKey<String> &&
-              (widget.key! as ValueKey<String>).value.startsWith(prefix) &&
-              (widget.key! as ValueKey<String>).value.endsWith(suffix),
-        );
-    await _pumpUntilFound(tester, keyed('situation-table-'));
-
-    expect(find.text('HABIT  backdash got hit', findRichText: true),
-        findsOneWidget);
-    expect(find.byType(ChoiceChip), findsNothing);
-    final rowClip = keyed('row-clip-', '-s1-2.mp4');
-    await tester.ensureVisible(rowClip);
-    await tester.tap(rowClip);
+    await tester.ensureVisible(find.byKey(const ValueKey('play-c1-s2')));
+    await tester.tap(find.byKey(const ValueKey('play-c1-s2')));
     await _settleIo(
       tester,
       () => sessions.isNotEmpty && sessions.single.playCalls == 1,
     );
 
-    expect(opened, ['s1-2.mp4']);
+    expect(opened, ['c1-s2.mp4']);
     expect(sessions.single.playCalls, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(sessions.single.disposeCalls, 1);
   });
 
-  testWidgets('a holding card without a table still gets its label',
+  testWidgets('the list shows each opponent with flagged counts',
       (tester) async {
-    final directory = _createTempDirectory('afterimage-holding');
-    addTearDown(() => _deleteTempEntity(directory));
-    final preview = _preview(
-      batchLabel: 'batch-holding',
-      opponent: 'Elphelt',
-      sectionPath: '${directory.path}/section.md',
-    );
-    final holding = NoteSectionData(
-      preview: preview,
-      document: splitNoteSection(
-        '### blocked [[Elphelt 6P]]\n'
-        'holding: 5 times, never hit. you did: [[Ky 2P]] won x3\n'
-        'seen: batch-holding 05:12\n',
-      ),
-      warnings: const <String>[],
-      clipIndex: null,
-    );
+    final preview = _preview(directory: '/out/batch-a/May');
+    final opened = <NotePreview>[];
 
-    await tester.pumpWidget(_app(NotesPage(
-      repository: _FakeNotesRepository(preview, holding),
-      preview: preview,
-      onBack: () {},
+    await tester.pumpWidget(_app(NotesListPage(
+      repository: _FakeNotesRepository(preview, _data(preview)),
+      onOpen: opened.add,
+      onClose: () {},
     )));
-    await _pumpUntilFound(
-      tester,
-      find.textContaining('5 times, never hit', findRichText: true),
-    );
+    await _pumpUntilFound(tester, find.text('vs May'));
 
-    expect(
-      find.text('HOLDING  5 times, never hit. you did: Ky 2P won x3',
-          findRichText: true),
-      findsOneWidget,
-    );
+    expect(find.text('2 situations  ·  1 flagged'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('open-notes-entry')));
+    expect(opened, [preview]);
   });
 
   testWidgets('missing clip files show unavailable without opening a session',
@@ -684,81 +480,6 @@ void main() {
         reason: 'A started before B but must not keep playing');
   });
 
-  testWidgets('list orders metadata previews and greys legacy entries',
-      (tester) async {
-    final legacy = _preview(
-      batchLabel: 'batch-old',
-      opponent: 'Ky',
-      sectionPath: '/out/batch-old/Ky/section.md',
-      legacy: true,
-    );
-    final repository = _FakeNotesRepository(
-      preview,
-      data,
-      previews: [preview, legacy],
-    );
-
-    NotePreview? opened;
-    await tester.pumpWidget(_app(
-      NotesListPage(
-        repository: repository,
-        onOpen: (value) => opened = value,
-        onClose: () {},
-      ),
-    ));
-    await _pumpUntilFound(
-      tester,
-      find.byKey(const ValueKey('notes-entry-/out/batch-new/I-No/section.md')),
-    );
-
-    final newOffset = tester
-        .getTopLeft(find.byKey(
-            const ValueKey('notes-entry-/out/batch-new/I-No/section.md')))
-        .dy;
-    final oldOffset = tester
-        .getTopLeft(find
-            .byKey(const ValueKey('notes-entry-/out/batch-old/Ky/section.md')))
-        .dy;
-    expect(newOffset, lessThan(oldOffset));
-    expect(find.text('made before the notes page; cannot be applied'),
-        findsOneWidget);
-    expect(find.byKey(const ValueKey('open-notes-entry')), findsOneWidget);
-    expect(
-        find.byKey(const ValueKey('open-legacy-notes-entry')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('open-legacy-notes-entry')));
-    expect(opened?.sectionPath, legacy.sectionPath);
-  });
-
-  testWidgets('legacy preview opens read-only', (tester) async {
-    final legacy = _preview(
-      batchLabel: 'batch-old',
-      opponent: 'Ky',
-      sectionPath: '/out/batch-old/Ky/section.md',
-      legacy: true,
-    );
-    final repository = _FakeNotesRepository(
-      legacy,
-      NoteSectionData(
-        preview: legacy,
-        document: data.document,
-        warnings: const <String>[],
-        clipIndex: data.clipIndex,
-      ),
-    );
-    await tester.pumpWidget(_app(
-      NotesPage(repository: repository, preview: legacy, onBack: () {}),
-    ));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('note-card-0')));
-
-    expect(
-      find.text('Made before the notes page; cannot be applied.'),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('edit-note-0')), findsNothing);
-    expect(find.byKey(const ValueKey('delete-note-0')), findsNothing);
-    expect(find.byKey(const ValueKey('apply-notes')), findsNothing);
-  });
-
   testWidgets('starting a clip pauses the other card', (tester) async {
     final sessions = <_FakeClipSession>[];
     final clipDirectory = _createTempDirectory('afterimage-restart-clips');
@@ -812,144 +533,6 @@ void main() {
     expect(sessions, hasLength(2));
     expect(sessions[1].pauseCalls, pausesOfB + 1);
   });
-
-  testWidgets('deleting an earlier card preserves the later clip state',
-      (tester) async {
-    final clipDirectory = _createTempDirectory('afterimage-stable-clips');
-    final clipsDirectory = Directory('${clipDirectory.path}/clips')
-      ..createSync();
-    final firstFile = File('${clipsDirectory.path}/first.mp4')..createSync();
-    final secondFile = File('${clipsDirectory.path}/second-a.mp4')
-      ..createSync();
-    final secondFileB = File('${clipsDirectory.path}/second-b.mp4')
-      ..createSync();
-    addTearDown(() => _deleteTempEntity(clipDirectory));
-
-    final stablePreview = _preview(
-      batchLabel: 'batch-stable',
-      opponent: 'I-No',
-      sectionPath: '${clipDirectory.path}/section.md',
-    );
-    const firstClip = NoteClip(
-      file: 'first.mp4',
-      poster: null,
-      replay: 1,
-      videoTime: '00:01',
-      videoTimeMs: 1000,
-      startMs: 0,
-      endMs: 1000,
-      herNext: null,
-      answer: 'first',
-      outcome: 'hit',
-      counterHit: false,
-    );
-    const secondClip = NoteClip(
-      file: 'second-a.mp4',
-      poster: null,
-      replay: 2,
-      videoTime: '00:02',
-      videoTimeMs: 2000,
-      startMs: 1000,
-      endMs: 2000,
-      herNext: null,
-      answer: 'second-a',
-      outcome: 'hit',
-      counterHit: false,
-    );
-    const secondClipB = NoteClip(
-      file: 'second-b.mp4',
-      poster: null,
-      replay: 3,
-      videoTime: '00:03',
-      videoTimeMs: 3000,
-      startMs: 2000,
-      endMs: 3000,
-      herNext: null,
-      answer: 'second-b',
-      outcome: 'hit',
-      counterHit: false,
-    );
-    final stableData = NoteSectionData(
-      preview: stablePreview,
-      document: const NoteSectionDocument(
-        preamble: '',
-        cards: [
-          NoteCard('### first', id: 'first'),
-          NoteCard('### second', id: 'second'),
-        ],
-      ),
-      warnings: const <String>[],
-      clipIndex: const ClipIndex(
-        video: null,
-        situations: [
-          ClipSituation(
-            heading: '### first',
-            entry: 'block',
-            posture: 'ground',
-            herMoveLink: null,
-            clips: [firstClip],
-          ),
-          ClipSituation(
-            heading: '### second',
-            entry: 'block',
-            posture: 'ground',
-            herMoveLink: null,
-            clips: [secondClip, secondClipB],
-          ),
-        ],
-        errors: <String>[],
-      ),
-    );
-    final sessions = <_FakeClipSession>[];
-    final repository = _FakeNotesRepository(stablePreview, stableData);
-
-    expect(firstFile.existsSync(), isTrue);
-    expect(secondFile.existsSync(), isTrue);
-    expect(secondFileB.existsSync(), isTrue);
-    await tester.pumpWidget(_app(
-      NotesPage(
-        repository: repository,
-        preview: stablePreview,
-        onBack: () {},
-        playerFactory: (_) {
-          final session = _FakeClipSession();
-          sessions.add(session);
-          return session;
-        },
-      ),
-    ));
-    await _pumpUntilFound(
-      tester,
-      find.byKey(const ValueKey('note-card-second')),
-    );
-
-    final secondClipChip = find.byKey(const ValueKey('clip-chip-second-1'));
-    await tester.ensureVisible(secondClipChip);
-    await tester.tap(secondClipChip);
-    await tester.pump();
-    final secondPlay = find.byKey(const ValueKey('clip-play')).at(1);
-    await tester.ensureVisible(secondPlay);
-    await tester.tap(secondPlay);
-    await _flushIo(tester);
-    await tester.pump();
-    expect(sessions, hasLength(1));
-    expect(sessions.single.playCalls, 1);
-
-    final deleteFirst = find.byKey(const ValueKey('delete-note-0'));
-    await tester.ensureVisible(deleteFirst);
-    await tester.tap(deleteFirst);
-    await _pumpUntilFound(
-      tester,
-      find.text('Situation deleted.'),
-    );
-
-    final selected = tester.widget<ChoiceChip>(
-      find.byKey(const ValueKey('clip-chip-second-1')),
-    );
-    expect(selected.selected, isTrue);
-    expect(sessions, hasLength(1));
-    expect(sessions.single.playCalls, 1);
-  });
 }
 
 Widget _app(Widget home) {
@@ -959,76 +542,167 @@ Widget _app(Widget home) {
   );
 }
 
-NotePreview _preview({
-  required String batchLabel,
-  required String opponent,
-  required String sectionPath,
-  NoteMetadata? metadata,
-  bool legacy = false,
-}) {
-  final resolvedMetadata = legacy
-      ? null
-      : metadata ??
-          NoteMetadata(
-            opponent: opponent,
-            player: 'Ky',
-            batchLabel: batchLabel,
-            batchFolder: '/out/$batchLabel',
-            notePath: '/notes/$opponent.md',
-            createdAt: DateTime(2026, 10, 3, 10, 18),
-            previous: null,
-            status: NoteMetadataStatus.draft,
-            appliedAt: null,
-          );
-  return NotePreview(
-    batchLabel: batchLabel,
-    opponent: opponent,
-    directoryPath: sectionPath.substring(0, sectionPath.lastIndexOf('/')),
-    sectionPath: sectionPath,
-    metadata: resolvedMetadata,
-    cardCount: 1,
-    modifiedAt: DateTime(2026, 10, 3, 10, 18),
-  );
-}
+NotePreview _preview({required String directory}) => NotePreview(
+      batchLabel: 'batch-a',
+      opponent: 'May',
+      directoryPath: directory,
+      documentPath: '$directory/sequences.json',
+      cardCount: 2,
+      flaggedCount: 1,
+      createdAt: DateTime(2026, 11, 9, 23),
+      modifiedAt: DateTime(2026, 11, 9, 23),
+    );
+
+Map<String, Object?> _recording(String name) =>
+    {'file_name': name, 'text': '# $name\nW10\n', 'frames': 10};
+
+Map<String, Object?> _clip(String id) => {
+      'file': '$id.mp4',
+      'poster': null,
+      'replay': 2,
+      'video_time': '04:11.6',
+      'video_time_ms': 251571,
+      'start_ms': 250000,
+      'end_ms': 253000,
+      'her_next': '5H',
+      'option': '5H',
+      'answer': 'block crouch',
+      'outcome': 'hit',
+      'counter_hit': false,
+    };
+
+Map<String, Object?> _sequence(
+  String id, {
+  Map<String, Object?>? recording,
+  String? error,
+}) =>
+    {
+      'id': id,
+      'replay': 2,
+      'round': 1,
+      'video_time': '04:11.6',
+      'video_time_ms': 251571,
+      'lead_in': '2K',
+      'follow_up': '5H',
+      'answer': 'block crouch',
+      'outcome': 'hit',
+      'counter_hit': false,
+      'damage': 70,
+      'flags': ['keeps_losing'],
+      'recording': recording,
+      'recording_error': error,
+      'clip': _clip(id),
+    };
+
+NoteSequenceData _data(NotePreview preview) => NoteSequenceData(
+      preview: preview,
+      document: SequenceDocument.fromJson({
+        'schema': 1,
+        'opponent': 'May',
+        'player': 'Ky',
+        'batch_label': 'batch-a',
+        'batch_folder': '/videos/batch-a',
+        'created_at': '2026-11-09T23:00:00+07:00',
+        'strivelabs_recordings': '/game/ue4ss/recordings',
+        'warnings': <String>[],
+        'clip_errors': <String>[],
+        'cards': [
+          {
+            'id': 'c1',
+            'title': 'blocked S Mr. Dolphin Vertical',
+            'flagged': true,
+            'damage': 140,
+            'hits': 2,
+            'decided': 3,
+            'count': 3,
+            'flags': [
+              {
+                'kind': 'keeps_losing',
+                'reason': 'keeps losing: hit 2 of 3',
+                'player': null,
+                'count': 3,
+              },
+            ],
+            'lead_ins': [
+              {'move': '2K', 'count': 2},
+              {'move': null, 'count': 1},
+            ],
+            'sequences': [
+              _sequence('c1-s1', recording: _recording('May - first.txt')),
+              _sequence('c1-s2', recording: _recording('May - second.txt')),
+              _sequence('c1-s3',
+                  error: 'this capture has no replay input stream'),
+            ],
+            'mixups': [
+              {
+                'lead_in': '2K',
+                'files': [
+                  {
+                    ..._recording('May - mixup 1 of 2 (5H).txt'),
+                    'follow_up': '5H',
+                    'count': 1,
+                    'sequence_id': 'c1-s1',
+                  },
+                  {
+                    ..._recording('May - mixup 2 of 2 (jump back).txt'),
+                    'follow_up': 'jump back',
+                    'count': 1,
+                    'sequence_id': 'c1-s2',
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            'id': 'c2',
+            'title': 'blocked 5P',
+            'flagged': false,
+            'damage': 0,
+            'hits': 0,
+            'decided': 1,
+            'count': 1,
+            'flags': <Object?>[],
+            'lead_ins': <Object?>[],
+            'sequences': [
+              _sequence('c2-s1', recording: _recording('May - 5P.txt')),
+            ],
+            'mixups': <Object?>[],
+          },
+        ],
+      }),
+    );
 
 class _FakeNotesRepository extends NotesRepository {
-  _FakeNotesRepository(this.preview, this.data, {List<NotePreview>? previews})
-      : _previews = previews ?? [preview],
-        super(finderDirectory: '/unused');
+  _FakeNotesRepository(this.preview, this.data)
+      : super(finderDirectory: '/unused');
 
   final NotePreview preview;
-  NoteSectionData data;
-  final List<NotePreview> _previews;
-  Completer<void>? writeCompleter;
-  int writeCalls = 0;
-  int applyCalls = 0;
+  final NoteSequenceData data;
+  final List<List<LabRecording>> saved = <List<LabRecording>>[];
+  Completer<void>? gate;
+  Object? failWith;
 
   @override
-  Future<List<NotePreview>> list() async => _previews;
+  Future<List<NotePreview>> list() async => [preview];
 
   @override
-  Future<NoteSectionData> read(NotePreview preview) async => data;
+  Future<NoteSequenceData> read(NotePreview preview) async => data;
 
   @override
-  Future<void> write(NotePreview preview, NoteSectionDocument document) async {
-    writeCalls++;
-    if (writeCompleter != null) await writeCompleter!.future;
-    data = NoteSectionData(
-      preview: data.preview,
-      document: document,
-      warnings: data.warnings,
-      clipIndex: data.clipIndex,
+  Future<RecordingSaveResult> saveRecordings(
+    SequenceDocument document,
+    List<LabRecording> recordings,
+  ) async {
+    await gate?.future;
+    final failure = failWith;
+    if (failure != null) throw failure;
+    saved.add(recordings);
+    return RecordingSaveResult(
+      batchDirectory: '${document.batchFolder}/recordings',
+      strivelabsDirectory: document.strivelabsRecordings,
+      fileNames: [for (final recording in recordings) recording.fileName],
     );
   }
-
-  @override
-  Future<ApplySectionResult> apply(NotePreview preview) async {
-    applyCalls++;
-    return ApplySectionResult.fromExitCode(0, opponent: preview.opponent);
-  }
-
-  @override
-  Future<NotePreview?> refreshPreview(NotePreview preview) async => preview;
 }
 
 const _playerClip = NoteClip(
