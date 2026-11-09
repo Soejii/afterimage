@@ -1,2 +1,2 @@
 /// The version embedded in the running application and frame-capture headers.
-const String afterimageVersion = '0.3.1+7';
+const String afterimageVersion = '0.3.2+8';
