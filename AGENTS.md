@@ -12,6 +12,19 @@ project.
 The ports-and-adapters map and recording safety invariants are documented in
 [`docs/architecture.md`](docs/architecture.md).
 
+## Related GGST interaction research
+
+For replay decoding, capture instrumentation, collection speed or the broader
+matchup interaction engine, first read
+[`../ggst-replay-capture/AGENTS.md`](../ggst-replay-capture/AGENTS.md) and
+[`../ggst-replay-capture/PROGRESS.md`](../ggst-replay-capture/PROGRESS.md).
+That separate project's progress file records completed work, open questions,
+judgments and decisions. Update it after meaningful research results or decisions
+and before ending a session on that work, even when the session starts here.
+Use its `HANDOFF.md` for resume commands. Keep Afterimage release status in
+`docs/status.md`; these research instructions do not replace this repository's
+safety or delivery requirements.
+
 ## Toolchain
 
 - Use the Flutter version pinned in `.fvmrc`, currently Flutter `3.47.2`.
