@@ -220,6 +220,52 @@ void main() {
       expect(withoutManager['rp'], isNull);
     });
 
+    test('reads tension and burst values from the engine into each frame row',
+        () {
+      final memory = _frameMemory()
+        ..putInt32(_engine + 0x60, 12345)
+        ..putInt32(_engine + 0x1F8, 67890)
+        ..putInt32(_engine + 0x14C8, 37)
+        ..putInt32(_engine + 0x14CC, 42);
+
+      final row = decodeLinuxFrameRow(
+        memory: memory,
+        gWorldPointerAddress: _gWorld,
+        expectedFrame: 1234,
+        elapsedMicros: 1,
+      ).row!;
+
+      expect(row.containsKey('ten'), isTrue,
+          reason: 'Frame row is missing the optional ten key.');
+      expect(row['ten'], [12345, 67890]);
+      expect(row.containsKey('bur'), isTrue,
+          reason: 'Frame row is missing the optional bur key.');
+      expect(row['bur'], [37, 42]);
+    });
+
+    test('unreadable tension or burst values are null without losing the row',
+        () {
+      final memory = _frameMemory()
+        ..putInt32(_engine + 0x60, 12345)
+        ..putInt32(_engine + 0x1F8, 67890)
+        ..putInt32(_engine + 0x14C8, 37)
+        ..putInt32(_engine + 0x14CC, 42)
+        ..failingAddresses.add(_engine + 0x1F8)
+        ..failingAddresses.add(_engine + 0x14C8);
+
+      final read = decodeLinuxFrameRow(
+        memory: memory,
+        gWorldPointerAddress: _gWorld,
+        expectedFrame: 1234,
+        elapsedMicros: 1,
+      );
+
+      expect(read.readError, isFalse);
+      expect(read.row, isNotNull);
+      expect(read.row!['ten'], isNull);
+      expect(read.row!['bur'], isNull);
+    });
+
     test('an unreadable replay manager leaves rp null and keeps the row', () {
       final memory = _frameMemory()
         ..failingAddresses.add(_peerTable + 0x10)

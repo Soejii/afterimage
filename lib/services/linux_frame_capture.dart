@@ -20,6 +20,10 @@ const int linuxEngineEntitiesOffset = 0xC80;
 const int linuxEngineEntityCountOffset = 0x910;
 const int linuxMaxEntityCount = 107;
 const int linuxEntityParentObjectOffset = 0x2C0;
+const int linuxEngineP1TensionOffset = 0x60;
+const int linuxEngineP2TensionOffset = 0x1F8;
+const int linuxEngineP1BurstOffset = 0x14C8;
+const int linuxEngineP2BurstOffset = 0x14CC;
 
 /// Replay input stream layout. The replay manager holds one input stream per
 /// seat for the whole match, loaded when the replay starts. Each peer is a
@@ -351,6 +355,18 @@ LinuxFrameRowRead decodeLinuxFrameRow({
           linuxInputMaskOffset,
     ),
   ];
+  final tension = _readOptionalInt32Pair(
+    memory,
+    state.engine,
+    linuxEngineP1TensionOffset,
+    linuxEngineP2TensionOffset,
+  );
+  final burst = _readOptionalInt32Pair(
+    memory,
+    state.engine,
+    linuxEngineP1BurstOffset,
+    linuxEngineP2BurstOffset,
+  );
   final players = <Map<String, Object?>>[
     _readPlayer(memory, state.player1),
     _readPlayer(memory, state.player2),
@@ -371,10 +387,28 @@ LinuxFrameRowRead decodeLinuxFrameRow({
       't': elapsedMicros,
       'in': inputs,
       'rp': replayPositions,
+      'ten': tension,
+      'bur': burst,
       'p': players,
       'e': entities,
     },
   );
+}
+
+List<int>? _readOptionalInt32Pair(
+  LinuxMemorySession memory,
+  int engine,
+  int p1Offset,
+  int p2Offset,
+) {
+  try {
+    return <int>[
+      _readInt32(memory, engine + p1Offset),
+      _readInt32(memory, engine + p2Offset),
+    ];
+  } on Object {
+    return null;
+  }
 }
 
 class LinuxFrameCapture implements FrameCapturePort, AbortableFrameCapturePort {
