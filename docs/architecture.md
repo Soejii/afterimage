@@ -70,20 +70,25 @@ process-memory permission troubleshooting, and controller setup.
 
 The Windows adapter lives in `lib/services/windows_process_memory.dart`,
 `windows_replay_monitor.dart`, `windows_menu_input.dart`, and
-`windows_native_backend.dart`. Windows keyboard input uses `PostMessageW` through
-`windows_window_message_input.dart`, plus an optional
+`windows_native_backend.dart`. Windows keyboard input uses `SendInput` behind
+the activation step in `windows_game_focus.dart`, plus an optional
 Xbox-compatible virtual controller in `windows_virtual_controller.dart` over the
 FFI shim built from `windows/runner/afterimage_controller.cpp`. See
 [`windows-runtime.md`](windows-runtime.md). Native Windows builds are compiled
 by GitHub Actions because this Linux development machine cannot perform a real
 Windows build locally.
 
-The window-message adapter binds one visible unowned window to the game process
-and checks its ownership before every key message. It has no desktop foreground
-requirement and no fallback to the desktop input queue. The old `SendInput`
-adapter retains its foreground guard but is not the production keyboard route.
-Message delivery is not game acceptance; the engine's frame-progress checks
-remain the recording acceptance signal.
+Before every key, `WindowsGameActivator` checks that the foreground window
+belongs to the GGST process and otherwise asks Windows to bring the single
+visible unowned GGST window to the front. A press that cannot confirm this sends
+no key. `SendInput` then rechecks the foreground process at key-down. The port
+is not an `InputSafetyPort`, so focus is required only at a key press and not
+while a replay plays. The `PostMessageW` adapter in
+`windows_window_message_input.dart` stays in the source for its tests and for
+finding the game window, but it is not the production keyboard route: on a live
+Windows run GGST did not act on posted keys. Key delivery is not game
+acceptance; the engine's frame-progress checks remain the recording acceptance
+signal.
 
 ## Pure-Dart services
 

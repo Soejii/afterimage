@@ -2,7 +2,8 @@
 
 Afterimage's Windows adapter reads a small set of values from the running
 GGST process and never writes game memory. It uses the Win32
-`ReadProcessMemory` API and posts replay-menu keys directly to the game window.
+`ReadProcessMemory` API and presses replay-menu keys while GGST is the active
+window.
 The Windows desktop build includes the Dart runtime, so Python is not needed.
 
 ## Prerequisites
@@ -29,22 +30,32 @@ present. Choose the keyboard or virtual-controller method under **Replay control
 controller method requires the separately installed ViGEmBus driver.
 
 After selecting Record, leave Saved Replays selected during the five-second
-countdown. Keyboard mode uses `PostMessageW` for `WM_KEYDOWN` and `WM_KEYUP` on
-the single visible, unowned main window belonging to `GGST-Win64-Shipping.exe`.
-It rechecks the window's process identity before each message. It never uses
-the foreground desktop input queue, raises the game window, or falls back to
-`SendInput`. The old foreground-guarded SendInput adapter remains in the source
-for its existing tests but is no longer selected by the Windows backend.
+countdown. Before each menu key, keyboard mode checks that the foreground
+window belongs to `GGST-Win64-Shipping.exe`. If it does not, Afterimage asks
+Windows to bring the single visible, unowned GGST main window to the front,
+restoring it first if it is minimized, and waits up to three seconds for that
+to happen. It then presses the key with `SendInput`, which rechecks the
+foreground process at key-down. If GGST cannot be brought to the front, no key
+is sent and the batch stops with the foreground window's details.
 
-This removes Afterimage's focus dependency; it does not prove that GGST accepts
-posted menu messages while unfocused or fully covered. Windows accepting a
-posted message only means it queued the message. The replay monitor still
-requires game frame movement, and the batch stops if the replay does not start.
-No activation spoofing, graphics hook, or game-memory write is used.
+GGST only needs to be in front when a replay opens or closes. You can use
+other windows while a replay plays, as long as GGST stays at least partly
+visible; Afterimage takes the front again for the next key. On a single
+monitor GGST will cover Afterimage, so use Alt+Tab to reach the Stop button.
 
-Replay controls are expanded by default on Windows and describe direct window
-messages and their verification limit. A physical controller does not automatically
-select Afterimage's controller mode.
+When Windows refuses the foreground change because Afterimage is not the
+active application, Afterimage briefly attaches to the input state of the
+thread that is in front and asks again. Nothing is sent to that thread's
+window. No graphics hook or game-memory write is used.
+
+Versions 0.2.2 to 0.3.3 posted `WM_KEYDOWN` and `WM_KEYUP` to the game window
+instead. On a live Windows run that route started the recording but GGST never
+opened the replay, so it was replaced. The adapter remains in the source for
+its tests but is no longer selected by the Windows backend. The new route has
+not been confirmed on a live Windows machine yet.
+
+Replay controls are expanded by default on Windows. A physical controller does
+not automatically select Afterimage's controller mode.
 
 Afterimage waits up to 30 seconds for OBS's matching recording-stopped event
 before moving the recording. If completion is not confirmed, it leaves the
@@ -53,7 +64,7 @@ Move errors include the failed operation and original filesystem error. The
 result screen labels the intended destination as the batch folder, not as proof
 that the video was saved there.
 
-Legacy SendInput focus failures include a UTC timestamp, expected GGST PID, foreground PID and
+Focus failures include a UTC timestamp, expected GGST PID, foreground PID and
 window handle, lookup failure details, and best-effort process name and window
 title. Batch errors also include the stage, replay index, and elapsed time.
 These details appear in the error and the batch's `summary.json`; window titles
@@ -88,8 +99,8 @@ The Windows preflight keeps these cases separate:
 - **GWorld signature mismatch:** GGST may have updated, or the build is not
   supported by this adapter. No write or patch is attempted.
 - **Keyboard input unavailable:** check that Afterimage and GGST run at the
-  same Windows integrity level. Direct window messages also require equal or
-  lower target integrity, and Afterimage does not change these permissions.
+  same Windows integrity level. Windows blocks injected keys aimed at a
+  higher-integrity window, and Afterimage does not change these permissions.
 - **Virtual controller driver missing:** install ViGEmBus manually, restart
   Afterimage, and refresh the setup checks. The adapter does not install a
   driver or silently fall back to keyboard input. See
@@ -99,6 +110,6 @@ The keyboard adapter sends `U,U` to open a replay, `U` to return to the replay
 list, and `W` to select the next replay. It releases every key even when an
 input call fails, and waits 800 milliseconds between the two keys in `U,U`.
 
-The automated tests use fake process-memory, window-message, SendInput, and virtual-controller
+The automated tests use fake process-memory, window-focus, window-message, SendInput, and virtual-controller
 providers. They run on Linux and do not claim that a live GGST process, Windows
 process handle, Windows keyboard event, or virtual controller has been verified.
