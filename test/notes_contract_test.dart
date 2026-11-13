@@ -6,7 +6,346 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:afterimage/domain/notes_models.dart';
 import 'package:afterimage/services/notes_repository.dart';
 
+import 'support/ledger_test_data.dart';
+
 void main() {
+  test('trend parses sets, independent comparisons and verbatim card text', () {
+    final document = SequenceDocument.fromJson(trendDocument());
+    final trend = document.trend!;
+    expect(trend.sets.first.batchLabel, 'batch-0');
+    expect(trend.sets.first.date, '2026-10-01');
+    expect(trend.sets.first.replays, 5);
+    expect(trend.sets.first.hpReplays, 0);
+    expect(trend.sets.first.damagePerReplay, isNull);
+    expect(trend.sets.first.current, isFalse);
+    expect(trend.sets.last.current, isTrue);
+    expect(trend.sets.last.damagePerReplay, 872.4);
+    expect(trend.ledger!.previous.date, '2026-10-20');
+    expect(trend.ledger!.previous.replays, 6);
+    expect(trend.ledger!.total.now, 872.4);
+    expect(trend.ledger!.total.before, 910.0);
+    expect(trend.ledger!.total.delta, -37.6);
+    expect(trend.ledger!.categories.first.key, 'pressing');
+    expect(trend.ledger!.categories.first.label, 'Hit while pressing a button');
+    expect(trend.ledger!.categories.first.delta, -21.7);
+    expect(trend.cards!.previous.batchLabel, 'earlier');
+    expect(trend.cards!.gone.single.kind, 'situation');
+    expect(trend.cards!.gone.single.title, "Ky blocked I-No's 5H");
+    expect(document.cards.first.trendText,
+        'Earlier set: ${document.cards.first.id}. Now seen again.');
+  });
+
+  test('trend tolerates missing, null and malformed additive data', () {
+    expect(SequenceDocument.fromJson(ledgerDocument()).trend, isNull);
+    for (final raw in [
+      null,
+      true,
+      3,
+      'bad',
+      [],
+      {},
+      {'sets': false},
+      {
+        'sets': [false, {}]
+      }
+    ]) {
+      expect(
+          SequenceDocument.fromJson({...ledgerDocument(), 'trend': raw}).trend,
+          isNull);
+    }
+    final json = trendDocument();
+    final raw = json['trend'] as Map;
+    (raw['sets'] as List).addAll([
+      null,
+      false,
+      {},
+      {'replays': '5'}
+    ]);
+    ((raw['ledger'] as Map)['categories'] as List).addAll([
+      null,
+      {},
+      {'key': 'bad', 'label': 'bad', 'now': double.nan, 'before': 1, 'delta': 1}
+    ]);
+    ((raw['cards'] as Map)['gone'] as List).addAll([
+      null,
+      {},
+      {'title': false}
+    ]);
+    raw['unknown'] = true;
+    var trend = SequenceDocument.fromJson(json).trend!;
+    expect(trend.sets, hasLength(2));
+    expect(trend.ledger!.categories, hasLength(3));
+    expect(trend.cards!.gone, hasLength(1));
+    for (final invalid in [
+      null,
+      false,
+      {},
+      {'text': 1},
+      {'previous': {}}
+    ]) {
+      raw['ledger'] = invalid;
+      raw['cards'] = invalid;
+      trend = SequenceDocument.fromJson(json).trend!;
+      expect(trend.ledger, isNull);
+      expect(trend.cards, isNull);
+    }
+    for (final value in [null, false, 3, [], {}, '  Finder text  ']) {
+      expect(SequenceCard.fromJson({'trend_text': value}).trendText,
+          value is String ? value : isNull);
+    }
+    expect(SequenceCard.fromJson({}).trendText, isNull);
+  });
+
+  test('event kinds and tolerant ledger card ids stay additive in schema 1',
+      () {
+    final document = SequenceDocument.fromJson(eventDocument());
+    expect(document.cards.where((card) => card.isEventCard), hasLength(5));
+    expect(document.cards.first.kind, 'future_kind');
+    expect(
+        document.ledger!.categories.first.cards, ['missing', 'e1', 'c2', 'c5']);
+    for (final raw in [null, false, 3, 'c1', <Object?>[]]) {
+      expect(LedgerCategory.fromJson({'cards': raw}).cards, isEmpty);
+    }
+    expect(
+        LedgerCategory.fromJson({
+          'cards': [false, 'e1', null, 2]
+        }).cards,
+        ['e1']);
+    expect(
+        SequenceDocument.fromJson(ledgerDocument())
+            .cards
+            .any((card) => card.isEventCard),
+        isFalse);
+    expect(
+        SequenceDocument.fromJson(ledgerDocument())
+            .ledger!
+            .categories
+            .first
+            .cards,
+        isEmpty);
+  });
+
+  test('ledger, focus, answers and reversal note parse without changing schema',
+      () {
+    final document = SequenceDocument.fromJson(ledgerDocument());
+    expect(document.focus, ['c3', 'unknown', 'c1']);
+    final ledger = document.ledger!;
+    expect([ledger.totalDamage, ledger.replays, ledger.coveredByCards],
+        [10469, 12, 2506]);
+    final category = ledger.categories.first;
+    expect([
+      category.key,
+      category.label,
+      category.damage,
+      category.events,
+      category.share
+    ], [
+      'neutral',
+      'Hit in neutral',
+      3100,
+      41,
+      0.296
+    ]);
+    final starter = category.starters.single;
+    expect([starter.move, starter.damage, starter.events, starter.counterHits],
+        ['j.S', 900, 9, 2]);
+    expect(starter.examples.first.videoTime, 512.4);
+    expect(starter.examples.last.videoTime, isNull);
+    expect([
+      starter.examples.first.replay,
+      starter.examples.first.round,
+      starter.examples.first.damage
+    ], [
+      3,
+      2,
+      141
+    ]);
+    expect(ledger.categories.last.hisMoves.first.move, 'f.S');
+    expect(ledger.categories.last.hisMoves.first.events, 4);
+    expect(ledger.categories.last.hisMoves.first.damage, 300);
+    final answer = document.cards.first.answers.first;
+    expect([
+      answer.text,
+      answer.count,
+      answer.gotHit,
+      answer.won,
+      answer.pressure,
+      answer.neutral,
+      answer.damage
+    ], [
+      'Ky blocked',
+      9,
+      3,
+      0,
+      5,
+      1,
+      240
+    ]);
+    expect(document.cards.first.reversalNote, contains('S Vapor Thrust'));
+  });
+
+  test('new optional keys tolerate absence, null, empty and wrong types', () {
+    for (final value in [null, false, 3, 'wrong', <Object?>[]]) {
+      final document = SequenceDocument.fromJson({
+        'schema': 1,
+        'focus': value,
+        'ledger': value,
+        'cards': [
+          {'answers': value, 'reversal_note': value}
+        ],
+      });
+      expect(document.focus, isEmpty);
+      expect(document.ledger, isNull);
+      expect(document.cards.single.answers, isEmpty);
+      expect(
+          document.cards.single.reversalNote, value is String ? value : isNull);
+    }
+    final old = SequenceDocument.fromJson(_document());
+    expect(old.focus, isEmpty);
+    expect(old.ledger, isNull);
+    expect(old.cards.single.answers, isEmpty);
+    expect(old.cards.single.reversalNote, isNull);
+    final malformed = SequenceDocument.fromJson({
+      'schema': 1,
+      'focus': [false, 'c1', null],
+      'ledger': {
+        'total_damage': [],
+        'replays': false,
+        'covered_by_cards': {},
+        'categories': [
+          null,
+          1,
+          {
+            'damage': 'bad',
+            'events': [],
+            'share': false,
+            'key': 1,
+            'label': [],
+            'his_moves': [
+              false,
+              {'move': 3, 'events': {}}
+            ],
+            'starters': [
+              true,
+              {
+                'counter_hits': [],
+                'examples': [
+                  4,
+                  {'video_time': 'wrong'}
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      'cards': [
+        {
+          'answers': [
+            null,
+            {'text': 2, 'count': [], 'won': false}
+          ],
+          'reversal_note': 1
+        }
+      ],
+    });
+    expect(malformed.focus, ['c1']);
+    expect(malformed.ledger!.totalDamage, 0);
+    final category = malformed.ledger!.categories.single;
+    expect(category.damage, 0);
+    expect(category.share, 0);
+    expect(category.key, '');
+    expect(category.starters.single.examples.single.videoTime, isNull);
+    expect(category.hisMoves.single.move, '');
+    expect(malformed.cards.single.answers.single.text, '');
+    expect(malformed.cards.single.answers.single.count, 0);
+    expect(malformed.cards.single.reversalNote, isNull);
+  });
+
+  test(
+    'Step 12 parses the supplied H Stroke card and sequence reads',
+    () {
+      final source = File('test/support/step12/ino_h_stroke.json');
+      final document = SequenceDocument.fromJson(
+        decodeObject(source.readAsStringSync()),
+      );
+      final card = document.cards.singleWhere(
+        (candidate) =>
+            candidate.title == "Ky blocked I-No's H Stroke the Big Tree",
+      );
+      final read = card.read!;
+
+      expect(read.kind, "player's turn");
+      expect(read.adv, 2);
+      expect(read.matrix!.rows, isNotEmpty);
+      expect(read.mistakes['guess']!.count, 5);
+      expect(read.mistakes['unclear']!.count, 1);
+      expect(
+        card.sequences.any((sequence) =>
+            sequence.read?.mistake != null &&
+            (sequence.read?.reason?.isNotEmpty ?? false)),
+        isTrue,
+      );
+    },
+  );
+
+  test('Step 12 keeps additive fields and unknown spot kinds readable', () {
+    final card = SequenceCard.fromJson({
+      'id': 'future',
+      'read': {
+        'kind': 'future spot',
+        'adv': 0,
+        'scope': 'even',
+        'corner': 'near corner',
+        'throw_range': {'min': 2, 'max': 4},
+        'fuzzy_candidates': ['low then high'],
+        'matrix': {
+          'player_options': [
+            {
+              'id': 'Ky 5P',
+              'label': '5P',
+              'active_frames': [5, 6],
+              'guards': ['low', 'high'],
+            },
+          ],
+        },
+        'new_finder_field': {'label': 'retain me'},
+      },
+      'sequences': [
+        {
+          'id': 'future-s1',
+          'read': {
+            'kind': 'future point kind',
+            'mistake': 'future mistake kind',
+            'reason': 'keep the explanation',
+            'corner': 'near corner',
+            'throw_range_bracket': [2, 4],
+            'unknown_point_field': 'still visible',
+          },
+        },
+      ],
+    });
+    final read = card.read!;
+    final sequenceRead = card.sequences.single.read!;
+
+    expect(read.kind, 'future spot');
+    expect(read.matrix!.playerOptions.single.activeFrames, [5, 6]);
+    expect(read.additionalDetails.join('\n'), contains('corner: near corner'));
+    expect(read.additionalDetails.join('\n'), contains('throw_range'));
+    expect(read.additionalDetails.join('\n'), contains('fuzzy_candidates'));
+    expect(read.additionalDetails.join('\n'), contains('active_frames'));
+    expect(read.additionalDetails.join('\n'), contains('guards'));
+    expect(read.additionalDetails.join('\n'), contains('new_finder_field'));
+    expect(sequenceRead.kind, 'future point kind');
+    expect(sequenceRead.mistake, 'future mistake kind');
+    expect(sequenceRead.reason, 'keep the explanation');
+    expect(sequenceRead.additionalDetails.join('\n'), contains('corner'));
+    expect(sequenceRead.additionalDetails.join('\n'), contains('throw_range'));
+    expect(
+      sequenceRead.additionalDetails.join('\n'),
+      contains('unknown_point_field: still visible'),
+    );
+  });
+
   group('sequence list', () {
     test('parses cards, sequences, recordings, mixups and clips', () {
       final document = SequenceDocument.fromJson(_document());

@@ -48,6 +48,11 @@ class SequenceDocument {
     required this.warnings,
     required this.clipErrors,
     required this.cards,
+    this.opponentName,
+    this.playerName,
+    this.focus = const [],
+    this.ledger,
+    this.trend,
   });
 
   factory SequenceDocument.fromJson(Map<String, Object?> json) {
@@ -56,8 +61,15 @@ class SequenceDocument {
       throw FormatException('Unknown sequence list schema: $schema');
     }
     return SequenceDocument(
+      trend: SequenceTrend.parse(json['trend']),
+      focus: _typedStrings(json['focus']).take(3).toList(),
+      ledger: json['ledger'] is Map<String, Object?>
+          ? DamageLedger.fromJson(json['ledger'] as Map<String, Object?>)
+          : null,
       opponent: json['opponent']?.toString() ?? '',
       player: _optionalString(json['player']),
+      opponentName: _optionalString(json['opponent_name']),
+      playerName: _optionalString(json['player_name']),
       batchLabel: json['batch_label']?.toString() ?? '',
       batchFolder: json['batch_folder']?.toString() ?? '',
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
@@ -72,6 +84,8 @@ class SequenceDocument {
 
   final String opponent;
   final String? player;
+  final String? opponentName;
+  final String? playerName;
   final String batchLabel;
   final String batchFolder;
   final DateTime? createdAt;
@@ -79,6 +93,9 @@ class SequenceDocument {
   final List<String> warnings;
   final List<String> clipErrors;
   final List<SequenceCard> cards;
+  final List<String> focus;
+  final DamageLedger? ledger;
+  final SequenceTrend? trend;
 }
 
 /// One situation: her last move, his posture and how he got there.
@@ -98,9 +115,20 @@ class SequenceCard {
     required this.mixups,
     this.header,
     this.leadInText,
+    this.answers = const [],
+    this.reversalNote,
+    this.trendText,
+    this.read,
   });
 
   factory SequenceCard.fromJson(Map<String, Object?> json) => SequenceCard(
+        answers: [
+          for (final value in _newMaps(json['answers']))
+            SequenceAnswer.fromJson(value),
+        ],
+        read: SituationRead.parse(json['read']),
+        trendText: _text(json['trend_text']),
+        reversalNote: _text(json['reversal_note']),
         id: json['id']?.toString() ?? '',
         kind: json['kind']?.toString() ?? 'situation',
         title: json['title']?.toString() ?? '',
@@ -134,13 +162,17 @@ class SequenceCard {
 
   final String id;
 
-  /// `situation`, or `guard_crush` for the small guard-crush card (v0.3.3).
+  /// Situations, guard crushes, or additive event kinds, including unknown ones.
   final String kind;
   final String title;
 
   /// Display text from the finder (v0.3.3); `null` in older lists.
   final String? header;
   final String? leadInText;
+  final List<SequenceAnswer> answers;
+  final String? reversalNote;
+  final String? trendText;
+  final SituationRead? read;
   final bool flagged;
   final int damage;
   final int hits;
@@ -151,7 +183,754 @@ class SequenceCard {
   final List<LabSequence> sequences;
   final List<SequenceMixup> mixups;
 
+  bool get isEventCard => kind != 'situation' && kind != 'guard_crush';
+
   bool get isGuardCrush => kind == 'guard_crush';
+}
+
+/// Additive Step 12 situation read. Unknown kinds and fields are retained so a
+/// newer finder can still explain its output in an older Afterimage build.
+class SituationRead {
+  SituationRead._({
+    required this.raw,
+    required this.version,
+    required this.kind,
+    required this.adv,
+    required this.advCounts,
+    required this.scope,
+    required this.matrix,
+    required this.playerOptions,
+    required this.opponentOptions,
+    required this.mistakes,
+    required this.points,
+    required this.mistake,
+    required this.reason,
+    required this.spacing,
+    required this.corner,
+    required this.throwRange,
+    required this.activeFrames,
+    required this.guards,
+    required this.fuzzyCandidates,
+    required this.additionalDetails,
+  });
+
+  static SituationRead? parse(Object? value) {
+    final json = _readMap(value);
+    if (json == null) return null;
+    return SituationRead._(
+      raw: json,
+      version: _integer(json['version']),
+      kind: _text(json['kind']) ?? '',
+      adv: _integer(json['adv']),
+      advCounts: [
+        for (final item in _readMaps(json['adv_counts']))
+          SituationAdvCount.fromJson(item),
+      ],
+      scope: _text(json['scope']),
+      matrix: SituationMatrix.parse(json['matrix']),
+      playerOptions: [
+        for (final item in _readMaps(json['player_options']))
+          SituationOption.fromJson(item),
+      ],
+      opponentOptions: [
+        for (final item in _readMaps(json['opponent_options']))
+          SituationOption.fromJson(item),
+      ],
+      mistakes: {
+        for (final entry in (_readMap(json['mistakes']) ?? {}).entries)
+          if (_readMap(entry.value) case final item?)
+            entry.key: SituationMistakeCount.fromJson(item),
+      },
+      points: [
+        for (final item in _readMaps(json['points']))
+          if (SituationRead.parse(item) case final point?) point,
+      ],
+      mistake: _text(json['mistake']),
+      reason: _text(json['reason']),
+      spacing: _text(json['spacing']),
+      corner: json['corner'],
+      throwRange: json['throw_range'] ?? json['throw_range_bracket'],
+      activeFrames: json['active_frames'] ?? json['active_frame'],
+      guards: json['guards'],
+      fuzzyCandidates: json['fuzzy_candidates'],
+      additionalDetails: _situationAdditionalDetails(json),
+    );
+  }
+
+  /// The original object is retained for future additive fields and diagnostics.
+  final Map<String, Object?> raw;
+  final int? version;
+  final String kind;
+  final int? adv;
+  final List<SituationAdvCount> advCounts;
+  final String? scope;
+  final SituationMatrix? matrix;
+  final List<SituationOption> playerOptions;
+  final List<SituationOption> opponentOptions;
+  final Map<String, SituationMistakeCount> mistakes;
+  final List<SituationRead> points;
+
+  /// Per-sequence assessment. Unknown values remain ordinary display strings.
+  final String? mistake;
+  final String? reason;
+  final String? spacing;
+  final Object? corner;
+  final Object? throwRange;
+  final Object? activeFrames;
+  final Object? guards;
+  final Object? fuzzyCandidates;
+
+  /// Unrecognised and newly additive details, flattened to plain text for display.
+  final List<String> additionalDetails;
+}
+
+class SituationAdvCount {
+  SituationAdvCount.fromJson(Map<String, Object?> json)
+      : adv = _integer(json['adv']),
+        count = _count(json['count']);
+
+  final int? adv;
+  final int count;
+}
+
+class SituationMistakeCount {
+  SituationMistakeCount.fromJson(Map<String, Object?> json)
+      : count = _count(json['count']),
+        points = _typedStrings(json['points']);
+
+  final int count;
+  final List<String> points;
+}
+
+class SituationMatrix {
+  SituationMatrix._({
+    required this.playerOptions,
+    required this.opponentOptions,
+    required this.rows,
+    required this.neverWorksHere,
+    required this.dominantRows,
+    required this.note,
+    required this.spacingCutRaw,
+    required this.routes,
+  });
+
+  static SituationMatrix? parse(Object? value) {
+    final json = _readMap(value);
+    if (json == null) return null;
+    return SituationMatrix._(
+      playerOptions: [
+        for (final item in _readMaps(json['player_options']))
+          SituationOption.fromJson(item),
+      ],
+      opponentOptions: [
+        for (final item in _readMaps(json['opponent_options']))
+          SituationOption.fromJson(item),
+      ],
+      rows: [
+        for (final item in _readMaps(json['rows']))
+          SituationMatrixRow.fromJson(item),
+      ],
+      neverWorksHere: _rawList(json['never_works_here']),
+      dominantRows: _rawList(json['dominant_rows']),
+      note: _text(json['note']),
+      spacingCutRaw: _number(json['spacing_cut_raw']),
+      routes: [
+        for (final item in _readMaps(json['routes']))
+          SituationRoute.fromJson(item),
+      ],
+    );
+  }
+
+  final List<SituationOption> playerOptions;
+  final List<SituationOption> opponentOptions;
+  final List<SituationMatrixRow> rows;
+  final List<Object?> neverWorksHere;
+  final List<Object?> dominantRows;
+  final String? note;
+  final double? spacingCutRaw;
+  final List<SituationRoute> routes;
+}
+
+class SituationOption {
+  SituationOption.fromJson(Map<String, Object?> json)
+      : id = _text(json['id']) ?? '',
+        label = _text(json['label']) ?? '',
+        kind = _text(json['kind']) ?? '',
+        guard = _text(json['guard']),
+        startup = _integer(json['startup']),
+        sources = _typedStrings(json['sources']),
+        tensionCost = _integer(json['tension_cost']),
+        availability = _text(json['availability']),
+        available = _integer(json['available']),
+        tensionUnknown = _integer(json['tension_unknown']),
+        possible = _integer(json['possible']),
+        reach = _text(json['reach']),
+        activeFrames = json['active_frames'] ?? json['active_frame'],
+        guards = json['guards'],
+        fuzzyCandidates = json['fuzzy_candidates'],
+        corner = json['corner'],
+        throwRange = json['throw_range'] ?? json['throw_range_bracket'];
+
+  final String id;
+  final String label;
+  final String kind;
+  final String? guard;
+  final int? startup;
+  final List<String> sources;
+  final int? tensionCost;
+  final String? availability;
+  final int? available;
+  final int? tensionUnknown;
+  final int? possible;
+  final String? reach;
+  final Object? activeFrames;
+  final Object? guards;
+  final Object? fuzzyCandidates;
+  final Object? corner;
+  final Object? throwRange;
+}
+
+class SituationMatrixRow {
+  SituationMatrixRow.fromJson(Map<String, Object?> json)
+      : options = _typedStrings(json['options']),
+        cells = {
+          for (final entry in (_readMap(json['cells']) ?? {}).entries)
+            if (_readMap(entry.value) case final cell?)
+              entry.key: SituationMatrixCell.fromJson(cell),
+        };
+
+  final List<String> options;
+  final Map<String, SituationMatrixCell> cells;
+}
+
+class SituationMatrixCell {
+  SituationMatrixCell.fromJson(Map<String, Object?> json)
+      : value = _text(json['value']) ?? '',
+        winner = _text(json['winner']),
+        values = {
+          for (final entry in (_readMap(json['values']) ?? {}).entries)
+            if (entry.value is num && (entry.value as num).isFinite)
+              entry.key: (entry.value as num).toInt(),
+        },
+        seen = SituationSeen.parse(json['seen']);
+
+  final String value;
+  final String? winner;
+  final Map<String, int> values;
+  final SituationSeen? seen;
+}
+
+class SituationSeen {
+  SituationSeen.fromJson(Map<String, Object?> json)
+      : count = _count(json['count']),
+        won = _count(json['won']),
+        lost = _count(json['lost']),
+        pressure = _count(json['pressure']),
+        neutral = _count(json['neutral']),
+        points = _typedStrings(json['points']);
+
+  static SituationSeen? parse(Object? value) {
+    final json = _readMap(value);
+    return json == null ? null : SituationSeen.fromJson(json);
+  }
+
+  final int count;
+  final int won;
+  final int lost;
+  final int pressure;
+  final int neutral;
+  final List<String> points;
+}
+
+class SituationRoute {
+  SituationRoute.fromJson(Map<String, Object?> json)
+      : leadIn = _text(json['lead_in']),
+        spacing = _text(json['spacing']),
+        corner = json['corner'],
+        count = _count(json['count']),
+        options = [
+          for (final item in _readMaps(json['options']))
+            SituationRouteOption.fromJson(item),
+        ];
+
+  final String? leadIn;
+  final String? spacing;
+  final Object? corner;
+  final int count;
+  final List<SituationRouteOption> options;
+}
+
+class SituationRouteOption {
+  SituationRouteOption.fromJson(Map<String, Object?> json)
+      : option = _text(json['option']) ?? '',
+        count = _count(json['count']);
+
+  final String option;
+  final int count;
+}
+
+const _situationKnownKeys = <String>{
+  'version',
+  'kind',
+  'adv',
+  'adv_counts',
+  'scope',
+  'matrix',
+  'mistakes',
+  'points',
+  'throw',
+  'throw_options',
+  'tension',
+  'distance',
+  'answer_delay',
+  'visible_frames',
+  'timing_complete',
+  'player_options',
+  'opponent_options',
+  'spacing',
+  'corner',
+  'mistake',
+  'reason',
+  'active_frame',
+  'active_frames',
+  'guards',
+  'fuzzy_candidates',
+  'throw_range',
+  'throw_range_bracket',
+  'id',
+  'label',
+  'startup',
+  'sources',
+  'tension_cost',
+  'availability',
+  'available',
+  'tension_unknown',
+  'possible',
+  'reach',
+  'rows',
+  'options',
+  'cells',
+  'never_works_here',
+  'dominant_rows',
+  'note',
+  'spacing_cut_raw',
+  'routes',
+  'value',
+  'winner',
+  'values',
+  'seen',
+  'count',
+  'won',
+  'lost',
+  'pressure',
+  'neutral',
+  'sequence_id',
+  'replay',
+  'frame',
+  'assessed',
+  'status',
+  'range',
+  'source',
+  'player',
+  'opponent',
+  'scale',
+  'lead_in',
+  'option',
+  'unc check',
+  'guard',
+  'timings',
+  'base_option',
+  'start_frame',
+  'reactable',
+  'capture_gap',
+  'approach',
+  'distance_at_start',
+  'throw_at_start',
+  'fuzzy_note',
+  'corner_note',
+  'corner_margin_raw',
+  'bracket',
+  'farthest_connect',
+  'nearest_whiff',
+  'connected',
+  'whiffed',
+  'unknown',
+};
+
+const _situationAdditiveTextKeys = <String>{
+  'active_frame',
+  'active_frames',
+  'guards',
+  'fuzzy_candidates',
+  'corner',
+  'throw_range',
+  'throw_range_bracket',
+};
+
+List<String> _situationAdditionalDetails(Map<String, Object?> json) {
+  final details = <String>[];
+
+  void visit(Object? value, String path, {String? shape}) {
+    if (value is List) {
+      for (var index = 0; index < value.length; index++) {
+        visit(value[index], '$path[$index]', shape: shape);
+      }
+      return;
+    }
+    final map = _readMap(value);
+    if (map == null) return;
+    for (final entry in map.entries) {
+      final key = entry.key;
+      final childPath = path.isEmpty ? key : '$path.$key';
+      if (_situationAdditiveTextKeys.contains(key)) {
+        if (entry.value != null) {
+          details.add('$childPath: ${_plainSituationValue(entry.value)}');
+        }
+        continue;
+      }
+      if (shape == 'values') continue;
+      if (shape == 'cells') {
+        visit(entry.value, childPath, shape: 'cell');
+        continue;
+      }
+      if (shape == 'mistakes') {
+        visit(entry.value, childPath, shape: 'mistake');
+        continue;
+      }
+      if (shape == 'throwOptions') {
+        visit(entry.value, childPath, shape: 'throwOptionSide');
+        continue;
+      }
+      if (shape == 'throwOptionSide') {
+        visit(entry.value, childPath, shape: 'throwOption');
+        continue;
+      }
+      if (!_situationKnownKeys.contains(key)) {
+        details.add('$childPath: ${_plainSituationValue(entry.value)}');
+        continue;
+      }
+      final childShape = switch (key) {
+        'cells' => 'cells',
+        'values' => 'values',
+        'mistakes' => 'mistakes',
+        'throw_options' => 'throwOptions',
+        _ => null,
+      };
+      // Sequence reads are rendered under their own row, so avoid duplicating
+      // their point-specific extensions at the card level.
+      if (key == 'points' && path.isEmpty) continue;
+      visit(entry.value, childPath, shape: childShape);
+    }
+  }
+
+  visit(json, '');
+  return details;
+}
+
+String _plainSituationValue(Object? value) {
+  if (value is String) return value;
+  try {
+    return jsonEncode(value);
+  } on Object {
+    return value.toString();
+  }
+}
+
+Map<String, Object?>? _readMap(Object? value) {
+  if (value is! Map) return null;
+  return {
+    for (final entry in value.entries)
+      if (entry.key is String) entry.key as String: entry.value,
+  };
+}
+
+List<Map<String, Object?>> _readMaps(Object? value) => value is List
+    ? [
+        for (final item in value)
+          if (_readMap(item) case final map?) map
+      ]
+    : const [];
+
+List<Object?> _rawList(Object? value) =>
+    value is List ? List<Object?>.from(value) : const [];
+
+// Optional additive finder data is strictly typed and defaults safely.
+String? _text(Object? value) => value is String ? value : null;
+int _count(Object? value) => value is num && value.isFinite ? value.toInt() : 0;
+double? _number(Object? value) =>
+    value is num && value.isFinite ? value.toDouble() : null;
+List<String> _typedStrings(Object? value) =>
+    value is List ? value.whereType<String>().toList() : const [];
+List<Map<String, Object?>> _newMaps(Object? value) =>
+    value is List ? value.whereType<Map<String, Object?>>().toList() : const [];
+
+/// Additive cross-set comparisons. Invalid objects are omitted, never coerced.
+class SequenceTrend {
+  SequenceTrend._(this.sets, this.ledger, this.cards);
+
+  static SequenceTrend? parse(Object? raw) {
+    if (raw is! Map<String, Object?> || raw['sets'] is! List) return null;
+    final sets = [
+      for (final value in _newMaps(raw['sets']))
+        if (TrendSet.parse(value) case final set?) set,
+    ];
+    if (sets.isEmpty) return null;
+    return SequenceTrend._(
+        sets, LedgerTrend.parse(raw['ledger']), CardsTrend.parse(raw['cards']));
+  }
+
+  final List<TrendSet> sets;
+  final LedgerTrend? ledger;
+  final CardsTrend? cards;
+}
+
+class TrendPrevious {
+  TrendPrevious._(this.batchLabel, this.date, this.replays);
+
+  static TrendPrevious? parse(Object? raw) {
+    if (raw is! Map<String, Object?> ||
+        raw['batch_label'] is! String ||
+        raw['date'] is! String ||
+        !_trendCount(raw['replays'])) {
+      return null;
+    }
+    return TrendPrevious._(raw['batch_label'] as String, raw['date'] as String,
+        _count(raw['replays']));
+  }
+
+  final String batchLabel;
+  final String date;
+  final int replays;
+}
+
+bool _trendCount(Object? value) =>
+    value is num &&
+    value.isFinite &&
+    value >= 0 &&
+    value == value.truncateToDouble();
+
+class TrendSet extends TrendPrevious {
+  TrendSet._(TrendPrevious previous, this.hpReplays, this.damagePerReplay,
+      this.current)
+      : super._(previous.batchLabel, previous.date, previous.replays);
+
+  static TrendSet? parse(Object? raw) {
+    final previous = TrendPrevious.parse(raw);
+    if (previous == null ||
+        raw is! Map<String, Object?> ||
+        !_trendCount(raw['hp_replays']) ||
+        raw['current'] is! bool ||
+        (raw['damage_per_replay'] != null &&
+            _number(raw['damage_per_replay']) == null)) {
+      return null;
+    }
+    return TrendSet._(previous, _count(raw['hp_replays']),
+        _number(raw['damage_per_replay']), raw['current'] as bool);
+  }
+
+  final int hpReplays;
+  final double? damagePerReplay;
+  final bool current;
+}
+
+class TrendDamage {
+  TrendDamage._(this.now, this.before, this.delta);
+
+  static TrendDamage? parse(Object? raw) {
+    if (raw is! Map<String, Object?>) return null;
+    final now = _number(raw['now']);
+    final before = _number(raw['before']);
+    final delta = _number(raw['delta']);
+    if (now == null || before == null || delta == null) return null;
+    return TrendDamage._(now, before, delta);
+  }
+
+  final double now;
+  final double before;
+  final double delta;
+}
+
+class TrendCategory extends TrendDamage {
+  TrendCategory._(this.key, this.label, TrendDamage damage)
+      : super._(damage.now, damage.before, damage.delta);
+
+  static TrendCategory? parse(Object? raw) {
+    final damage = TrendDamage.parse(raw);
+    if (damage == null ||
+        raw is! Map<String, Object?> ||
+        raw['key'] is! String ||
+        raw['label'] is! String) {
+      return null;
+    }
+    return TrendCategory._(
+        raw['key'] as String, raw['label'] as String, damage);
+  }
+
+  final String key;
+  final String label;
+}
+
+class LedgerTrend {
+  LedgerTrend._(this.previous, this.text, this.total, this.categories);
+
+  static LedgerTrend? parse(Object? raw) {
+    if (raw is! Map<String, Object?>) return null;
+    final previous = TrendPrevious.parse(raw['previous']);
+    final total = TrendDamage.parse(raw['total']);
+    if (previous == null ||
+        total == null ||
+        raw['text'] is! String ||
+        raw['categories'] is! List) {
+      return null;
+    }
+    return LedgerTrend._(previous, raw['text'] as String, total, [
+      for (final value in _newMaps(raw['categories']))
+        if (TrendCategory.parse(value) case final category?) category,
+    ]);
+  }
+
+  final TrendPrevious previous;
+  final String text;
+  final TrendDamage total;
+  final List<TrendCategory> categories;
+}
+
+class GoneTrendCard {
+  GoneTrendCard._(this.title, this.kind, this.text);
+
+  static GoneTrendCard? parse(Object? raw) {
+    if (raw is! Map<String, Object?> ||
+        raw['title'] is! String ||
+        raw['kind'] is! String ||
+        raw['text'] is! String) {
+      return null;
+    }
+    return GoneTrendCard._(
+        raw['title'] as String, raw['kind'] as String, raw['text'] as String);
+  }
+
+  final String title;
+  final String kind;
+  final String text;
+}
+
+class CardsTrend {
+  CardsTrend._(this.previous, this.text, this.gone);
+
+  static CardsTrend? parse(Object? raw) {
+    if (raw is! Map<String, Object?>) return null;
+    final previous = TrendPrevious.parse(raw['previous']);
+    if (previous == null || raw['text'] is! String || raw['gone'] is! List) {
+      return null;
+    }
+    return CardsTrend._(previous, raw['text'] as String, [
+      for (final value in _newMaps(raw['gone']))
+        if (GoneTrendCard.parse(value) case final card?) card,
+    ]);
+  }
+
+  final TrendPrevious previous;
+  final String text;
+  final List<GoneTrendCard> gone;
+}
+
+class DamageLedger {
+  DamageLedger.fromJson(Map<String, Object?> json)
+      : totalDamage = _count(json['total_damage']),
+        replays = _count(json['replays']),
+        coveredByCards = _count(json['covered_by_cards']),
+        categories = [
+          for (final value in _newMaps(json['categories']))
+            LedgerCategory.fromJson(value),
+        ];
+
+  final int totalDamage;
+  final int replays;
+  final int coveredByCards;
+  final List<LedgerCategory> categories;
+}
+
+class LedgerCategory {
+  LedgerCategory.fromJson(Map<String, Object?> json)
+      : key = _text(json['key']) ?? '',
+        label = _text(json['label']) ?? '',
+        damage = _count(json['damage']),
+        events = _count(json['events']),
+        share = _number(json['share']) ?? 0,
+        cards = _typedStrings(json['cards']),
+        starters = [
+          for (final value in _newMaps(json['starters']))
+            LedgerStarter.fromJson(value),
+        ],
+        hisMoves = [
+          for (final value in _newMaps(json['his_moves']))
+            LedgerMove.fromJson(value),
+        ];
+
+  final String key;
+  final String label;
+  final int damage;
+  final int events;
+  final double share;
+  final List<String> cards;
+  final List<LedgerStarter> starters;
+  final List<LedgerMove> hisMoves;
+}
+
+class LedgerMove {
+  LedgerMove.fromJson(Map<String, Object?> json)
+      : move = _text(json['move']) ?? '',
+        damage = _count(json['damage']),
+        events = _count(json['events']);
+
+  final String move;
+  final int damage;
+  final int events;
+}
+
+class LedgerStarter extends LedgerMove {
+  LedgerStarter.fromJson(super.json)
+      : counterHits = _count(json['counter_hits']),
+        examples = [
+          for (final value in _newMaps(json['examples']))
+            LedgerExample.fromJson(value),
+        ],
+        super.fromJson();
+
+  final int counterHits;
+  final List<LedgerExample> examples;
+}
+
+class LedgerExample {
+  LedgerExample.fromJson(Map<String, Object?> json)
+      : replay = _count(json['replay']),
+        round = _count(json['round']),
+        videoTime = _number(json['video_time']),
+        damage = _count(json['damage']);
+
+  final int replay;
+  final int round;
+  final double? videoTime;
+  final int damage;
+}
+
+class SequenceAnswer {
+  SequenceAnswer.fromJson(Map<String, Object?> json)
+      : text = _text(json['text']) ?? '',
+        count = _count(json['count']),
+        gotHit = _count(json['got_hit']),
+        won = _count(json['won']),
+        pressure = _count(json['pressure']),
+        neutral = _count(json['neutral']),
+        damage = _count(json['damage']);
+
+  final String text;
+  final int count;
+  final int gotHit;
+  final int won;
+  final int pressure;
+  final int neutral;
+  final int damage;
 }
 
 class SequenceFlag {
@@ -201,6 +980,7 @@ class LabSequence {
     required this.clip,
     this.line,
     this.result,
+    this.read,
   });
 
   factory LabSequence.fromJson(Map<String, Object?> json) {
@@ -227,6 +1007,7 @@ class LabSequence {
           : null,
       line: _optionalString(json['line']),
       result: _optionalString(json['result']),
+      read: SituationRead.parse(json['read']),
     );
   }
 
@@ -236,6 +1017,7 @@ class LabSequence {
   /// (70 damage)` from the finder (v0.3.3); `null` in older lists.
   final String? line;
   final String? result;
+  final SituationRead? read;
   final int? replay;
   final int? round;
   final String videoTime;
