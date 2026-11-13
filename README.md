@@ -110,7 +110,14 @@ On Linux, the optional sequence finder can run after a completed batch when fram
 capture is enabled. It reads the `ggst-input-tracker` checkout at
 `~/CODE/ggst-input-tracker` by default and lists the defensive situations from
 the batch on the **Sequences** page, plus a small card for each move that
-guard-crushed you. Tapping a sequence's play button opens its clip directly under
+guard-crushed you. When supplied by the finder, a damage ledger shows where you
+lost HP, and up to three focus cards appear first under **Work on these**.
+Event cards show other ways you got hit, including pressing, wakeup, guarding,
+and throws. They start collapsed unless focused. Ledger links open and scroll
+to the matching card.
+When supplied by the finder, trends compare damage per replay across sets and
+show earlier card frequencies, including situations no longer seen.
+Tapping a sequence's play button opens its clip directly under
 that row (one clip open at a time). **Save** writes
 the opponent's inputs as a StriveLabs recording (`.txt`) to the batch folder's
 `recordings` folder and, when StriveLabs is installed in GGST, to its

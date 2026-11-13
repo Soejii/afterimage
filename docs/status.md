@@ -54,6 +54,13 @@ Version `0.3.3+9` is an alpha desktop release:
   its row, and saves the opponent's inputs for a sequence (Save) or for every
   option after one lead-in (Save mixup) as StriveLabs `.txt` recordings in the
   batch folder and, when StriveLabs is installed, its `recordings` folder.
+  The local, unreleased sequence UI adds an expandable damage ledger and up to
+  three focus cards, with other flagged situations grouped below. Cards can also show answer
+  outcomes and a secondary reversal note. Event cards group other ways the player
+  got hit and start collapsed unless focused. Ledger category links expand and
+  reveal their matching cards. Finder-supplied trends show set history, damage
+  comparisons per replay, and earlier card frequencies or cards no longer seen.
+  Older sequence files keep their layout.
   Loading those files into the training dummy through StriveLabs is unverified;
   the Windows entry points remain hidden.
 - OBS WebSocket v5 control now supports localhost configuration discovery,
