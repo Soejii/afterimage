@@ -66,6 +66,8 @@ Version `0.3.4+10` is an alpha desktop release:
   that fits the card, solid marks for results that hold at any spacing and
   outlined marks for frame-only results, what happened in each pairing, and
   Watch links that open the matching clips.
+  Reference lists are labelled and kept distinct from the player's history.
+  Own lists can compare high-level picks and damage when the finder supplies reference data.
   Older sequence files keep their layout.
   Loading those files into the training dummy through StriveLabs is unverified;
   the Windows entry points remain hidden.
