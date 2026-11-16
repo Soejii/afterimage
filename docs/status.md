@@ -60,6 +60,10 @@ Version `0.3.3+9` is an alpha desktop release:
   got hit and start collapsed unless focused. Ledger category links expand and
   reveal their matching cards. Finder-supplied trends show set history, damage
   comparisons per replay, and earlier card frequencies or cards no longer seen.
+  A situation card's Read tab shows one headline verdict, a who-beats-who grid
+  that fits the card, solid marks for results that hold at any spacing and
+  outlined marks for frame-only results, what happened in each pairing, and
+  Watch links that open the matching clips. Also local and unreleased.
   Older sequence files keep their layout.
   Loading those files into the training dummy through StriveLabs is unverified;
   the Windows entry points remain hidden.
