@@ -51,6 +51,13 @@ platform integration also require a real Linux release build:
 fvm flutter build linux --release
 ```
 
+An incremental local release build can keep a stale icon font: the asset step
+does not rerun when only Dart code changed, so a newly used `Icons.*` glyph is
+missing from the tree-shaken `MaterialIcons-Regular.otf` and paints as nothing.
+Before a local build that will be deployed, run
+`rm -f .dart_tool/flutter_build/*/release_bundle_linux-x64_assets.stamp`.
+CI builds start clean and are not affected.
+
 Windows release builds run on the native Windows GitHub Actions job. Do not
 claim a Windows build was verified locally from Linux. A regression test must
 be demonstrated failing for the expected reason before the fix, then passing
