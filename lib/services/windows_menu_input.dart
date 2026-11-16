@@ -134,6 +134,7 @@ class WindowsSendInputDriver implements WindowsKeyboardDriver {
   WindowsSendInputDriver({
     WindowsKeyboardNativeApi? api,
     this.keyHold = const Duration(milliseconds: 80),
+    this.beforePress,
   }) : api = api ?? SystemWindowsKeyboardNativeApi() {
     if (keyHold < Duration.zero) {
       throw ArgumentError.value(keyHold, 'keyHold', 'must not be negative');
@@ -142,6 +143,9 @@ class WindowsSendInputDriver implements WindowsKeyboardDriver {
 
   final WindowsKeyboardNativeApi api;
   final Duration keyHold;
+
+  /// Runs before every key-down. A failure here sends no key at all.
+  final Future<void> Function()? beforePress;
   bool _opened = false;
   bool _closed = false;
 
@@ -180,6 +184,18 @@ class WindowsSendInputDriver implements WindowsKeyboardDriver {
     }
     final normalized = validateWindowsKey(key);
     final virtualKey = windowsVirtualKeyFor(normalized);
+    try {
+      await beforePress?.call();
+    } catch (error, stackTrace) {
+      Error.throwWithStackTrace(_inputError(error), stackTrace);
+    }
+    // The driver may have been closed while the activation was waiting.
+    if (_closed) {
+      throw const WindowsNativeException(
+        WindowsNativeErrorCode.closed,
+        'The Windows keyboard input driver is closed.',
+      );
+    }
     var keyDown = false;
     Object? failure;
     StackTrace? failureStack;
@@ -327,6 +343,7 @@ class SystemWindowsKeyboardNativeApi implements WindowsKeyboardNativeApi {
 
   bool _bound = false;
   late final int Function(int, Pointer<_WindowsInput>, int) _sendInput;
+  late final int Function(int, int) _mapVirtualKey;
   late final Pointer<Void> Function() _getProcessHeap;
   late final Pointer<Void> Function(Pointer<Void>, int, int) _heapAlloc;
   late final int Function(Pointer<Void>, int, Pointer<Void>) _heapFree;
@@ -377,10 +394,13 @@ class SystemWindowsKeyboardNativeApi implements WindowsKeyboardNativeApi {
     try {
       final value = input.cast<_WindowsInput>().ref;
       value.type = 1; // INPUT_KEYBOARD
+      // A real key carries its scan code, and the arrow keys are extended.
+      final extended = virtualKey >= 0x25 && virtualKey <= 0x28;
       value.data.keyboard
         ..wVk = virtualKey
-        ..wScan = 0
-        ..flags = keyDown ? 0 : 0x0002 // KEYEVENTF_KEYUP
+        ..wScan = _mapVirtualKey(virtualKey, 0) & 0xFFFF
+        ..flags = (keyDown ? 0 : 0x0002) | // KEYEVENTF_KEYUP
+            (extended ? 0x0001 : 0) // KEYEVENTF_EXTENDEDKEY
         ..time = 0
         ..extraInfo = Pointer<Void>.fromAddress(0);
       final sent = _sendInput(1, input.cast<_WindowsInput>(), inputSize);
@@ -418,6 +438,8 @@ class SystemWindowsKeyboardNativeApi implements WindowsKeyboardNativeApi {
       _sendInput = user32.lookupFunction<
           Uint32 Function(Uint32, Pointer<_WindowsInput>, Uint32),
           int Function(int, Pointer<_WindowsInput>, int)>('SendInput');
+      _mapVirtualKey = user32.lookupFunction<Uint32 Function(Uint32, Uint32),
+          int Function(int, int)>('MapVirtualKeyW');
       _getProcessHeap = kernel32.lookupFunction<Pointer<Void> Function(),
           Pointer<Void> Function()>('GetProcessHeap');
       _heapAlloc = kernel32.lookupFunction<

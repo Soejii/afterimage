@@ -1,22 +1,8 @@
-import 'package:afterimage/domain/recorder_contracts.dart';
-import 'package:afterimage/domain/setup_models.dart';
-import 'package:afterimage/services/windows_native_backend.dart';
 import 'package:afterimage/services/windows_native_errors.dart';
 import 'package:afterimage/services/windows_window_message_input.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('keyboard backend selects a game-window port without a foreground gate',
-      () async {
-    final backend = WindowsNativeRecorderBackend(platformIsWindows: true);
-    final input = await backend.openMenuInput(InputMode.keyboard);
-    expect(input, isA<WindowsWindowMessageMenuInput>(),
-        reason:
-            'Windows keyboard mode must address GGST instead of the foreground desktop input queue');
-    expect(input, isNot(isA<InputSafetyPort>()));
-    await (input as ClosableMenuInputPort).close();
-  });
-
   test(
       'a key release keeps the original target when focus changes during a tap',
       () async {

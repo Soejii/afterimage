@@ -43,8 +43,8 @@ then follow the matching instructions below. Keep every extracted file together.
 This alpha build is not code-signed, so Windows may show a security warning.
 Only continue if the archive came from the official release page linked above.
 Windows supports **Keyboard** input and an optional virtual controller. The
-keyboard mode posts menu keys directly to GGST's window. It does not type into
-the browser or other foreground application. Controller
+keyboard mode brings GGST to the front and presses the menu keys there. It
+sends no key while another window is active. Controller
 mode creates a separate virtual pad alongside a physical pad;
 it requires a separately installed ViGEmBus driver. See
 [`docs/windows-controller.md`](docs/windows-controller.md).

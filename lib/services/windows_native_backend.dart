@@ -7,7 +7,7 @@ import 'obs_config_discovery.dart';
 import 'obs_websocket_recorder.dart';
 import 'output_organizer.dart';
 import 'windows_menu_input.dart';
-import 'windows_window_message_input.dart';
+import 'windows_game_focus.dart';
 import 'windows_native_errors.dart';
 import 'windows_process_memory.dart';
 import 'windows_replay_monitor.dart';
@@ -37,7 +37,7 @@ class WindowsNativeRecorderBackend
     bool? platformIsWindows,
   })  : memoryFactory = memoryFactory ?? _openWindowsMemorySession,
         keyboardDriverFactory =
-            keyboardDriverFactory ?? WindowsWindowMessageDriver.new,
+            keyboardDriverFactory ?? createWindowsFocusedKeyboardDriver,
         controllerProbe =
             controllerProbe ?? WindowsVirtualControllerReadinessProbe(),
         controllerDriverFactory =
@@ -88,7 +88,7 @@ class WindowsNativeRecorderBackend
       return const NativeBackendReadiness(
         available: true,
         detail:
-            'Game-window keyboard messages are available. GGST must accept the menu keys before recording can progress.',
+            'Keyboard input is available. Afterimage brings GGST to the front before each menu key.',
       );
     }
 
@@ -131,7 +131,7 @@ class WindowsNativeRecorderBackend
         code: null,
         title: 'Keyboard input',
         detail:
-            'Keyboard messages target GGST directly. Background acceptance by the game remains unverified.',
+            'Afterimage brings GGST to the front and presses the menu keys. No key is sent while another window is active.',
         ready: true,
       ));
     }
@@ -152,7 +152,7 @@ class WindowsNativeRecorderBackend
         driver: controllerDriverFactory(),
       );
     }
-    return WindowsWindowMessageMenuInput(
+    return WindowsFocusedKeyboardMenuInput(
       driver: keyboardDriverFactory(),
     );
   }
