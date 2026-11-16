@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -55,6 +56,180 @@ Future<void> _tapKey(WidgetTester tester, String key) async {
 void main() {
   Map<String, Object?> step13() => decodeObject(
       File('test/support/step13/elphelt_2h.json').readAsStringSync());
+  Map<String, Object?> step14() => decodeObject(
+      File('test/support/step14/elphelt_2h_reference.json').readAsStringSync());
+
+  testWidgets('card header shows reference hit count and rate', (tester) async {
+    await _pumpLedger(tester, step14(), width: 1400, height: 1000);
+    expect(find.byKey(const ValueKey('card-reference-c14')), findsOneWidget);
+    expect(find.text('High-level Ky: 9 times · hit 2 (22%)'), findsOneWidget);
+  });
+
+  testWidgets('spot comparison shows shares and small sample', (tester) async {
+    await _pumpLedger(tester, step14(), width: 1400, height: 1000);
+    expect(find.byKey(const ValueKey('spot-reference')), findsOneWidget);
+    final walk = find.byKey(const ValueKey('reference-pick-walk forward'));
+    expect(_textWithin(tester, walk), contains('5 of 14'));
+    expect(_textWithin(tester, walk), contains('1 of 4'));
+    expect(
+        find.byKey(const ValueKey('reference-small-sample')), findsOneWidget);
+  });
+
+  testWidgets('spot comparison is compact at desktop width', (tester) async {
+    await _pumpLedger(tester, step14(), width: 1400, height: 1000);
+    final spot = find.byKey(const ValueKey('spot-reference'));
+    expect(tester.getSize(spot).height, lessThanOrEqualTo(260));
+    expect(
+        find.descendant(
+            of: spot, matching: find.byKey(const ValueKey('reference-legend'))),
+        findsOneWidget);
+    final row = find.byKey(const ValueKey('reference-pick-walk forward'));
+    final you =
+        find.descendant(of: row, matching: find.textContaining('5 of 14'));
+    final other = find.descendant(of: row, matching: find.text('1 of 4'));
+    expect(tester.getTopLeft(you).dy, tester.getTopLeft(other).dy);
+    final bars = tester
+        .widgetList<LinearProgressIndicator>(find.descendant(
+            of: row, matching: find.byType(LinearProgressIndicator)))
+        .toList();
+    expect(bars, hasLength(2));
+    expect(bars[0].color, AfterimageTheme.accent);
+    expect(bars[1].color, isNot(AfterimageTheme.accent));
+    expect(bars[1].color, isNot(AfterimageTheme.accentStrong));
+  });
+
+  testWidgets('spot comparison stacks without overflow at 700px',
+      (tester) async {
+    await _pumpLedger(tester, step14(), width: 700, height: 1000);
+    final row = find.byKey(const ValueKey('reference-pick-walk forward'));
+    final you =
+        find.descendant(of: row, matching: find.textContaining('5 of 14'));
+    final other = find.descendant(of: row, matching: find.text('1 of 4'));
+    expect(tester.getTopLeft(you).dy, lessThan(tester.getTopLeft(other).dy));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('reference-only pick shows zero for the user', (tester) async {
+    await _pumpLedger(tester, step14(), width: 1400, height: 1000);
+    expect(
+        _textWithin(tester, find.byKey(const ValueKey('reference-pick-f.S'))),
+        contains('0 of 14'));
+  });
+
+  testWidgets('switching spots changes the reference picks', (tester) async {
+    await _pumpLedger(tester, step14(), width: 1400, height: 1000);
+    await _tapKey(tester, 'spot-chip-1');
+    expect(find.byKey(const ValueKey('reference-pick-stand block')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('reference-pick-c.S')), findsOneWidget);
+    expect(find.byKey(const ValueKey('reference-pick-f.S')), findsNothing);
+  });
+
+  for (final width in [1400.0, 700.0]) {
+    testWidgets('damage reference panel and answers fit at $width',
+        (tester) async {
+      await _pumpLedger(tester, step14(),
+          width: width, height: 1000, tab: 'damage');
+      expect(find.byKey(const ValueKey('reference-panel')), findsOneWidget);
+      expect(find.text('You: 220 spots, hit 57 (26%)'), findsOneWidget);
+      expect(
+          find.text('High-level Ky: 169 spots, hit 40 (24%)'), findsOneWidget);
+      for (final text in ['block', 'walk forward', '2P']) {
+        expect(find.byKey(ValueKey('reference-answer-$text')), findsOneWidget);
+      }
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('reference-panel')),
+              matching: find.byKey(const ValueKey('reference-legend'))),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('reference-gap-block')), findsOneWidget);
+      expect(find.byKey(const ValueKey('reference-gap-2P')), findsNothing);
+      final gap = tester
+          .widget<Text>(find.byKey(const ValueKey('reference-gap-block')));
+      expect(gap.style?.color, AfterimageTheme.failed);
+      expect(gap.data, '40%');
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+      'reference ledger follows own category order and appends new categories',
+      (tester) async {
+    final json = step14();
+    json['ledger'] = {
+      'total_damage': 1000,
+      'replays': 15,
+      'categories': [
+        {'key': 'own', 'label': 'Own only', 'damage': 300, 'share': .3},
+        {'key': 'pressing', 'label': 'Pressing', 'damage': 700, 'share': .7},
+        {'key': 'tiny', 'label': 'Tiny', 'damage': 1, 'share': .004},
+      ],
+    };
+    await _pumpLedger(tester, json, width: 1400, height: 1000, tab: 'damage');
+    final own = find.byKey(const ValueKey('reference-category-own'));
+    final pressing = find.byKey(const ValueKey('reference-category-pressing'));
+    final referenceOnly =
+        find.byKey(const ValueKey('reference-category-throw'));
+    expect(tester.getTopLeft(own).dy, lessThan(tester.getTopLeft(pressing).dy));
+    expect(tester.getTopLeft(pressing).dy,
+        lessThan(tester.getTopLeft(referenceOnly).dy));
+    expect(_textWithin(tester, pressing), contains('70%'));
+    expect(_textWithin(tester, pressing), contains('60%'));
+    expect(find.byKey(const ValueKey('reference-category-tiny')), findsNothing);
+  });
+
+  testWidgets('old step13 list shows no reference UI', (tester) async {
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    for (final key in [
+      'reference-notice',
+      'card-reference-c14',
+      'spot-reference',
+      'reference-small-sample',
+      'reference-panel',
+      'reference-after-block'
+    ]) {
+      expect(find.byKey(ValueKey(key)), findsNothing);
+    }
+  });
+
+  testWidgets('reference list shows notice and badge from repository',
+      (tester) async {
+    final root = Directory.systemTemp.createTempSync('reference-list-');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final json = step14()..['is_reference'] = true;
+    final file =
+        File('${root.path}/out/batch-reference/Elphelt/sequences.json');
+    file.createSync(recursive: true);
+    file.writeAsStringSync(jsonEncode(json));
+    final repository = NotesRepository(finderDirectory: root.path);
+    final previews = await tester.runAsync(repository.list);
+    final preview = previews!.single;
+    final data = await tester.runAsync(() => repository.read(preview));
+    final fake = _FakeNotesRepository(preview, data!);
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+        _app(NotesListPage(repository: fake, onOpen: (_) {}, onClose: () {})));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('reference-badge-batch-reference')),
+        findsOneWidget);
+    final title = find.text('vs Elphelt Valentine');
+    final badge = find.byKey(const ValueKey('reference-badge-batch-reference'));
+    expect(tester.getCenter(badge).dy, closeTo(tester.getCenter(title).dy, 1));
+    expect(
+        tester.getTopLeft(badge).dx, greaterThan(tester.getTopRight(title).dx));
+    await tester.pumpWidget(_app(NotesPage(
+        repository: fake,
+        preview: preview,
+        onBack: () {},
+        playerFactory: (_) => _FakeClipSession())));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('reference-notice')), findsOneWidget);
+    expect(
+        find.text(
+            'High-level Ky reference set. Not counted in your own history.'),
+        findsOneWidget);
+  });
 
   testWidgets('grid stays within its card and scrolls only on narrow screens',
       (tester) async {

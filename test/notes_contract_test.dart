@@ -9,6 +9,56 @@ import 'package:afterimage/services/notes_repository.dart';
 import 'support/ledger_test_data.dart';
 
 void main() {
+  test('reference fields tolerate missing and wrong-typed data', () {
+    final document = SequenceDocument.fromJson({
+      'schema': 1,
+      'is_reference': 'true',
+      'reference': {
+        'replays': '15',
+        'batches': [1, 'batch'],
+        'ledger': false,
+        'after_block': {
+          'own': {
+            'answers': [
+              false,
+              {'text': 'block', 'count': 2}
+            ]
+          },
+          'reference': 'bad'
+        },
+      },
+      'cards': [
+        {
+          'reference': {
+            'count': 9,
+            'hits': false,
+            'spots': [
+              {
+                'kind': "player's turn",
+                'count': 4,
+                'player_rows': [
+                  false,
+                  {'name': 'walk forward', 'count': 1}
+                ]
+              }
+            ]
+          }
+        }
+      ],
+    });
+    expect(document.isReference, isFalse);
+    expect(document.reference!.replays, isNull);
+    expect(document.reference!.batches, ['batch']);
+    expect(document.reference!.ledger, isNull);
+    expect(document.reference!.afterBlock!.own!.answers.single.count, 2);
+    expect(document.reference!.afterBlock!.reference, isNull);
+    expect(document.cards.single.reference!.hits, isNull);
+    expect(document.cards.single.reference!.spots.single.playerRows.single.name,
+        'walk forward');
+    expect(SequenceDocument.fromJson({'schema': 1, 'reference': []}).reference,
+        isNull);
+  });
+
   test('trend parses sets, independent comparisons and verbatim card text', () {
     final document = SequenceDocument.fromJson(trendDocument());
     final trend = document.trend!;

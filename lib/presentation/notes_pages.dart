@@ -9,6 +9,7 @@ import '../domain/notes_models.dart';
 import '../services/notes_repository.dart';
 import 'widgets/move_card_views.dart';
 import 'widgets/notes_clip_player.dart';
+import 'widgets/reference_views.dart';
 import 'widgets/status_surface.dart';
 
 // The sequence list: the finder's situations per opponent, with Save and Save
@@ -153,11 +154,26 @@ class _NotesListTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 5),
-                  Text(
-                    'vs ${preview.opponent}',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Row(
+                    children: [
+                      Flexible(
+                          child: Text(
+                        'vs ${preview.opponent}',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )),
+                      if (preview.isReference) ...[
+                        const SizedBox(width: 8),
+                        Chip(
+                          key:
+                              ValueKey('reference-badge-${preview.batchLabel}'),
+                          label: const Text('Reference'),
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 5),
                   Text(
@@ -357,6 +373,12 @@ class _NotesPageState extends State<NotesPage> {
                         player: data.document.player,
                         cards: data.document.cards,
                         onCard: _revealCard),
+                  if (!data.document.isReference &&
+                      data.document.reference != null)
+                    ReferencePanel(
+                        player: data.document.player ?? 'player',
+                        reference: data.document.reference!,
+                        ledger: data.document.ledger),
                   if (data.document.trend case final trend?)
                     _TrendPanel(trend: trend),
                 ] else
@@ -388,8 +410,9 @@ class _NotesPageState extends State<NotesPage> {
     final document = data.document;
     final events = document.cards.where((card) => card.isEventCard).length;
     final spots = document.cards.length - events;
-    final damage =
-        (document.ledger?.totalDamage ?? 0) > 0 || document.trend != null;
+    final damage = (document.ledger?.totalDamage ?? 0) > 0 ||
+        document.trend != null ||
+        (!document.isReference && document.reference != null);
     if (events == 0 && !damage) return const [];
     return [
       Align(
@@ -674,6 +697,16 @@ class _NotesPageState extends State<NotesPage> {
                     ),
                 ],
               ),
+              if (!data.document.isReference &&
+                  card.reference != null &&
+                  (card.reference!.count ?? 0) > 0)
+                Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                        'High-level ${data.document.player ?? 'player'}: ${card.reference!.count} times${card.reference!.hits == null ? '' : ' · hit ${card.reference!.hits} (${(100 * card.reference!.hits! / card.reference!.count!).round()}%)'}',
+                        key: ValueKey('card-reference-${card.id}'),
+                        style:
+                            theme.textTheme.bodySmall?.copyWith(color: muted))),
               if (!collapsed && moves[card.moveId] != null)
                 Padding(
                   key: ValueKey('move-strip-${card.id}'),
@@ -796,6 +829,9 @@ class _NotesPageState extends State<NotesPage> {
                   _ReadSummaryView(
                       key: ValueKey('read-view-${card.id}'),
                       summary: summary,
+                      reference:
+                          data.document.isReference ? null : card.reference,
+                      referencePlayer: data.document.player ?? 'player',
                       moves: moves,
                       player: data.document.playerName ??
                           data.document.player ??
@@ -1039,6 +1075,15 @@ class _PageNotices extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (document.isReference) ...[
+          StatusSurface(
+              key: const ValueKey('reference-notice'),
+              tone: StatusTone.blocked,
+              icon: Icons.info_outline,
+              child: Text(
+                  'High-level ${document.player ?? 'player'} reference set. Not counted in your own history.')),
+          const SizedBox(height: 12),
+        ],
         if (document.warnings.isNotEmpty) ...[
           StatusSurface(
             tone: StatusTone.blocked,
@@ -1494,12 +1539,16 @@ class _ReadSummaryView extends StatefulWidget {
       this.moves = const {},
       required this.player,
       required this.opponent,
+      this.reference,
+      required this.referencePlayer,
       required this.onWatch});
 
   final SituationSummary summary;
   final Map<String, MoveCard> moves;
   final String player;
   final String opponent;
+  final CardReference? reference;
+  final String referencePlayer;
   final void Function(List<String>, String, String) onWatch;
 
   @override
@@ -1636,6 +1685,11 @@ class _ReadSummaryViewState extends State<_ReadSummaryView> {
                 ],
               ),
             ),
+          if (widget.reference case final reference?)
+            SpotReferenceView(
+                player: widget.referencePlayer,
+                spot: spot,
+                reference: reference),
           if (spot.opponentRows.isNotEmpty && spot.playerRows.isNotEmpty)
             _table(context, spot)
           else if (spot.playerRows.isNotEmpty)

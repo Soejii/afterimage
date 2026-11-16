@@ -58,6 +58,7 @@ class NotesRepository {
             flaggedCount: document.cards.where((card) => card.flagged).length,
             createdAt: document.createdAt,
             modifiedAt: stat.modified,
+            isReference: document.isReference,
           ),
         );
       }

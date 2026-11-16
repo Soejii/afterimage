@@ -15,6 +15,7 @@ class NotePreview {
     required this.flaggedCount,
     required this.createdAt,
     required this.modifiedAt,
+    this.isReference = false,
   });
 
   final String batchLabel;
@@ -25,6 +26,7 @@ class NotePreview {
   final int flaggedCount;
   final DateTime? createdAt;
   final DateTime? modifiedAt;
+  final bool isReference;
 
   DateTime? get sortDate => createdAt ?? modifiedAt;
 }
@@ -54,6 +56,8 @@ class SequenceDocument {
     this.ledger,
     this.trend,
     this.moves = const {},
+    this.isReference = false,
+    this.reference,
   });
 
   factory SequenceDocument.fromJson(Map<String, Object?> json) {
@@ -62,6 +66,8 @@ class SequenceDocument {
       throw FormatException('Unknown sequence list schema: $schema');
     }
     return SequenceDocument(
+      isReference: json['is_reference'] == true,
+      reference: DocumentReference.parse(json['reference']),
       trend: SequenceTrend.parse(json['trend']),
       moves: {
         for (final entry in (_readMap(json['moves']) ?? {}).entries)
@@ -102,6 +108,8 @@ class SequenceDocument {
   final List<String> focus;
   final DamageLedger? ledger;
   final SequenceTrend? trend;
+  final bool isReference;
+  final DocumentReference? reference;
 
   /// Move card id (the vault note's name, `Ky 2H`) to the note behind it.
   final Map<String, MoveCard> moves;
@@ -188,9 +196,11 @@ class SequenceCard {
     this.eventRead = const [],
     this.moveId,
     this.moveIds = const [],
+    this.reference,
   });
 
   factory SequenceCard.fromJson(Map<String, Object?> json) => SequenceCard(
+        reference: CardReference.parse(json['reference']),
         answers: [
           for (final value in _newMaps(json['answers']))
             SequenceAnswer.fromJson(value),
@@ -254,6 +264,7 @@ class SequenceCard {
   final String? reversalNote;
   final String? trendText;
   final SituationRead? read;
+  final CardReference? reference;
   final bool flagged;
   final int damage;
   final int hits;
@@ -1067,6 +1078,7 @@ class CardsTrend {
 class DamageLedger {
   DamageLedger.fromJson(Map<String, Object?> json)
       : totalDamage = _count(json['total_damage']),
+        damagePerReplay = _number(json['damage_per_replay']),
         replays = _count(json['replays']),
         coveredByCards = _count(json['covered_by_cards']),
         categories = [
@@ -1075,6 +1087,7 @@ class DamageLedger {
         ];
 
   final int totalDamage;
+  final double? damagePerReplay;
   final int replays;
   final int coveredByCards;
   final List<LedgerCategory> categories;
@@ -1087,6 +1100,7 @@ class LedgerCategory {
         damage = _count(json['damage']),
         events = _count(json['events']),
         share = _number(json['share']) ?? 0,
+        damagePerReplay = _number(json['damage_per_replay']),
         cards = _typedStrings(json['cards']),
         starters = [
           for (final value in _newMaps(json['starters']))
@@ -1102,6 +1116,7 @@ class LedgerCategory {
   final int damage;
   final int events;
   final double share;
+  final double? damagePerReplay;
   final List<String> cards;
   final List<LedgerStarter> starters;
   final List<LedgerMove> hisMoves;
@@ -1161,6 +1176,125 @@ class SequenceAnswer {
   final int pressure;
   final int neutral;
   final int damage;
+}
+
+class DocumentReference {
+  DocumentReference.fromJson(Map<String, Object?> json)
+      : replays = _integerReference(json['replays']),
+        batches = _typedStrings(json['batches']),
+        ledger = _referenceLedger(json['ledger']),
+        afterBlock = ReferenceAfterBlock.parse(json['after_block']);
+
+  static DocumentReference? parse(Object? value) {
+    final map = _readMap(value);
+    return map == null ? null : DocumentReference.fromJson(map);
+  }
+
+  final int? replays;
+  final List<String> batches;
+  final DamageLedger? ledger;
+  final ReferenceAfterBlock? afterBlock;
+}
+
+DamageLedger? _referenceLedger(Object? value) {
+  final map = _readMap(value);
+  return map == null ? null : DamageLedger.fromJson(map);
+}
+
+int? _integerReference(Object? value) =>
+    value is num && value.isFinite ? value.toInt() : null;
+
+class ReferenceAfterBlock {
+  ReferenceAfterBlock.fromJson(Map<String, Object?> json)
+      : own = ReferenceAnswers.parse(json['own']),
+        reference = ReferenceAnswers.parse(json['reference']);
+
+  static ReferenceAfterBlock? parse(Object? value) {
+    final map = _readMap(value);
+    return map == null ? null : ReferenceAfterBlock.fromJson(map);
+  }
+
+  final ReferenceAnswers? own;
+  final ReferenceAnswers? reference;
+}
+
+class ReferenceAnswers {
+  ReferenceAnswers.fromJson(Map<String, Object?> json)
+      : count = _integerReference(json['count']),
+        hits = _integerReference(json['hits']),
+        answers = [
+          for (final item in _readMaps(json['answers']))
+            SequenceAnswer.fromJson(item),
+        ];
+
+  static ReferenceAnswers? parse(Object? value) {
+    final map = _readMap(value);
+    return map == null ? null : ReferenceAnswers.fromJson(map);
+  }
+
+  final int? count;
+  final int? hits;
+  final List<SequenceAnswer> answers;
+}
+
+class CardReference {
+  CardReference.fromJson(Map<String, Object?> json)
+      : replays = _integerReference(json['replays']),
+        count = _integerReference(json['count']),
+        hits = _integerReference(json['hits']),
+        damage = _integerReference(json['damage']),
+        decided = _integerReference(json['decided']),
+        answers = [
+          for (final item in _readMaps(json['answers']))
+            SequenceAnswer.fromJson(item),
+        ],
+        spots = [
+          for (final item in _readMaps(json['spots']))
+            ReferenceSpot.fromJson(item),
+        ];
+
+  static CardReference? parse(Object? value) {
+    final map = _readMap(value);
+    return map == null ? null : CardReference.fromJson(map);
+  }
+
+  final int? replays;
+  final int? count;
+  final int? hits;
+  final int? damage;
+  final int? decided;
+  final List<SequenceAnswer> answers;
+  final List<ReferenceSpot> spots;
+}
+
+class ReferenceSpot {
+  ReferenceSpot.fromJson(Map<String, Object?> json)
+      : kind = _text(json['kind']),
+        count = _integerReference(json['count']),
+        playerRows = [
+          for (final item in _readMaps(json['player_rows']))
+            ReferenceRow.fromJson(item),
+        ],
+        opponentRows = [
+          for (final item in _readMaps(json['opponent_rows']))
+            ReferenceRow.fromJson(item),
+        ];
+
+  final String? kind;
+  final int? count;
+  final List<ReferenceRow> playerRows;
+  final List<ReferenceRow> opponentRows;
+}
+
+class ReferenceRow {
+  ReferenceRow.fromJson(Map<String, Object?> json)
+      : name = _text(json['name']),
+        count = _integerReference(json['count']),
+        hit = _integerReference(json['hit']);
+
+  final String? name;
+  final int? count;
+  final int? hit;
 }
 
 class SequenceFlag {
