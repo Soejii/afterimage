@@ -56,7 +56,7 @@ Version `0.3.4+10` is an alpha desktop release:
   its row, and saves the opponent's inputs for a sequence (Save) or for every
   option after one lead-in (Save mixup) as StriveLabs `.txt` recordings in the
   batch folder and, when StriveLabs is installed, its `recordings` folder.
-  The local, unreleased sequence UI adds an expandable damage ledger and up to
+  The sequence UI adds an expandable damage ledger and up to
   three focus cards, with other flagged situations grouped below. Cards can also show answer
   outcomes and a secondary reversal note. Event cards group other ways the player
   got hit and start collapsed unless focused. Ledger category links expand and
@@ -65,7 +65,7 @@ Version `0.3.4+10` is an alpha desktop release:
   A situation card's Read tab shows one headline verdict, a who-beats-who grid
   that fits the card, solid marks for results that hold at any spacing and
   outlined marks for frame-only results, what happened in each pairing, and
-  Watch links that open the matching clips. Also local and unreleased.
+  Watch links that open the matching clips.
   Older sequence files keep their layout.
   Loading those files into the training dummy through StriveLabs is unverified;
   the Windows entry points remain hidden.
