@@ -1072,7 +1072,8 @@ class RecorderController extends ChangeNotifier {
     _finderError = null;
     notifyListeners();
     try {
-      await finder.startBatch(batchDirectory);
+      await finder.startBatch(batchDirectory,
+          reference: _options.referenceBatch);
       await refreshFinderStatus();
     } on Object catch (error) {
       // Finder startup is auxiliary. The completed recording remains the

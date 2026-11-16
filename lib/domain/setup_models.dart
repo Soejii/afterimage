@@ -167,6 +167,7 @@ class RecordingOptions {
     this.inputMode = InputMode.keyboard,
     this.outputDirectory = '',
     this.captureFrameData = false,
+    this.referenceBatch = false,
     this.screenGuardEnabled = false,
   });
 
@@ -176,6 +177,7 @@ class RecordingOptions {
   final InputMode inputMode;
   final String outputDirectory;
   final bool captureFrameData;
+  final bool referenceBatch;
   final bool screenGuardEnabled;
 
   RecordingOptions copyWith({
@@ -185,6 +187,7 @@ class RecordingOptions {
     InputMode? inputMode,
     String? outputDirectory,
     bool? captureFrameData,
+    bool? referenceBatch,
     bool? screenGuardEnabled,
   }) {
     return RecordingOptions(
@@ -194,6 +197,7 @@ class RecordingOptions {
       inputMode: inputMode ?? this.inputMode,
       outputDirectory: outputDirectory ?? this.outputDirectory,
       captureFrameData: captureFrameData ?? this.captureFrameData,
+      referenceBatch: referenceBatch ?? this.referenceBatch,
       screenGuardEnabled: screenGuardEnabled ?? this.screenGuardEnabled,
     );
   }

@@ -39,7 +39,7 @@ class LinuxFinder implements FinderPort {
   bool get available => _isLinux && File(scriptPath).existsSync();
 
   @override
-  Future<void> startBatch(String batchFolder) async {
+  Future<void> startBatch(String batchFolder, {bool reference = false}) async {
     if (!available) {
       throw StateError('The notes finder is not available on this computer.');
     }
@@ -53,6 +53,7 @@ class LinuxFinder implements FinderPort {
       '19',
       '/usr/bin/python3',
       scriptPath,
+      if (reference) '--reference',
       batchFolder,
     ].map(_shellQuote).join(' ');
     final shellCommand = '$command > ${_shellQuote(logPath)} 2>&1';

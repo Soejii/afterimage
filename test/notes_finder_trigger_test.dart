@@ -10,9 +10,11 @@ import 'package:afterimage/domain/replay_batch.dart';
 import 'package:afterimage/domain/setup_models.dart';
 import 'package:afterimage/presentation/recorder_controller.dart';
 import 'package:afterimage/presentation/views/done_view.dart';
+import 'package:afterimage/presentation/views/ready_view.dart';
 import 'package:afterimage/services/batch_output_directory.dart';
 import 'package:afterimage/services/notes_repository.dart';
 import 'package:afterimage/services/output_directory_preflight.dart';
+import 'package:afterimage/services/recorder_preferences.dart';
 
 void main() {
   late Directory root;
@@ -36,7 +38,99 @@ void main() {
 
     expect(result?.outcome, ReplayBatchOutcome.completed);
     expect(finder.startedFolders.single, '${root.path}/batch-run');
+    expect(finder.references.single, isFalse);
     expect(controller.error, isNull);
+  });
+
+  test('passes the reference batch option to the finder', () async {
+    final finder = _FakeFinder();
+    final controller = _controller(root, finder);
+    addTearDown(controller.dispose);
+    await controller.refreshReadiness();
+    controller.updateOptions(controller.options.copyWith(referenceBatch: true));
+    await controller.startBatch();
+    await _waitUntil(() => finder.startedFolders.isNotEmpty);
+    expect(finder.references.single, isTrue);
+  });
+
+  testWidgets('reference switch requires capture and controls finder flag',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final finder = _FakeFinder();
+    final controller = _controller(root, finder, capture: false);
+    addTearDown(controller.dispose);
+    await controller.refreshReadiness();
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => ReadyView(
+          controller: controller, isRefreshing: false, onRefresh: () async {}),
+    ))));
+    await tester.tap(find.byKey(const ValueKey('advanced-options')));
+    await tester.pumpAndSettle();
+    final reference = find.byKey(const ValueKey('reference-batch'));
+    expect(tester.widget<SwitchListTile>(reference).value, isFalse);
+    expect(tester.widget<SwitchListTile>(reference).onChanged, isNull);
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('capture-frame-data')));
+    await tester.tap(find.byKey(const ValueKey('capture-frame-data')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(reference).onChanged, isNotNull);
+    await tester.ensureVisible(reference);
+    await tester.tap(reference);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(reference).value, isTrue);
+    await tester.runAsync(() async {
+      await controller.startBatch();
+      await _waitUntil(() => finder.references.length == 1);
+    });
+    expect(finder.references.single, isTrue);
+    controller.clearResult();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(reference);
+    await tester.tap(reference);
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await controller.startBatch();
+      await _waitUntil(() => finder.references.length == 2);
+    });
+    expect(finder.references.last, isFalse);
+    controller.clearResult();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(reference);
+    await tester.tap(reference);
+    await tester.pumpAndSettle();
+    final capture = find.byKey(const ValueKey('capture-frame-data'));
+    await tester.ensureVisible(capture);
+    await tester.tap(capture);
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(reference).value, isFalse);
+    expect(tester.widget<SwitchListTile>(reference).onChanged, isNull);
+  });
+
+  test('reference batch is not saved or restored between launches', () async {
+    Map<String, Object?> stored = {};
+    final preferences = RecorderPreferences(
+      read: () async => stored,
+      write: (values) async => stored = values,
+    );
+    final first = RecorderController(
+      backend: _CaptureBackend(),
+      preferences: preferences,
+    );
+    first.updateOptions(
+        first.options.copyWith(captureFrameData: true, referenceBatch: true));
+    await preferences.flush();
+    expect(stored, isNot(contains('referenceBatch')));
+    first.dispose();
+    final second = RecorderController(
+        backend: _CaptureBackend(), preferences: preferences);
+    addTearDown(second.dispose);
+    await second.initialize();
+    expect(second.options.captureFrameData, isTrue);
+    expect(second.options.referenceBatch, isFalse);
   });
 
   test('does not start on Windows, without captures, or without the finder',
@@ -237,10 +331,12 @@ class _FakeFinder implements FinderPort {
   final bool available;
   final Object? failure;
   final List<String> startedFolders = <String>[];
+  final List<bool> references = <bool>[];
 
   @override
-  Future<void> startBatch(String batchFolder) async {
+  Future<void> startBatch(String batchFolder, {bool reference = false}) async {
     if (failure != null) throw failure!;
+    references.add(reference);
     startedFolders.add(batchFolder);
   }
 }

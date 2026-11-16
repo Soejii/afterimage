@@ -182,7 +182,11 @@ class _AdvancedOptions extends StatelessWidget {
               value: options.captureFrameData,
               onChanged: controller.frameCaptureSupported
                   ? (value) => controller.updateOptions(
-                        options.copyWith(captureFrameData: value ?? false),
+                        options.copyWith(
+                          captureFrameData: value ?? false,
+                          referenceBatch:
+                              value == true && options.referenceBatch,
+                        ),
                       )
                   : null,
               title: const Text('Save frame data for analysis'),
@@ -194,6 +198,20 @@ class _AdvancedOptions extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+            ),
+            SwitchListTile(
+              key: const ValueKey('reference-batch'),
+              value: options.referenceBatch && options.captureFrameData,
+              onChanged: options.captureFrameData
+                  ? (value) => controller.updateOptions(
+                        options.copyWith(referenceBatch: value),
+                      )
+                  : null,
+              title: const Text('High-level reference replays'),
+              subtitle: const Text(
+                  'Replays of other players. Kept out of your own history.'),
               contentPadding: EdgeInsets.zero,
               dense: true,
             ),
