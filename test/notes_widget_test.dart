@@ -8,14 +8,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:afterimage/app/theme.dart';
 import 'package:afterimage/domain/notes_models.dart';
 import 'package:afterimage/presentation/notes_pages.dart';
+import 'package:afterimage/presentation/widgets/move_card_views.dart';
 import 'package:afterimage/presentation/widgets/notes_clip_player.dart';
 import 'package:afterimage/services/notes_repository.dart';
 
 import 'support/ledger_test_data.dart';
 
 Future<void> _pumpLedger(WidgetTester tester, Map<String, Object?> json,
-    {double width = 1280}) async {
-  await tester.binding.setSurfaceSize(Size(width, 900));
+    {double width = 1280, double height = 900, String? tab}) async {
+  await tester.binding.setSurfaceSize(Size(width, height));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   final preview = _preview(directory: '/out/batch-a/I-No');
   await tester.pumpWidget(_app(NotesPage(
@@ -30,6 +31,16 @@ Future<void> _pumpLedger(WidgetTester tester, Map<String, Object?> json,
   )));
   await _pumpUntilFound(tester, find.byKey(const ValueKey('notes-page')));
   await tester.pumpAndSettle();
+  if (tab != null) await _openTab(tester, tab);
+}
+
+/// Opens a page tab (`spots`, `hits`, `damage`) when the page shows it.
+Future<void> _openTab(WidgetTester tester, String tab) async {
+  final finder = find.byKey(ValueKey('tab-$tab'));
+  if (finder.evaluate().isEmpty) return;
+  await tester.ensureVisible(finder);
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
 }
 
 Future<void> _tapKey(WidgetTester tester, String key) async {
@@ -42,6 +53,163 @@ Future<void> _tapKey(WidgetTester tester, String key) async {
 }
 
 void main() {
+  Map<String, Object?> step13() => decodeObject(
+      File('test/support/step13/elphelt_2h.json').readAsStringSync());
+
+  testWidgets('grid stays within its card and scrolls only on narrow screens',
+      (tester) async {
+    for (final width in [1400.0, 700.0]) {
+      await _pumpLedger(tester, step13(), width: width, height: 1000);
+      await _tapKey(tester, 'toggle-unseen');
+      final table = find.byKey(const ValueKey('rps-table'));
+      final card = find.byKey(const ValueKey('sequence-card-c14'));
+      final scroll = find.ancestor(
+          of: table,
+          matching: find.byWidgetPredicate((w) =>
+              w is SingleChildScrollView &&
+              w.scrollDirection == Axis.horizontal));
+      if (width == 1400) {
+        expect(tester.getSize(table).width,
+            lessThanOrEqualTo(tester.getSize(card).width),
+            reason: 'grid must not be wider than its card');
+        expect(scroll, findsNothing, reason: 'wide grid must not scroll');
+      } else {
+        expect(scroll, findsOneWidget, reason: 'narrow grid must scroll');
+      }
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('headline answer remains visible before showing unseen options',
+      (tester) async {
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    expect(find.byKey(const ValueKey('row-label-5P')), findsOneWidget);
+  });
+
+  testWidgets('all player row labels have equal height', (tester) async {
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'toggle-unseen');
+    final labels = find.byWidgetPredicate((w) =>
+        w.key is ValueKey<String> &&
+        (w.key! as ValueKey<String>).value.startsWith('row-label-'));
+    final heights = labels
+        .evaluate()
+        .map((e) => tester.getSize(find.byWidget(e.widget)).height)
+        .toSet();
+    expect(heights, hasLength(1));
+  });
+
+  testWidgets('paper wins and rule wins have distinct icons and legend entries',
+      (tester) async {
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'toggle-unseen');
+    final paper = tester
+        .widget<Icon>(find.byKey(const ValueKey('cell-proof-5P|f.S-paper')));
+    final rule = tester.widget<Icon>(
+        find.byKey(const ValueKey('cell-proof-block|Juganto Da Parfeo-rule')));
+    expect(paper.icon, Icons.check_circle_outline_rounded);
+    expect(rule.icon, Icons.check_circle_rounded);
+    expect(find.text('on paper win'), findsOneWidget);
+    expect(find.text('proven win'), findsOneWidget);
+  });
+
+  testWidgets('unsettled walk forward versus f.S displays hit 3',
+      (tester) async {
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    expect(
+        _textWithin(
+            tester, find.byKey(const ValueKey('cell-walk forward|f.S-open'))),
+        contains('hit 3'));
+  });
+
+  testWidgets('Watch lists exactly c14-s19 and Show all restores 33 clips',
+      (tester) async {
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    final disproved = find.byKey(const ValueKey('disproved-2P|f.S'));
+    final watch = find.descendant(of: disproved, matching: find.text('Watch'));
+    await tester.ensureVisible(watch);
+    await tester.tap(watch);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('clip-filter-c14')), findsOneWidget);
+    expect(_textWithin(tester, find.byKey(const ValueKey('clip-filter-c14'))),
+        contains('Showing 1 of 33 clips: 2P vs f.S'));
+    expect(find.byKey(const ValueKey('reversal-note-c14')), findsNothing);
+    expect(find.byKey(const ValueKey('answers-c14')), findsNothing);
+    expect(find.textContaining('What Elphelt did before 2H:'), findsNothing);
+    expect(find.byKey(const ValueKey('save-mixup-c14-0')), findsNothing);
+    final sequences = find.byWidgetPredicate((w) =>
+        w.key is ValueKey<String> &&
+        (w.key! as ValueKey<String>).value.startsWith('sequence-c14-s'));
+    expect(sequences, findsOneWidget,
+        reason: 'Watch must list exactly c14-s19');
+    expect(find.byKey(const ValueKey('sequence-c14-s19')), findsOneWidget);
+    await _tapKey(tester, 'clip-filter-clear-c14');
+    expect(sequences, findsNWidgets(33));
+    expect(find.byKey(const ValueKey('answers-c14')), findsOneWidget);
+    expect(find.textContaining('What Elphelt did before 2H:'), findsOneWidget);
+  });
+
+  testWidgets('context uses character names and column bars sort by frequency',
+      (tester) async {
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    final text =
+        _textWithin(tester, find.byKey(const ValueKey('read-summary')));
+    expect(text, contains('Where: far 13 · close 1 · Ky cornered 7'));
+    expect(text, isNot(contains('player cornered')));
+    expect(find.byKey(const ValueKey('opponent-strip')), findsNothing);
+    final first = find.byKey(const ValueKey('opponent-bar-f.S'));
+    expect(first, findsOneWidget);
+    expect(
+        tester.widget<LinearProgressIndicator>(first).value, closeTo(.5, .001));
+    final bar = find.byKey(const ValueKey('opponent-bar-5H'));
+    expect(tester.getTopLeft(first).dx, lessThan(tester.getTopLeft(bar).dx));
+    final label = find.byKey(const ValueKey('row-label-2P'));
+    expect(tester.getSize(label).width, 250);
+  });
+
+  testWidgets('spot chips and unread count account for all 33 occurrences',
+      (tester) async {
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    expect(_textWithin(tester, find.byKey(const ValueKey('spot-chip-0'))),
+        contains('14 times'));
+    expect(_textWithin(tester, find.byKey(const ValueKey('spot-chip-1'))),
+        contains('12 times'));
+    expect(_textWithin(tester, find.byKey(const ValueKey('spot-unread'))),
+        contains('7 not read'));
+  });
+
+  testWidgets('Clips does not expose raw opponent timing or section center',
+      (tester) async {
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'card-tab-clips-c14');
+    final text =
+        _textWithin(tester, find.byKey(const ValueKey('sequence-card-c14')));
+    expect(text, isNot(contains('opponent_timing:')));
+    expect(text, isNot(contains('section_center_raw:')));
+  });
+
+  testWidgets('old summary without new fields retains lines and solid icons',
+      (tester) async {
+    final json = step13();
+    final card = (json['cards'] as List).single as Map;
+    final summary = ((card['read'] as Map)['summary'] as Map);
+    for (final spot in summary['spots'] as List) {
+      (spot as Map).remove('notes');
+      for (final row in spot['player_rows'] as List) {
+        (row as Map).remove('proof');
+        row.remove('seen_vs');
+      }
+    }
+    await _pumpLedger(tester, json, width: 1400, height: 1000);
+    expect(_textWithin(tester, find.byKey(const ValueKey('spot-verdict'))),
+        contains('Habit:'));
+    final cell = find.byKey(const ValueKey('cell-5P|f.S-win'));
+    await _tapKey(tester, 'toggle-unseen');
+    expect(
+        find.descendant(
+            of: cell, matching: find.byIcon(Icons.check_circle_rounded)),
+        findsOneWidget);
+  });
   testWidgets(
       'situation reads show compact matchup rows, mistake counts and row reasons at 360 px',
       (tester) async {
@@ -295,6 +463,201 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a read with a summary opens on the RPS, not on the frame grid',
+      (tester) async {
+    // 2026-11-13: the card showed a grid of "varies" cells and never said who
+    // beats who. The summary states it, and the grid moves behind an expander.
+    final json = ledgerDocument()..['focus'] = <String>[];
+    final card = (json['cards'] as List).first as Map;
+    final read = _step12ReadFixture();
+    read['summary'] = {
+      'version': 1,
+      'note': 'Timing and guard only.',
+      'spots': [
+        {
+          'kind': "player's turn",
+          'title': "Ky's turn · I-No is -2",
+          'count': 14,
+          'context': 'H Stroke leaves I-No at -2.',
+          'where': ['far 10', 'close 4'],
+          'player': 'Ky',
+          'opponent': 'I-No',
+          'opponent_rows': [
+            {
+              'name': 'backdash',
+              'count': 7,
+              'of': 14,
+              'seen': true,
+              'how': '',
+              'beats': ['2K', '5P'],
+              'loses_to': ['dash-up button'],
+              'theory': false,
+              'hit': 0,
+            },
+            {
+              'name': '2P / 5P',
+              'count': 3,
+              'of': 14,
+              'seen': true,
+              'how': 'mid, 5f',
+              'beats': <String>[],
+              'loses_to': <String>[],
+              'theory': false,
+              'hit': 0,
+            },
+            {
+              'name': 'Roman Cancel',
+              'count': 0,
+              'of': 14,
+              'seen': false,
+              'how': '50 tension',
+              'beats': <String>[],
+              'loses_to': <String>[],
+              'theory': false,
+              'hit': 0,
+            },
+          ],
+          'player_rows': [
+            {
+              'name': '2K',
+              'count': 9,
+              'of': 14,
+              'seen': true,
+              'how': '6f',
+              'beats': <String>[],
+              'loses_to': ['backdash'],
+              'theory': false,
+              'hit': 2,
+              'disproved': {'2P / 5P': 1},
+            },
+          ],
+          'lines': ['Habit: I-No picked backdash 7 of 14.'],
+        },
+        {
+          'kind': 'punish',
+          'title': 'Punish · I-No is -7',
+          'count': 1,
+          'context': 'I-No cannot act for 7 frames.',
+          'where': <String>[],
+          'player': 'Ky',
+          'opponent': 'I-No',
+          'opponent_rows': <Object>[],
+          'player_rows': <Object>[],
+          'lines': ['Fast enough: c.S (7f).'],
+        },
+      ],
+    };
+    card['read'] = read;
+
+    for (final width in [1280.0, 700.0]) {
+      await _pumpLedger(tester, json, width: width);
+      expect(tester.takeException(), isNull);
+      final id = card['id'];
+
+      // A card that is not a focus card starts closed, with a one-line teaser.
+      expect(find.byKey(const ValueKey('read-summary')), findsNothing);
+      expect(find.byKey(ValueKey('card-teaser-$id')), findsOneWidget);
+      await _tapKey(tester, 'toggle-card-$id');
+
+      // Read tab: verdict first, then the who-beats-who table.
+      final text =
+          _textWithin(tester, find.byKey(const ValueKey('read-summary')));
+      expect(text, contains("Ky's turn · I-No is -2 · 14 times"));
+      expect(text, contains('Habit: I-No picked backdash 7 of 14.'));
+      expect(text, contains('7 of 14'));
+      expect(text, contains('picked 9 · got hit 2'));
+      expect(
+          find.byKey(const ValueKey('cell-2K|backdash-lose')), findsOneWidget);
+      expect(find.byKey(const ValueKey('cell-2K|2P / 5P-disproved')),
+          findsOneWidget);
+      expect(text, isNot(contains('Roman Cancel')),
+          reason: 'options nobody used start hidden');
+      await _tapKey(tester, 'toggle-unseen');
+      expect(_textWithin(tester, find.byKey(const ValueKey('read-summary'))),
+          contains('Roman Cancel'));
+      expect(find.byKey(const ValueKey('cell-2K|Roman Cancel-open')),
+          findsOneWidget);
+
+      // The second spot is one tap away.
+      await _tapKey(tester, 'spot-chip-1');
+      expect(_textWithin(tester, find.byKey(const ValueKey('read-summary'))),
+          contains('Fast enough: c.S (7f).'));
+
+      // Clips and the old frame grid are tabs of the card.
+      expect(find.byKey(const ValueKey('read-headline')), findsNothing);
+      await _tapKey(tester, 'card-tab-grid-$id');
+      expect(find.byKey(const ValueKey('read-headline')), findsOneWidget);
+      expect(find.byKey(const ValueKey('read-summary')), findsNothing);
+      await _tapKey(tester, 'card-tab-clips-$id');
+      expect(find.byKey(ValueKey('sequence-$id-s1')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('cards show the vault note behind a move and open it in full',
+      (tester) async {
+    final json = ledgerDocument()..['focus'] = <String>[];
+    final card = (json['cards'] as List).first as Map;
+    card['move_id'] = 'I-No H Stroke';
+    json['moves'] = {
+      'I-No H Stroke': {
+        'id': 'I-No H Stroke',
+        'name': 'H Stroke',
+        'character': 'I-No',
+        'input': '236H',
+        'startup': '28',
+        'on_block': '-2',
+        'guard': 'Low',
+        'images': ['/vault/assets/ino_assets/missing.png'],
+        'note_path': '/vault/character/ino/I-No H Stroke.md',
+        'dustloop_notes': ['At -2 I-No can effectively RPS.'],
+        'my_notes': 'Instant block it, then throw.',
+      },
+    };
+
+    await _pumpLedger(tester, json, width: 1280);
+    final strip = find.byKey(ValueKey('move-strip-${card['id']}'));
+    final text = _textWithin(tester, strip);
+    expect(text, contains('I-No H Stroke (236H)'));
+    expect(text, contains('Startup 28'));
+    expect(text, contains('On block -2'));
+    expect(text, contains('My note: Instant block it, then throw.'));
+
+    await tester.ensureVisible(find.byType(MoveThumb).first);
+    await tester.tap(find.byType(MoveThumb).first);
+    await tester.pumpAndSettle();
+    final dialog = find.byKey(const ValueKey('move-dialog-I-No H Stroke'));
+    final full = _textWithin(tester, dialog);
+    expect(full, contains('I-No H Stroke · 236H'));
+    expect(full, contains('Guard Low'));
+    expect(full, contains('MY NOTES'));
+    expect(full, contains('Instant block it, then throw.'));
+    expect(full, contains('• At -2 I-No can effectively RPS.'));
+    await tester.tap(find.byKey(const ValueKey('close-move-dialog')));
+    await tester.pumpAndSettle();
+    expect(dialog, findsNothing);
+    // A picture the vault no longer has must not break the page.
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a hit-out-of-a-button card says how the button was lost',
+      (tester) async {
+    final json = ledgerDocument()..['focus'] = <String>[];
+    final card = (json['cards'] as List).first as Map;
+    card['event_read'] = [
+      'How it was lost: Elphelt had already started when Ky pressed 5 of 9.',
+      'Ky pressed into a move that was already coming.',
+    ];
+
+    await _pumpLedger(tester, json, width: 1280);
+
+    final text =
+        _textWithin(tester, find.byKey(ValueKey('event-read-${card['id']}')));
+    expect(text, contains('How it was lost: Elphelt had already started'));
+    expect(text, contains('Ky pressed into a move that was already coming.'));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('reactable seen opponent options are marked as unc check',
       (tester) async {
     final json = ledgerDocument()..['focus'] = <String>[];
@@ -400,7 +763,7 @@ void main() {
   testWidgets(
       'trend panel shows folded history, signed coloured rows and gone cards',
       (tester) async {
-    await _pumpLedger(tester, trendDocument(sets: 6));
+    await _pumpLedger(tester, trendDocument(sets: 6), tab: 'damage');
     expect(find.byKey(const ValueKey('trend-panel')), findsOneWidget);
     final sets =
         tester.widget<Text>(find.byKey(const ValueKey('trend-sets'))).data!;
@@ -439,7 +802,7 @@ void main() {
     final json = trendDocument();
     final trend = json['trend'] as Map;
     trend['ledger'] = null;
-    await _pumpLedger(tester, json);
+    await _pumpLedger(tester, json, tab: 'damage');
     expect(find.byKey(const ValueKey('trend-ledger')), findsNothing);
     expect(
         find.text(
@@ -447,17 +810,17 @@ void main() {
         findsOneWidget);
     expect(find.byKey(const ValueKey('trend-gone')), findsOneWidget);
     (trend['cards'] as Map)['gone'] = <Object?>[];
-    await _pumpLedger(tester, json);
+    await _pumpLedger(tester, json, tab: 'damage');
     expect(find.byKey(const ValueKey('trend-gone')), findsNothing);
     expect(find.text('Cards compared with 2026-10-20 (6 replays)'),
         findsOneWidget);
     trend['ledger'] = (trendDocument()['trend'] as Map)['ledger'];
     trend['cards'] = null;
-    await _pumpLedger(tester, json);
+    await _pumpLedger(tester, json, tab: 'damage');
     expect(find.byKey(const ValueKey('trend-ledger')), findsOneWidget);
     expect(find.byKey(const ValueKey('trend-gone')), findsNothing);
     for (final value in [null, <String, Object?>{}]) {
-      await _pumpLedger(tester, {...json, 'trend': value});
+      await _pumpLedger(tester, {...json, 'trend': value}, tab: 'damage');
       expect(find.byKey(const ValueKey('trend-panel')), findsNothing);
     }
   });
@@ -468,6 +831,7 @@ void main() {
     await _pumpLedger(tester, trendDocument());
     for (final id in ['c1', 'c5', 'e1', 'e2']) {
       final line = find.byKey(ValueKey('trend-text-$id'));
+      if (line.evaluate().isEmpty) await _openTab(tester, 'hits');
       expect(line, findsOneWidget);
       expect(
           tester.widget<Text>(line).data, 'Earlier set: $id. Now seen again.');
@@ -475,6 +839,7 @@ void main() {
           AfterimageTheme.dark().colorScheme.onSurfaceVariant);
     }
     for (final id in ['c5', 'e1']) {
+      await _openTab(tester, id.startsWith('e') ? 'hits' : 'spots');
       await _tapKey(tester, 'show-sequences-$id');
       expect(find.byKey(ValueKey('trend-text-$id')), findsOneWidget);
     }
@@ -489,7 +854,8 @@ void main() {
     final ledger = trend['ledger'] as Map;
     ((ledger['categories'] as List).first as Map)['label'] =
         'Hit while pressing a button with a very long description of the situation';
-    await _pumpLedger(tester, json, width: 360);
+    await _pumpLedger(tester, json, width: 360, tab: 'damage');
+    expect(tester.takeException(), isNull);
     for (final key in ['trend-panel', 'trend-ledger', 'trend-gone']) {
       await tester.ensureVisible(find.byKey(ValueKey(key)));
       await tester.pumpAndSettle();
@@ -514,6 +880,9 @@ void main() {
         onBack: () {},
         playerFactory: (_) => _FakeClipSession())));
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('sequence-card-e1')), findsNothing,
+        reason: 'event cards live in the Got hit tab');
+    await _openTab(tester, 'hits');
     final event = find.byKey(const ValueKey('sequence-card-e1'));
     expect(
         find.descendant(
@@ -556,28 +925,16 @@ void main() {
   });
 
   for (final focus in [true, false]) {
-    testWidgets('event group order with focus $focus', (tester) async {
+    testWidgets('event cards have their own tab, focus $focus', (tester) async {
       await _pumpLedger(tester,
           {...eventDocument(focus: focus), 'ledger': null, 'player': null});
-      expect(find.text('HOW ELSE YOU GOT HIT'), findsOneWidget);
-      final group = find.byKey(const ValueKey('event-cards'));
-      expect(
-          find.descendant(
-              of: group,
-              matching: find.byKey(const ValueKey('sequence-card-e5'))),
-          findsOneWidget);
+      // Spots tab: situations only, plus an event card when it is a focus card.
+      expect(find.byKey(const ValueKey('event-cards')), findsNothing);
+      expect(find.byKey(const ValueKey('sequence-card-e5')), findsNothing);
       if (focus) {
         expect(find.text('1. I-No hit Ky out of wakeup'), findsOneWidget);
         expect(find.byKey(const ValueKey('sequence-e2-s1')), findsOneWidget);
         expect(find.byKey(const ValueKey('show-sequences-e2')), findsNothing);
-        expect(
-            tester.getTopLeft(find.byKey(const ValueKey('other-flagged'))).dy,
-            lessThan(tester.getTopLeft(group).dy));
-        expect(
-            tester.getTopLeft(group).dy,
-            lessThan(tester
-                .getTopLeft(find.byKey(const ValueKey('sequence-card-c5')))
-                .dy));
         await _tapKey(tester, 'other-flagged');
         expect(
             find.descendant(
@@ -585,17 +942,19 @@ void main() {
                 matching: find.byKey(const ValueKey('sequence-card-e1'))),
             findsNothing);
       } else {
-        expect(
-            tester
-                .getTopLeft(find.byKey(const ValueKey('sequence-card-c6')))
-                .dy,
-            lessThan(tester.getTopLeft(group).dy));
+        expect(find.byKey(const ValueKey('sequence-card-c6')), findsOneWidget);
       }
-      final ids =
-          focus ? ['e5', 'e4', 'e3', 'e1'] : ['e5', 'e4', 'e3', 'e2', 'e1'];
+      await _openTab(tester, 'hits');
+      expect(find.text('HOW ELSE YOU GOT HIT'), findsOneWidget);
+      expect(find.byKey(const ValueKey('sequence-card-c6')), findsNothing);
+      final group = find.byKey(const ValueKey('event-cards'));
       final positions = [
-        for (final id in ids)
-          tester.getTopLeft(find.byKey(ValueKey('sequence-card-$id'))).dy
+        for (final id in ['e5', 'e4', 'e3', 'e2', 'e1'])
+          tester
+              .getTopLeft(find.descendant(
+                  of: group,
+                  matching: find.byKey(ValueKey('sequence-card-$id'))))
+              .dy
       ];
       expect(positions, orderedEquals([...positions]..sort()));
     });
@@ -603,7 +962,7 @@ void main() {
 
   for (final id in ['e1', 'c2', 'c5']) {
     testWidgets('ledger reveals and scrolls to $id', (tester) async {
-      await _pumpLedger(tester, eventDocument());
+      await _pumpLedger(tester, eventDocument(), tab: 'damage');
       await _tapKey(tester, 'ledger-category-neutral');
       expect(find.byKey(const ValueKey('ledger-card-missing')), findsNothing);
       await _tapKey(tester, 'ledger-card-$id');
@@ -619,11 +978,15 @@ void main() {
   for (final width in [1280.0, 700.0]) {
     testWidgets('all event and ledger content expanded fits at $width',
         (tester) async {
-      await _pumpLedger(tester, eventDocument(long: true), width: width);
+      await _pumpLedger(tester, eventDocument(long: true),
+          width: width, tab: 'damage');
+      expect(tester.takeException(), isNull);
       await _tapKey(tester, 'ledger-category-neutral');
       await _tapKey(tester, 'ledger-category-pressing');
+      await _openTab(tester, 'spots');
       await _tapKey(tester, 'other-flagged');
       for (final id in ['c3', 'c5', 'c6', 'e5', 'e4', 'e3', 'e1']) {
+        if (id == 'e5') await _openTab(tester, 'hits');
         await _tapKey(tester, 'show-sequences-$id');
         expect(tester.takeException(), isNull);
       }
@@ -633,6 +996,9 @@ void main() {
   testWidgets('ledger renders totals, proportional bars and expanded evidence',
       (tester) async {
     await _pumpLedger(tester, ledgerDocument());
+    expect(find.byKey(const ValueKey('damage-ledger')), findsNothing,
+        reason: 'the ledger lives in the Damage tab');
+    await _openTab(tester, 'damage');
     expect(find.byKey(const ValueKey('damage-ledger')), findsOneWidget);
     expect(find.text('WHERE THE DAMAGE CAME FROM'), findsOneWidget);
     expect(
@@ -661,7 +1027,8 @@ void main() {
   });
 
   testWidgets('ledger uses You when the player is missing', (tester) async {
-    await _pumpLedger(tester, {...ledgerDocument(), 'player': null});
+    await _pumpLedger(tester, {...ledgerDocument(), 'player': null},
+        tab: 'damage');
     expect(
         find.text(
             'You lost 10,469 HP over 12 replays. The cards below cover 2,506 (24%).'),
@@ -808,9 +1175,11 @@ void main() {
   for (final width in [1280.0, 700.0]) {
     testWidgets('long ledger and all expanded cards fit at $width px',
         (tester) async {
-      await _pumpLedger(tester, ledgerDocument(long: true), width: width);
+      await _pumpLedger(tester, ledgerDocument(long: true),
+          width: width, tab: 'damage');
       await _tapKey(tester, 'ledger-category-neutral');
       await _tapKey(tester, 'ledger-category-pressing');
+      await _openTab(tester, 'spots');
       await _tapKey(tester, 'other-flagged');
       for (final id in ['c5', 'c6']) {
         await _tapKey(tester, 'show-sequences-$id');
@@ -1478,7 +1847,7 @@ Widget _app(Widget home) {
 
 String _textWithin(WidgetTester tester, Finder parent) => tester
     .widgetList<Text>(find.descendant(of: parent, matching: find.byType(Text)))
-    .map((widget) => widget.data ?? '')
+    .map((widget) => widget.data ?? widget.textSpan?.toPlainText() ?? '')
     .join('\n');
 
 Map<String, Object?> _singleCardDocument(String sourcePath, String title) {

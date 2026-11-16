@@ -53,6 +53,7 @@ class SequenceDocument {
     this.focus = const [],
     this.ledger,
     this.trend,
+    this.moves = const {},
   });
 
   factory SequenceDocument.fromJson(Map<String, Object?> json) {
@@ -62,6 +63,11 @@ class SequenceDocument {
     }
     return SequenceDocument(
       trend: SequenceTrend.parse(json['trend']),
+      moves: {
+        for (final entry in (_readMap(json['moves']) ?? {}).entries)
+          if (_readMap(entry.value) case final move?)
+            entry.key: MoveCard.fromJson(entry.key, move),
+      },
       focus: _typedStrings(json['focus']).take(3).toList(),
       ledger: json['ledger'] is Map<String, Object?>
           ? DamageLedger.fromJson(json['ledger'] as Map<String, Object?>)
@@ -96,6 +102,66 @@ class SequenceDocument {
   final List<String> focus;
   final DamageLedger? ledger;
   final SequenceTrend? trend;
+
+  /// Move card id (the vault note's name, `Ky 2H`) to the note behind it.
+  final Map<String, MoveCard> moves;
+}
+
+/// A move note from the vault: frame data, pictures, Dustloop notes, own notes.
+class MoveCard {
+  MoveCard.fromJson(this.id, Map<String, Object?> json)
+      : name = _text(json['name']) ?? id,
+        character = _text(json['character']),
+        input = _text(json['input']),
+        moveName = _text(json['move_name']),
+        damage = _text(json['damage']),
+        guard = _text(json['guard']),
+        startup = _text(json['startup']),
+        active = _text(json['active']),
+        recovery = _text(json['recovery']),
+        level = _text(json['level']),
+        onBlock = _text(json['on_block']),
+        onHit = _text(json['on_hit']),
+        invuln = _text(json['invuln']),
+        cancelsInto = _text(json['cancels_into']),
+        images = _typedStrings(json['images']),
+        notePath = _text(json['note_path']),
+        dustloopNotes = _typedStrings(json['dustloop_notes']),
+        myNotes = _text(json['my_notes']);
+
+  final String id;
+  final String name;
+  final String? character;
+  final String? input;
+  final String? moveName;
+  final String? damage;
+  final String? guard;
+  final String? startup;
+  final String? active;
+  final String? recovery;
+  final String? level;
+  final String? onBlock;
+  final String? onHit;
+  final String? invuln;
+  final String? cancelsInto;
+  final List<String> images;
+  final String? notePath;
+  final List<String> dustloopNotes;
+  final String? myNotes;
+
+  /// Label and value for every frame-data field the note has, in reading order.
+  List<(String, String)> get facts => [
+        if (startup != null) ('Startup', startup!),
+        if (active != null) ('Active', active!),
+        if (recovery != null) ('Recovery', recovery!),
+        if (onBlock != null) ('On block', onBlock!),
+        if (onHit != null) ('On hit', onHit!),
+        if (guard != null) ('Guard', guard!),
+        if (damage != null) ('Damage', damage!),
+        if (level != null) ('Level', level!),
+        if (invuln != null) ('Invuln', invuln!),
+        if (cancelsInto != null) ('Cancels into', cancelsInto!),
+      ];
 }
 
 /// One situation: her last move, his posture and how he got there.
@@ -119,6 +185,9 @@ class SequenceCard {
     this.reversalNote,
     this.trendText,
     this.read,
+    this.eventRead = const [],
+    this.moveId,
+    this.moveIds = const [],
   });
 
   factory SequenceCard.fromJson(Map<String, Object?> json) => SequenceCard(
@@ -127,6 +196,9 @@ class SequenceCard {
             SequenceAnswer.fromJson(value),
         ],
         read: SituationRead.parse(json['read']),
+        eventRead: _typedStrings(json['event_read']),
+        moveId: _text(json['move_id']),
+        moveIds: _typedStrings(json['move_ids']),
         trendText: _text(json['trend_text']),
         reversalNote: _text(json['reversal_note']),
         id: json['id']?.toString() ?? '',
@@ -169,6 +241,15 @@ class SequenceCard {
   /// Display text from the finder (v0.3.3); `null` in older lists.
   final String? header;
   final String? leadInText;
+
+  /// How a "hit out of a button" card was lost, as ready-to-show sentences.
+  final List<String> eventRead;
+
+  /// The opponent's move a situation card is about, as a move card id.
+  final String? moveId;
+
+  /// Event cards: the player's button first, then the opponent's moves that hit.
+  final List<String> moveIds;
   final List<SequenceAnswer> answers;
   final String? reversalNote;
   final String? trendText;
@@ -212,6 +293,7 @@ class SituationRead {
     required this.guards,
     required this.fuzzyCandidates,
     required this.additionalDetails,
+    required this.summary,
   });
 
   static SituationRead? parse(Object? value) {
@@ -254,6 +336,7 @@ class SituationRead {
       guards: json['guards'],
       fuzzyCandidates: json['fuzzy_candidates'],
       additionalDetails: _situationAdditionalDetails(json),
+      summary: SituationSummary.parse(json['summary']),
     );
   }
 
@@ -282,6 +365,151 @@ class SituationRead {
 
   /// Unrecognised and newly additive details, flattened to plain text for display.
   final List<String> additionalDetails;
+
+  /// The plain reading of the card: per spot, both sides' options and who beats
+  /// who. Null on lists written before the finder produced it.
+  final SituationSummary? summary;
+}
+
+class SituationSummary {
+  SituationSummary._({
+    required this.spots,
+    required this.note,
+    required this.unread,
+  });
+
+  static SituationSummary? parse(Object? value) {
+    final json = _readMap(value);
+    if (json == null) return null;
+    return SituationSummary._(
+      spots: [
+        for (final item in _readMaps(json['spots']))
+          SituationSpot.fromJson(item),
+      ],
+      note: _text(json['note']),
+      unread: SituationUnread.parse(json['unread']),
+    );
+  }
+
+  final List<SituationSpot> spots;
+  final String? note;
+  final SituationUnread? unread;
+}
+
+class SituationUnread {
+  SituationUnread.fromJson(Map<String, Object?> json)
+      : count = _count(json['count']),
+        reason = _text(json['reason']);
+
+  static SituationUnread? parse(Object? value) {
+    final json = _readMap(value);
+    return json == null ? null : SituationUnread.fromJson(json);
+  }
+
+  final int count;
+  final String? reason;
+}
+
+class SituationSpot {
+  SituationSpot.fromJson(Map<String, Object?> json)
+      : kind = _text(json['kind']) ?? '',
+        title = _text(json['title']) ?? '',
+        count = _count(json['count']),
+        context = _text(json['context']),
+        where = _typedStrings(json['where']),
+        player = _text(json['player']),
+        opponent = _text(json['opponent']),
+        opponentRows = [
+          for (final item in _readMaps(json['opponent_rows']))
+            SituationSummaryRow.fromJson(item),
+        ],
+        playerRows = [
+          for (final item in _readMaps(json['player_rows']))
+            SituationSummaryRow.fromJson(item),
+        ],
+        lines = _typedStrings(json['lines']),
+        notes = [
+          for (final item in _readMaps(json['notes']))
+            SituationSummaryNote.fromJson(item),
+        ];
+
+  final String kind;
+  final String title;
+  final int count;
+  final String? context;
+  final List<String> where;
+  final String? player;
+  final String? opponent;
+  final List<SituationSummaryRow> opponentRows;
+  final List<SituationSummaryRow> playerRows;
+  final List<String> lines;
+  final List<SituationSummaryNote> notes;
+}
+
+class SituationSummaryNote {
+  SituationSummaryNote.fromJson(Map<String, Object?> json)
+      : kind = _text(json['kind']) ?? '',
+        text = _text(json['text']) ?? '',
+        rows = _typedStrings(json['rows']),
+        versus = _text(json['versus']),
+        points = _typedStrings(json['points']);
+
+  final String kind;
+  final String text;
+  final List<String> rows;
+  final String? versus;
+  final List<String> points;
+}
+
+class SituationSummaryRow {
+  SituationSummaryRow.fromJson(Map<String, Object?> json)
+      : name = _text(json['name']) ?? '',
+        count = _count(json['count']),
+        of = _count(json['of']),
+        seen = json['seen'] == true,
+        how = _text(json['how']) ?? '',
+        beats = _typedStrings(json['beats']),
+        losesTo = _typedStrings(json['loses_to']),
+        theory = json['theory'] == true,
+        hit = _count(json['hit']),
+        moves = _typedStrings(json['moves']),
+        disproved = {
+          for (final entry in (_readMap(json['disproved']) ?? {}).entries)
+            entry.key: _count(entry.value),
+        },
+        basis = {
+          for (final entry in (_readMap(json['basis']) ?? {}).entries)
+            if (entry.value is String) entry.key: entry.value as String,
+        },
+        proof = {
+          for (final entry in (_readMap(json['proof']) ?? {}).entries)
+            if (entry.value is String) entry.key: entry.value as String,
+        },
+        seenVs = {
+          for (final entry in (_readMap(json['seen_vs']) ?? {}).entries)
+            if (SituationSeen.parse(entry.value) case final seen?)
+              entry.key: seen,
+        };
+
+  final String name;
+  final int count;
+  final int of;
+  final bool seen;
+  final String how;
+  final List<String> beats;
+  final List<String> losesTo;
+  final bool theory;
+  final int hit;
+
+  /// Move card ids of the notes behind this row's options.
+  final List<String> moves;
+
+  /// Other side's row name to the times this row lost to it here although the
+  /// timing rules call it a win.
+  final Map<String, int> disproved;
+  final Map<String, String> basis;
+  final Map<String, String> proof;
+  final Map<String, SituationSeen> seenVs;
 }
 
 class SituationAdvCount {
@@ -582,6 +810,8 @@ List<String> _situationAdditionalDetails(Map<String, Object?> json) {
     for (final entry in map.entries) {
       final key = entry.key;
       final childPath = path.isEmpty ? key : '$path.$key';
+      // The summary has its own model and its own place on the card.
+      if (key == 'summary' && path.isEmpty) continue;
       if (_situationAdditiveTextKeys.contains(key)) {
         if (entry.value != null) {
           details.add('$childPath: ${_plainSituationValue(entry.value)}');

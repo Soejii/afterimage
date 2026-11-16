@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../app/theme.dart';
 import '../domain/notes_models.dart';
 import '../services/notes_repository.dart';
+import 'widgets/move_card_views.dart';
 import 'widgets/notes_clip_player.dart';
 import 'widgets/status_surface.dart';
 
@@ -193,6 +194,8 @@ class _EmptyNotes extends StatelessWidget {
   }
 }
 
+enum _PageTab { spots, hits, damage }
+
 class NotesPage extends StatefulWidget {
   const NotesPage({
     super.key,
@@ -219,10 +222,16 @@ class _NotesPageState extends State<NotesPage> {
   bool _saving = false;
   final Set<String> _saved = <String>{};
   final Set<String> _expanded = <String>{};
+  _PageTab _tab = _PageTab.spots;
+  // Card id to its open tab (0 read, 1 clips, 2 frame grid) and the cards with a
+  // read that were opened by hand; focus cards are always open.
+  final Map<String, int> _cardTab = {};
+  final Set<String> _openCards = <String>{};
   final Map<String, GlobalKey> _cardAnchors = {};
   final _flaggedController = ExpansibleController();
   // The one sequence whose clip is open, under its row; null when none is.
   String? _openSequence;
+  final Map<String, (Set<String>, String)> _clipFilters = {};
   ScaffoldMessengerState? _scaffoldMessenger;
 
   @override
@@ -339,17 +348,20 @@ class _NotesPageState extends State<NotesPage> {
                 const Center(child: CircularProgressIndicator())
               else ...[
                 _PageNotices(document: data.document),
-                if (data.document.ledger case final ledger?
-                    when ledger.totalDamage > 0)
-                  _DamageLedgerPanel(
-                      ledger: ledger,
-                      player: data.document.player,
-                      cards: data.document.cards,
-                      onCard: _revealCard),
-                if (data.document.trend case final trend?)
-                  _TrendPanel(trend: trend),
-                ..._buildGroups(context, data),
-                if (data.document.cards.isEmpty)
+                ..._buildTabs(context, data),
+                if (_tab == _PageTab.damage) ...[
+                  if (data.document.ledger case final ledger?
+                      when ledger.totalDamage > 0)
+                    _DamageLedgerPanel(
+                        ledger: ledger,
+                        player: data.document.player,
+                        cards: data.document.cards,
+                        onCard: _revealCard),
+                  if (data.document.trend case final trend?)
+                    _TrendPanel(trend: trend),
+                ] else
+                  ..._buildGroups(context, data),
+                if (data.document.cards.isEmpty && _tab == _PageTab.spots)
                   const StatusSurface(
                     tone: StatusTone.blocked,
                     icon: Icons.playlist_play_rounded,
@@ -372,8 +384,48 @@ class _NotesPageState extends State<NotesPage> {
     );
   }
 
+  List<Widget> _buildTabs(BuildContext context, NoteSequenceData data) {
+    final document = data.document;
+    final events = document.cards.where((card) => card.isEventCard).length;
+    final spots = document.cards.length - events;
+    final damage =
+        (document.ledger?.totalDamage ?? 0) > 0 || document.trend != null;
+    if (events == 0 && !damage) return const [];
+    return [
+      Align(
+        alignment: Alignment.centerLeft,
+        child: SegmentedButton<_PageTab>(
+          key: const ValueKey('page-tabs'),
+          showSelectedIcon: false,
+          segments: [
+            ButtonSegment(
+                value: _PageTab.spots,
+                icon: const Icon(Icons.grid_view_rounded),
+                label:
+                    Text('Spots ($spots)', key: const ValueKey('tab-spots'))),
+            if (events > 0)
+              ButtonSegment(
+                  value: _PageTab.hits,
+                  icon: const Icon(Icons.flash_on_rounded),
+                  label: Text('Got hit ($events)',
+                      key: const ValueKey('tab-hits'))),
+            if (damage)
+              const ButtonSegment(
+                  value: _PageTab.damage,
+                  icon: Icon(Icons.bar_chart_rounded),
+                  label: Text('Damage', key: ValueKey('tab-damage'))),
+          ],
+          selected: {_tab},
+          onSelectionChanged: (value) => setState(() => _tab = value.first),
+        ),
+      ),
+      const SizedBox(height: 18),
+    ];
+  }
+
   List<Widget> _buildGroups(BuildContext context, NoteSequenceData data) {
     final document = data.document;
+
     final events = document.cards.where((card) => card.isEventCard).toList();
     Widget eventGroup(Iterable<SequenceCard> cards) => Column(
           key: const ValueKey('event-cards'),
@@ -385,11 +437,11 @@ class _NotesPageState extends State<NotesPage> {
             for (final card in cards) _buildCard(context, data, card),
           ],
         );
+    if (_tab == _PageTab.hits) return [eventGroup(events)];
     if (document.focus.isEmpty) {
       return [
         for (final card in document.cards.where((card) => !card.isEventCard))
           _buildCard(context, data, card),
-        if (events.isNotEmpty) eventGroup(events),
       ];
     }
     final focus = <SequenceCard>[];
@@ -423,8 +475,6 @@ class _NotesPageState extends State<NotesPage> {
         title: Text('Other flagged situations (${flagged.length})'),
         children: [for (final card in flagged) _buildCard(context, data, card)],
       ),
-      if (others.any((card) => card.isEventCard))
-        eventGroup(others.where((card) => card.isEventCard)),
       for (final card in others.where(
           (card) => !card.isEventCard && !card.flagged && !card.isGuardCrush))
         _buildCard(context, data, card),
@@ -432,7 +482,11 @@ class _NotesPageState extends State<NotesPage> {
   }
 
   Future<void> _revealCard(SequenceCard card) async {
-    setState(() => _expanded.add(card.id));
+    setState(() {
+      _expanded.add(card.id);
+      _openCards.add(card.id);
+      _tab = card.isEventCard ? _PageTab.hits : _PageTab.spots;
+    });
     final document = _data!.document;
     if (document.focus.isNotEmpty &&
         !document.focus.contains(card.id) &&
@@ -473,6 +527,95 @@ class _NotesPageState extends State<NotesPage> {
         (card.leadIns.isEmpty
             ? null
             : 'lead-ins: ${card.leadIns.map((leadIn) => '${leadIn.label} x${leadIn.count}').join(', ')}');
+    final summary = card.read?.summary;
+    final hasSummary = summary != null && summary.spots.isNotEmpty;
+    final collapsed =
+        hasSummary && focusNumber == null && !_openCards.contains(card.id);
+    final cardTab = _cardTab[card.id] ?? 0;
+    final moves = data.document.moves;
+    final eventMoves = [
+      for (final id in card.moveIds)
+        if (moves[id] case final move?) move
+    ];
+    final filter = _clipFilters[card.id];
+    final visibleSequences = filter == null
+        ? card.sequences
+        : card.sequences.where((s) => filter.$1.contains(s.id)).toList();
+    final clips = <Widget>[
+      if (filter != null)
+        Row(key: ValueKey('clip-filter-${card.id}'), children: [
+          Expanded(
+              child: Text(
+                  'Showing ${visibleSequences.length} of ${card.sequences.length} clips: ${filter.$2}')),
+          TextButton(
+              key: ValueKey('clip-filter-clear-${card.id}'),
+              onPressed: () => setState(() => _clipFilters.remove(card.id)),
+              child: const Text('Show all')),
+        ]),
+      if (filter == null && card.reversalNote != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            card.reversalNote!,
+            key: ValueKey('reversal-note-${card.id}'),
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          ),
+        ),
+      if (filter == null && card.answers.isNotEmpty)
+        _AnswerScoreboard(card: card),
+      if (filter == null && leadIns != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            leadIns,
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          ),
+        ),
+      if (filter == null)
+        for (var index = 0; index < card.mixups.length; index++)
+          _buildMixup(card, index),
+      if (filter == null &&
+          card.isEventCard &&
+          card.count > card.sequences.length)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            'Showing the ${card.sequences.length} most damaging of ${card.count}.',
+            key: ValueKey('event-more-${card.id}'),
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          ),
+        ),
+      if (!expanded && !hasSummary)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            key: ValueKey('show-sequences-${card.id}'),
+            onPressed: () => setState(() => _expanded.add(card.id)),
+            child: Text(
+              'Show ${card.sequences.length} '
+              '${card.sequences.length == 1 ? 'sequence' : 'sequences'}',
+            ),
+          ),
+        )
+      else ...[
+        SizedBox(height: small ? 6 : 10),
+        for (final sequence in visibleSequences) ...[
+          _buildSequence(sequence),
+          if (_openSequence == sequence.id && sequence.clip != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 2, 0, 12),
+              child: NotesClipPlayer(
+                key: ValueKey('clip-${sequence.id}'),
+                playerCardKey: ValueKey('clip-player-${sequence.id}'),
+                clip: sequence.clip!,
+                filePath: _clipPath(data.preview, sequence.clip!),
+                playerFactory: widget.playerFactory,
+                playOnOpen: true,
+              ),
+            ),
+        ],
+      ],
+    ];
     return KeyedSubtree(
       key: _cardAnchors.putIfAbsent(card.id, () => GlobalKey()),
       child: Card(
@@ -505,27 +648,75 @@ class _NotesPageState extends State<NotesPage> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  if (card.isEventCard)
-                    Flexible(
-                      child: Text(
-                        header,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: muted,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    )
-                  else
-                    Text(
+                  Flexible(
+                    child: Text(
                       header,
                       style: theme.textTheme.labelMedium?.copyWith(
                         color: muted,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
+                  ),
+                  if (hasSummary && focusNumber == null)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: IconButton(
+                        key: ValueKey('toggle-card-${card.id}'),
+                        visualDensity: VisualDensity.compact,
+                        tooltip: collapsed ? 'Open' : 'Close',
+                        onPressed: () => setState(() => collapsed
+                            ? _openCards.add(card.id)
+                            : _openCards.remove(card.id)),
+                        icon: Icon(collapsed
+                            ? Icons.expand_more_rounded
+                            : Icons.expand_less_rounded),
+                      ),
+                    ),
                 ],
               ),
-              if (card.trendText != null)
+              if (!collapsed && moves[card.moveId] != null)
+                Padding(
+                  key: ValueKey('move-strip-${card.id}'),
+                  padding: const EdgeInsets.only(top: 10),
+                  child: MoveStrip(move: moves[card.moveId]!),
+                ),
+              if (eventMoves.isNotEmpty)
+                Padding(
+                  key: ValueKey('event-moves-${card.id}'),
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (card.kind == 'pressing')
+                        MoveStrip(move: eventMoves.first),
+                      if (eventMoves.length > (card.kind == 'pressing' ? 1 : 0))
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Wrap(
+                            spacing: 10,
+                            runSpacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text('Hit by',
+                                  style: theme.textTheme.bodySmall
+                                      ?.copyWith(color: muted)),
+                              for (final move in eventMoves
+                                  .skip(card.kind == 'pressing' ? 1 : 0))
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    MoveThumb(move: move, size: 64),
+                                    Text(move.name,
+                                        style: theme.textTheme.bodySmall),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              if (card.trendText != null && (!hasSummary || cardTab == 1))
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(card.trendText!,
@@ -545,71 +736,100 @@ class _NotesPageState extends State<NotesPage> {
                     ),
                   ),
                 ),
-              if (card.read case final read?)
-                _SituationReadPanel(
-                  read: read,
-                  player: data.document.playerName ?? data.document.player,
-                  opponent:
-                      data.document.opponentName ?? data.document.opponent,
+              if (card.eventRead.isNotEmpty)
+                Padding(
+                  key: ValueKey('event-read-${card.id}'),
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final line in card.eventRead)
+                        Text(line, style: theme.textTheme.bodyMedium),
+                    ],
+                  ),
                 ),
-              if (card.reversalNote != null)
+              if (hasSummary && collapsed)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
-                    card.reversalNote!,
-                    key: ValueKey('reversal-note-${card.id}'),
+                    _headline(summary.spots.first)?.text ??
+                        (summary.spots.first.lines.isEmpty
+                            ? summary.spots.first.title
+                            : '${summary.spots.first.title}: ${summary.spots.first.lines.first}'),
+                    key: ValueKey('card-teaser-${card.id}'),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                  ),
-                ),
-              if (card.answers.isNotEmpty) _AnswerScoreboard(card: card),
-              if (leadIns != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    leadIns,
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                  ),
-                ),
-              for (var index = 0; index < card.mixups.length; index++)
-                _buildMixup(card, index),
-              if (card.isEventCard && card.count > card.sequences.length)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    'Showing the ${card.sequences.length} most damaging of ${card.count}.',
-                    key: ValueKey('event-more-${card.id}'),
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                  ),
-                ),
-              if (!expanded)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton(
-                    key: ValueKey('show-sequences-${card.id}'),
-                    onPressed: () => setState(() => _expanded.add(card.id)),
-                    child: Text(
-                      'Show ${card.sequences.length} '
-                      '${card.sequences.length == 1 ? 'sequence' : 'sequences'}',
-                    ),
                   ),
                 )
-              else ...[
-                SizedBox(height: small ? 6 : 10),
-                for (final sequence in card.sequences) ...[
-                  _buildSequence(sequence),
-                  if (_openSequence == sequence.id && sequence.clip != null)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(0, 2, 0, 12),
-                      child: NotesClipPlayer(
-                        key: ValueKey('clip-${sequence.id}'),
-                        playerCardKey: ValueKey('clip-player-${sequence.id}'),
-                        clip: sequence.clip!,
-                        filePath: _clipPath(data.preview, sequence.clip!),
-                        playerFactory: widget.playerFactory,
-                        playOnOpen: true,
-                      ),
+              else if (hasSummary) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: SegmentedButton<int>(
+                      key: ValueKey('card-tabs-${card.id}'),
+                      showSelectedIcon: false,
+                      segments: [
+                        ButtonSegment(
+                            value: 0,
+                            label: Text('Read',
+                                key: ValueKey('card-tab-read-${card.id}'))),
+                        ButtonSegment(
+                            value: 1,
+                            label: Text('Clips (${card.sequences.length})',
+                                key: ValueKey('card-tab-clips-${card.id}'))),
+                        ButtonSegment(
+                            value: 2,
+                            label: Text('Frame grid',
+                                key: ValueKey('card-tab-grid-${card.id}'))),
+                      ],
+                      selected: {cardTab},
+                      onSelectionChanged: (value) => setState(() {
+                        _cardTab[card.id] = value.first;
+                        _clipFilters.remove(card.id);
+                      }),
                     ),
-                ],
+                  ),
+                ),
+                if (cardTab == 0)
+                  _ReadSummaryView(
+                      key: ValueKey('read-view-${card.id}'),
+                      summary: summary,
+                      moves: moves,
+                      player: data.document.playerName ??
+                          data.document.player ??
+                          'Player',
+                      opponent:
+                          data.document.opponentName ?? data.document.opponent,
+                      onWatch: (points, row, versus) => setState(() {
+                            _clipFilters[card.id] =
+                                (points.toSet(), '$row vs $versus');
+                            _cardTab[card.id] = 1;
+                            _openSequence = card.sequences
+                                .where((s) =>
+                                    points.contains(s.id) && s.clip != null)
+                                .firstOrNull
+                                ?.id;
+                          }))
+                else if (cardTab == 1)
+                  ...clips
+                else
+                  _SituationReadPanel(
+                    read: card.read!,
+                    player: data.document.playerName ?? data.document.player,
+                    opponent:
+                        data.document.opponentName ?? data.document.opponent,
+                  ),
+              ] else ...[
+                if (card.read case final read?)
+                  _SituationReadPanel(
+                    read: read,
+                    player: data.document.playerName ?? data.document.player,
+                    opponent:
+                        data.document.opponentName ?? data.document.opponent,
+                  ),
+                ...clips,
               ],
             ],
           ),
@@ -736,12 +956,6 @@ class _NotesPageState extends State<NotesPage> {
                           : 'Mistake: ${read.mistake}'
                               '${read.reason == null || read.reason!.isEmpty ? '' : ' · ${read.reason}'}',
                       key: ValueKey('sequence-read-${sequence.id}'),
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                  if (read.additionalDetails.isNotEmpty)
-                    Text(
-                      read.additionalDetails.join('\n'),
-                      key: ValueKey('sequence-read-details-${sequence.id}'),
                       style: theme.textTheme.bodySmall?.copyWith(color: muted),
                     ),
                 ],
@@ -1261,6 +1475,493 @@ int _situationRowSeenCount(
 ) =>
     groups.where((group) => group.hasSeenOption).fold(
         0, (total, group) => total + _situationGroupSeenCount(row, group));
+
+SituationSummaryNote? _headline(SituationSpot spot) {
+  for (final kind in ['answer', 'fast', 'mix', 'unproven', 'guess']) {
+    for (final note in spot.notes) {
+      if (note.kind == kind) return note;
+    }
+  }
+  return null;
+}
+
+/// The plain reading of a card: per spot, the verdict and a who-beats-who table
+/// (the player's answers down, the opponent's options across).
+class _ReadSummaryView extends StatefulWidget {
+  const _ReadSummaryView(
+      {super.key,
+      required this.summary,
+      this.moves = const {},
+      required this.player,
+      required this.opponent,
+      required this.onWatch});
+
+  final SituationSummary summary;
+  final Map<String, MoveCard> moves;
+  final String player;
+  final String opponent;
+  final void Function(List<String>, String, String) onWatch;
+
+  @override
+  State<_ReadSummaryView> createState() => _ReadSummaryViewState();
+}
+
+class _ReadSummaryViewState extends State<_ReadSummaryView> {
+  int _spot = 0;
+  bool _unseen = false;
+
+  static String _times(int count) => count == 1 ? '1 time' : '$count times';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final spots = widget.summary.spots;
+    final spot = spots[_spot.clamp(0, spots.length - 1)];
+    final hidden = spot.opponentRows.where((row) => row.count <= 0).length +
+        spot.playerRows.where((row) => !row.seen).length;
+    return Padding(
+      key: const ValueKey('read-summary'),
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (spots.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (var index = 0; index < spots.length; index++)
+                    ChoiceChip(
+                      key: ValueKey('spot-chip-$index'),
+                      label: Text(
+                          '${spots[index].title} · ${_times(spots[index].count)}'),
+                      selected: index == _spot,
+                      onSelected: (_) => setState(() => _spot = index),
+                    ),
+                  if ((widget.summary.unread?.count ?? 0) > 0)
+                    Tooltip(
+                        message: widget.summary.unread?.reason ?? '',
+                        child: Chip(
+                            key: const ValueKey('spot-unread'),
+                            label: Text(
+                                '${widget.summary.unread!.count} not read'))),
+                ],
+              ),
+            ),
+          if (spot.context case final text?)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(text, style: theme.textTheme.bodyMedium),
+            ),
+          if (spot.where.isNotEmpty)
+            Text(
+                'Where: ${spot.where.map((where) => where.replaceFirstMapped(RegExp(r'^(player|opponent)\b', caseSensitive: false), (match) => match[0]!.toLowerCase() == 'player' ? widget.player : widget.opponent)).join(' · ')}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+          for (final note in spot.notes.where((n) => n.kind == 'route'))
+            Text(note.text,
+                style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+          if (spot.lines.isNotEmpty || spot.notes.isNotEmpty)
+            Container(
+              key: const ValueKey('spot-verdict'),
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+              decoration: BoxDecoration(
+                color: AfterimageTheme.panelRaised,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AfterimageTheme.hairline),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (spot.notes.isEmpty)
+                    for (final line in spot.lines)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(line, style: theme.textTheme.bodyMedium),
+                      ),
+                  if (_headline(spot) case final headline?) ...[
+                    if (headline.kind == 'unproven')
+                      const Text('On paper, not proven'),
+                    if (headline.kind == 'guess')
+                      const Text('No single answer'),
+                    if (const {'answer', 'fast', 'mix'}.contains(headline.kind))
+                      const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Icon(Icons.check_circle_rounded,
+                              color: AfterimageTheme.accentStrong)),
+                    Text(headline.text,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                            color: headline.kind == 'unproven'
+                                ? AfterimageTheme.blocked
+                                : headline.kind == 'guess'
+                                    ? null
+                                    : AfterimageTheme.accentStrong)),
+                  ],
+                  for (final note in spot.notes.where((n) => !{
+                        'answer',
+                        'fast',
+                        'mix',
+                        'unproven',
+                        'guess',
+                        'habit',
+                        'route',
+                        'disproved',
+                        'losses'
+                      }.contains(n.kind)))
+                    Text(note.text, style: theme.textTheme.bodySmall),
+                  for (final note
+                      in spot.notes.where((n) => n.kind == 'disproved'))
+                    for (final row in note.rows)
+                      Row(
+                          key: ValueKey('disproved-$row|${note.versus}'),
+                          children: [
+                            Expanded(
+                                child: Text(
+                                    '$row lost to ${note.versus ?? 'opponent'} ${note.points.length} ${note.points.length == 1 ? 'time' : 'times'}, timing says it should win')),
+                            TextButton(
+                                onPressed: () => widget.onWatch(note.points,
+                                    row, note.versus ?? 'opponent'),
+                                child: const Text('Watch')),
+                          ]),
+                  for (final note
+                      in spot.notes.where((n) => n.kind == 'losses'))
+                    Text(note.text,
+                        style:
+                            theme.textTheme.bodySmall?.copyWith(color: muted)),
+                ],
+              ),
+            ),
+          if (spot.opponentRows.isNotEmpty && spot.playerRows.isNotEmpty)
+            _table(context, spot)
+          else if (spot.playerRows.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                '${spot.player ?? 'Player'} did: ${[
+                  for (final row in spot.playerRows.where((row) => row.seen))
+                    '${row.name} ${row.count}'
+                        '${row.hit > 0 ? ' (got hit ${row.hit})' : ''}'
+                ].join(', ')}',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+          if (hidden > 0 && spot.opponentRows.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                key: const ValueKey('toggle-unseen'),
+                onPressed: () => setState(() => _unseen = !_unseen),
+                child: Text(_unseen
+                    ? 'Hide options not seen yet'
+                    : 'Show options not seen yet ($hidden)'),
+              ),
+            ),
+          if (widget.summary.note case final note?)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(note,
+                  style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _table(BuildContext context, SituationSpot spot) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final small = theme.textTheme.bodySmall;
+    final player = spot.player ?? 'Player';
+    final opponent = spot.opponent ?? 'Opponent';
+    final columns = [
+      for (final row in spot.opponentRows)
+        if (row.count > 0 || _unseen) row
+    ]..sort((a, b) => b.count.compareTo(a.count));
+    final rows = [
+      for (final row in spot.playerRows)
+        if (row.seen ||
+            _unseen ||
+            (_headline(spot)?.rows.contains(row.name) ?? false))
+          row
+    ];
+
+    Widget heading(SituationSummaryRow row, {required bool mine}) {
+      final seen = row.count <= 0
+          ? 'not seen'
+          : mine && row.hit > 0
+              ? '${row.count} of ${row.of} · hit ${row.hit}'
+              : '${row.count} of ${row.of}';
+      final move = row.moves
+          .map((id) => widget.moves[id])
+          .whereType<MoveCard>()
+          .firstOrNull;
+      if (mine) {
+        return SizedBox(
+            key: ValueKey('row-label-${row.name}'),
+            height: 70,
+            child: Row(children: [
+              SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: move == null
+                      ? null
+                      : FittedBox(child: MoveThumb(move: move, size: 40))),
+              const SizedBox(width: 6),
+              Expanded(
+                  child: Tooltip(
+                      message: row.how,
+                      child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(row.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700)),
+                            Text(
+                                row.seen
+                                    ? 'picked ${row.count}${row.hit > 0 ? ' · got hit ${row.hit}' : ''}'
+                                    : 'not tried',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: small?.copyWith(color: muted)),
+                            if (row.how.isNotEmpty)
+                              Text(row.how,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: small?.copyWith(color: muted)),
+                          ]))),
+            ]));
+      }
+      return Tooltip(
+          message: row.how,
+          child: Opacity(
+            opacity: row.count > 0 ? 1 : 0.6,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Column(
+                crossAxisAlignment:
+                    mine ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+                children: [
+                  if (move != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: MoveThumb(move: move, size: 44),
+                    ),
+                  Text(row.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: mine ? TextAlign.start : TextAlign.center,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  Text(seen,
+                      textAlign: mine ? TextAlign.start : TextAlign.center,
+                      style: small?.copyWith(color: muted)),
+                  LinearProgressIndicator(
+                    key: ValueKey('opponent-bar-${row.name}'),
+                    value: spot.count > 0
+                        ? (row.count / spot.count).clamp(0.0, 1.0)
+                        : 0,
+                    minHeight: 3,
+                  ),
+                ],
+              ),
+            ),
+          ));
+    }
+
+    Widget cell(SituationSummaryRow mine, SituationSummaryRow theirs) {
+      final lost = mine.disproved[theirs.name];
+      final proof = mine.proof[theirs.name];
+      final seen = mine.seenVs[theirs.name];
+      final (String state, IconData? icon, Color color, String tip) =
+          lost != null
+              ? (
+                  'disproved',
+                  Icons.warning_amber_rounded,
+                  AfterimageTheme.blocked,
+                  'Should win on timing, but lost here '
+                      '${lost == 1 ? 'once' : '$lost times'}'
+                )
+              : mine.beats.contains(theirs.name)
+                  ? (
+                      'win',
+                      proof == 'paper'
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.check_circle_rounded,
+                      AfterimageTheme.accentStrong,
+                      '$player ${mine.name} beats $opponent ${theirs.name}'
+                    )
+                  : mine.losesTo.contains(theirs.name)
+                      ? (
+                          'lose',
+                          proof == 'paper'
+                              ? Icons.highlight_off_rounded
+                              : Icons.cancel_rounded,
+                          AfterimageTheme.failed,
+                          '$player ${mine.name} loses to $opponent ${theirs.name}'
+                        )
+                      : ('open', null, muted, 'Not settled by the rules');
+      final details = [
+        if ((seen?.won ?? 0) > 0) 'won ${seen!.won}',
+        if ((seen?.lost ?? 0) > 0) 'hit ${seen!.lost}',
+        if ((seen?.pressure ?? 0) > 0) 'blocked ${seen!.pressure}',
+        if ((seen?.neutral ?? 0) > 0) 'reset ${seen!.neutral}'
+      ].join(' · ');
+      return Tooltip(
+        message: seen != null && seen.points.isNotEmpty
+            ? 'Watch ${seen.points.length} ${seen.points.length == 1 ? 'clip' : 'clips'}'
+            : mine.basis[theirs.name] ?? tip,
+        child: InkWell(
+            onTap: seen != null && seen.points.isNotEmpty
+                ? () => widget.onWatch(seen.points, mine.name, theirs.name)
+                : null,
+            child: Container(
+              key: ValueKey('cell-${mine.name}|${theirs.name}-$state'),
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                if (icon != null)
+                  Icon(icon,
+                      key: proof == 'rule' || proof == 'paper'
+                          ? ValueKey(
+                              'cell-proof-${mine.name}|${theirs.name}-$proof')
+                          : null,
+                      size: 20,
+                      color: proof == 'paper'
+                          ? color.withValues(alpha: .75)
+                          : color)
+                else if (details.isEmpty)
+                  Text('·',
+                      style:
+                          theme.textTheme.titleMedium?.copyWith(color: muted)),
+                if (details.isNotEmpty)
+                  Text(details,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: small?.copyWith(color: muted)),
+              ]),
+            )),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(builder: (context, constraints) {
+            final width = columns.isEmpty
+                ? 76.0
+                : ((constraints.maxWidth - 250) / columns.length)
+                    .clamp(76.0, 130.0);
+            final tableWidth = 250.0 + width * columns.length;
+            final table = SizedBox(
+                width: tableWidth,
+                child: Table(
+                  key: const ValueKey('rps-table'),
+                  defaultColumnWidth: FixedColumnWidth(width),
+                  columnWidths: const {0: FixedColumnWidth(250)},
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  border: const TableBorder(
+                    horizontalInside:
+                        BorderSide(color: AfterimageTheme.hairline),
+                  ),
+                  children: [
+                    TableRow(children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                        child: Text('$player ↓   $opponent →'.toUpperCase(),
+                            style: small?.copyWith(
+                                color: muted, letterSpacing: 0.6)),
+                      ),
+                      for (final column in columns)
+                        heading(column, mine: false),
+                    ]),
+                    for (final row in rows)
+                      TableRow(children: [
+                        heading(row, mine: true),
+                        for (final column in columns) cell(row, column),
+                      ]),
+                  ],
+                ));
+            if (tableWidth <= constraints.maxWidth) {
+              return Align(alignment: Alignment.centerLeft, child: table);
+            }
+            return _HorizontalReadScroll(child: table);
+          }),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Wrap(
+              spacing: 16,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _legend(Icons.check_circle_rounded,
+                    AfterimageTheme.accentStrong, 'proven win', small, muted),
+                _legend(Icons.cancel_rounded, AfterimageTheme.failed,
+                    'proven loss', small, muted),
+                if (spot.playerRows.any((row) => row.proof.isNotEmpty)) ...[
+                  _legend(
+                      Icons.check_circle_outline_rounded,
+                      AfterimageTheme.accentStrong,
+                      'on paper win',
+                      small,
+                      muted),
+                  _legend(Icons.highlight_off_rounded, AfterimageTheme.failed,
+                      'on paper loss', small, muted),
+                ],
+                _legend(Icons.warning_amber_rounded, AfterimageTheme.blocked,
+                    'should win, lost here', small, muted),
+                Text('·  not settled', style: small?.copyWith(color: muted)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _legend(IconData icon, Color color, String text, TextStyle? style,
+          Color muted) =>
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 5),
+        Text(text, style: style?.copyWith(color: muted)),
+      ]);
+}
+
+class _HorizontalReadScroll extends StatefulWidget {
+  const _HorizontalReadScroll({required this.child});
+  final Widget child;
+  @override
+  State<_HorizontalReadScroll> createState() => _HorizontalReadScrollState();
+}
+
+class _HorizontalReadScrollState extends State<_HorizontalReadScroll> {
+  final controller = ScrollController();
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scrollbar(
+      controller: controller,
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+          controller: controller,
+          scrollDirection: Axis.horizontal,
+          child: widget.child));
+}
 
 class _SituationReadPanel extends StatelessWidget {
   const _SituationReadPanel({
