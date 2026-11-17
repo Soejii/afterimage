@@ -6,7 +6,7 @@ This file records what works in the current alpha and what is still unverified.
 - The development branch adds Linux live match capture without input or OBS;
   end-to-end operation against a real online set remains unverified.
 
-Version `0.3.7+13` is an alpha desktop release:
+Version `0.3.8+14` is an alpha desktop release:
 
 - One Material 3 dark workspace screen that moves through four states:
   blocked, ready, running, and finished. While blocked it leads with a single
