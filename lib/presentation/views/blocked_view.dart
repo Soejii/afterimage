@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme.dart';
 import '../recorder_blocker.dart';
 import '../recorder_controller.dart';
+import '../ui/ui.dart';
 import '../widgets/diagnostics_drawer.dart';
 import '../widgets/obs_setup_guide.dart';
 import '../widgets/status_surface.dart';
@@ -45,14 +46,22 @@ class BlockedView extends StatelessWidget {
     final rest = blockers.skip(1).toList();
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(28, 24, 28, 36),
+      padding: const EdgeInsets.fromLTRB(28, 36, 28, 40),
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 820),
+          constraints: const BoxConstraints(maxWidth: 680),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              const Text('Not ready to record yet', style: Ui.h1),
+              const SizedBox(height: 6),
+              Text(
+                  blockers.length == 1
+                      ? 'One thing to sort out first.'
+                      : '${blockers.length} things to sort out first, one at a time.',
+                  style: Ui.bodyMid),
+              const SizedBox(height: 22),
               if (errorMessage != null) ...[
                 StatusSurface(
                   tone: StatusTone.failed,
@@ -116,65 +125,62 @@ class _LeadBlocker extends StatelessWidget {
     final isObs = blocker.id == RecorderBlockerId.obsConnection;
     final connection = controller.obsConnection;
 
-    return Card(
+    return UiPanel(
       key: const ValueKey('lead-blocker'),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      border: AfterimageTheme.blocked.withValues(alpha: 0.4),
+      padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.arrow_circle_right_outlined,
+                size: 16, color: AfterimageTheme.blocked),
+            SizedBox(width: 8),
+            UiCaps('Do this now', color: AfterimageTheme.blocked),
+          ]),
+          const SizedBox(height: 12),
+          if (isObs && connection != null)
+            // OBS is the one wall Afterimage refuses to climb for the user,
+            // so it gets the illustrated guide instead of one sentence.
+            ObsSetupGuide(
+              stage: connection.stage,
+              isBusy: isRefreshing || controller.isBusy,
+              onOpenObsDownload: controller.openObsDownload,
+              onConnect: () async {
+                await connection.useAutomaticConnection();
+                if (connection.result?.ready == true) {
+                  await onRefresh();
+                }
+              },
+            )
+          else ...[
             Text(
-              'NEXT STEP',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: AfterimageTheme.blocked,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.2,
+              blocker.label,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 12),
-            if (isObs && connection != null)
-              // OBS is the one wall Afterimage refuses to climb for the user,
-              // so it gets the illustrated guide instead of one sentence.
-              ObsSetupGuide(
-                stage: connection.stage,
-                isBusy: isRefreshing || controller.isBusy,
-                onOpenObsDownload: controller.openObsDownload,
-                onConnect: () async {
-                  await connection.useAutomaticConnection();
-                  if (connection.result?.ready == true) {
-                    await onRefresh();
-                  }
-                },
-              )
-            else ...[
-              Text(
-                blocker.label,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            const SizedBox(height: 8),
+            Text(
+              blocker.message,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.45,
               ),
-              const SizedBox(height: 8),
-              Text(
-                blocker.message,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  height: 1.45,
-                ),
-              ),
-              const SizedBox(height: 16),
-              _BlockerAction(
-                blocker: blocker,
-                controller: controller,
-                isRefreshing: isRefreshing,
-                onRefresh: onRefresh,
-              ),
-            ],
-            if (isObs && obsConnectionCard != null) ...[
-              const SizedBox(height: 18),
-              obsConnectionCard!,
-            ],
+            ),
+            const SizedBox(height: 16),
+            _BlockerAction(
+              blocker: blocker,
+              controller: controller,
+              isRefreshing: isRefreshing,
+              onRefresh: onRefresh,
+            ),
           ],
-        ),
+          if (isObs && obsConnectionCard != null) ...[
+            const SizedBox(height: 18),
+            obsConnectionCard!,
+          ],
+        ],
       ),
     );
   }
@@ -255,7 +261,8 @@ class _BlockerAction extends StatelessWidget {
   }
 }
 
-/// The remaining blockers, as a compact honest count.
+/// The remaining blockers, each with its sentence, so nothing waits behind a
+/// tooltip.
 class _RemainingStrip extends StatelessWidget {
   const _RemainingStrip({required this.blockers});
 
@@ -263,56 +270,51 @@ class _RemainingStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Column(
       key: const ValueKey('remaining-blockers'),
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'AFTER THAT',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 9,
-          runSpacing: 9,
-          children: [
-            for (final blocker in blockers)
-              Tooltip(
-                message: blocker.message,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        const UiCaps('After that'),
+        const SizedBox(height: 8),
+        UiPanel(
+          padding: const EdgeInsets.fromLTRB(18, 6, 18, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var index = 0; index < blockers.length; index++)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 11),
                   decoration: BoxDecoration(
-                    color: AfterimageTheme.panelRaised,
-                    borderRadius: BorderRadius.circular(9),
-                    border: Border.all(color: AfterimageTheme.hairline),
-                  ),
+                      border: index == 0
+                          ? null
+                          : const Border(
+                              top:
+                                  BorderSide(color: AfterimageTheme.hairline))),
                   child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        Icons.circle_outlined,
-                        size: 13,
-                        color: AfterimageTheme.blocked,
+                      const Padding(
+                        padding: EdgeInsets.only(top: 3),
+                        child: Icon(Icons.circle_outlined,
+                            size: 14, color: Ui.inkLow),
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        blocker.label,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(blockers[index].label,
+                                style: Ui.body
+                                    .copyWith(fontWeight: FontWeight.w600)),
+                            Text(blockers[index].message, style: Ui.small),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ],
     );

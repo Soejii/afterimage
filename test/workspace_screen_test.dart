@@ -33,20 +33,56 @@ void main() {
     await tester.pump();
 
     expect(
-      tester
-          .widget<TextButton>(find.byKey(const ValueKey('open-notes')))
-          .onPressed,
+      tester.widget<InkWell>(find.byKey(const ValueKey('open-notes'))).onTap,
       isNull,
     );
     expect(find.byKey(const ValueKey('open-notes-from-done')), findsNothing);
+  });
+
+  testWidgets('header tabs switch views and disappear during a batch',
+      (tester) async {
+    final controller = _DoneController();
+    addTearDown(controller.dispose);
+    var showingNotes = false;
+    late StateSetter update;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: StatefulBuilder(
+      builder: (context, setState) {
+        update = setState;
+        return WorkspaceScreen(
+          controller: controller,
+          notesRepository: NotesRepository(finderDirectory: '/unused'),
+          showNotes: showingNotes,
+          isRefreshing: false,
+          onRefresh: () async {},
+          onOpenNotes: (_) => setState(() => showingNotes = true),
+          onCloseNotes: () => setState(() => showingNotes = false),
+        );
+      },
+    ))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('open-notes')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byKey(const ValueKey('notes-list-view')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('close-notes')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byKey(const ValueKey('done-view')), findsOneWidget);
+    update(() => controller.currentPhase = RecorderPhase.running);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byKey(const ValueKey('open-notes')), findsNothing);
+    expect(find.byKey(const ValueKey('close-notes')), findsNothing);
   });
 }
 
 class _DoneController extends RecorderController {
   _DoneController() : super(backend: _NoopBackend());
 
+  RecorderPhase currentPhase = RecorderPhase.done;
+
   @override
-  RecorderPhase get phase => RecorderPhase.done;
+  RecorderPhase get phase => currentPhase;
 
   @override
   ReplayBatchResult? get result => const ReplayBatchResult(

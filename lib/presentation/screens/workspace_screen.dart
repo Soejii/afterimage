@@ -10,6 +10,7 @@ import '../views/ready_view.dart';
 import '../views/running_view.dart';
 import '../notes_pages.dart';
 import '../widgets/afterimage_brand.dart';
+import '../ui/ui.dart';
 import '../widgets/phase_indicator.dart';
 
 /// Afterimage's only screen.
@@ -77,13 +78,22 @@ class WorkspaceScreen extends StatelessWidget {
               notesAvailable:
                   notesRepository != null && phase != RecorderPhase.running,
               notesSaving: notesSaving,
+              showingNotes: showNotes && phase != RecorderPhase.running,
               onOpenNotes: () => onOpenNotes?.call(null),
+              onCloseNotes: onCloseNotes ?? () {},
             ),
             Expanded(
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 180),
                 switchInCurve: Curves.easeOut,
                 switchOutCurve: Curves.easeIn,
+                // Pages start at the top. The default centres a short page in
+                // the window, which left content floating mid-screen.
+                layoutBuilder: (current, previous) => Stack(
+                  alignment: Alignment.topCenter,
+                  fit: StackFit.expand,
+                  children: [...previous, if (current != null) current],
+                ),
                 child: _body(phase, message),
               ),
             ),
@@ -156,19 +166,23 @@ class _WorkspaceHeader extends StatelessWidget {
     required this.controller,
     required this.notesAvailable,
     required this.notesSaving,
+    required this.showingNotes,
     required this.onOpenNotes,
+    required this.onCloseNotes,
   });
 
   final RecorderPhase phase;
   final RecorderController controller;
   final bool notesAvailable;
   final bool notesSaving;
+  final bool showingNotes;
   final VoidCallback onOpenNotes;
+  final VoidCallback onCloseNotes;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(28, 20, 28, 18),
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: Theme.of(context).dividerColor),
@@ -177,17 +191,69 @@ class _WorkspaceHeader extends StatelessWidget {
       child: Row(
         children: [
           const AfterimageBrand(),
-          const Spacer(),
-          if (notesAvailable)
-            TextButton.icon(
-              key: const ValueKey('open-notes'),
-              onPressed: notesSaving ? null : onOpenNotes,
-              icon: const Icon(Icons.playlist_play_rounded),
-              label: const Text('Sequences'),
+          const SizedBox(width: 26),
+          if (notesAvailable) ...[
+            _NavTab(
+              tabKey: const ValueKey('close-notes'),
+              label: 'Record',
+              icon: Icons.fiber_manual_record_rounded,
+              selected: !showingNotes,
+              onTap: notesSaving || !showingNotes ? null : onCloseNotes,
             ),
-          if (notesAvailable) const SizedBox(width: 8),
+            const SizedBox(width: 4),
+            _NavTab(
+              tabKey: const ValueKey('open-notes'),
+              label: 'Sequences',
+              icon: Icons.insights_rounded,
+              selected: showingNotes,
+              onTap: notesSaving ? null : onOpenNotes,
+            ),
+          ],
+          const Spacer(),
           PhaseIndicator(phase: phase, controller: controller),
         ],
+      ),
+    );
+  }
+}
+
+/// One of the two places in the application: recording, and reviewing.
+class _NavTab extends StatelessWidget {
+  const _NavTab({
+    required this.tabKey,
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Key tabKey;
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? const Color(0xFF1E2827) : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        key: tabKey,
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        hoverColor: Colors.white.withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: selected ? Ui.ink : Ui.inkLow),
+            const SizedBox(width: 8),
+            Text(label,
+                style: Ui.body.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: selected ? Ui.ink : Ui.inkMid)),
+          ]),
+        ),
       ),
     );
   }

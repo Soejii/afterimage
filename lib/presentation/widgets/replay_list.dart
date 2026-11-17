@@ -89,6 +89,8 @@ class _ReplayListState extends State<ReplayList> {
             child: ListView.builder(
               key: const ValueKey('replay-timeline'),
               controller: _scrollController,
+              // A short batch takes only the rows it has; a long one scrolls.
+              shrinkWrap: true,
               padding: const EdgeInsets.symmetric(vertical: 6),
               itemExtent: _rowExtent,
               itemCount: widget.rows.length,

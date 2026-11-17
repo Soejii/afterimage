@@ -342,11 +342,7 @@ class _StartPanel extends StatelessWidget {
                     'GGST and records $count '
                     '${count == 1 ? 'replay' : 'replays'} upward from there, '
                     'into one video.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: AfterimageTheme.readyText,
-              height: 1.4,
-              fontWeight: FontWeight.w600,
-            ),
+            style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
           ),
         ),
         const SizedBox(height: 14),
