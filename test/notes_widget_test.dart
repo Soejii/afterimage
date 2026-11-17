@@ -523,6 +523,24 @@ void main() {
     expect(text, isNot(contains('section_center_raw:')));
   });
 
+  testWidgets('clip tab identifies sets with no video', (tester) async {
+    final json = step13();
+    for (final rawCard in json['cards'] as List) {
+      final card = rawCard as Map<String, dynamic>;
+      for (final rawSequence in (card['sequences'] as List? ?? [])) {
+        (rawSequence as Map<String, dynamic>)['clip'] = null;
+      }
+    }
+    await _pumpLedger(tester, json, width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
+    await _tapKey(tester, 'card-tab-clips-c14');
+    expect(find.byKey(const ValueKey('no-video-notice')), findsOneWidget);
+    await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
+    await _tapKey(tester, 'card-tab-clips-c14');
+    expect(find.byKey(const ValueKey('no-video-notice')), findsNothing);
+  });
+
   testWidgets('old summary without new fields retains lines and solid icons',
       (tester) async {
     final json = step13();

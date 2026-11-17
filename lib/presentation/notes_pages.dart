@@ -680,6 +680,14 @@ class _NotesPageState extends State<NotesPage> {
         : card.sequences.where((s) => filter.$1.contains(s.id)).toList();
     final strivelabs = data.document.strivelabsRecordings;
     final clips = <Widget>[
+      if (data.document.clipErrors.isEmpty &&
+          data.document.cards
+              .expand((card) => card.sequences)
+              .every((sequence) => sequence.clip == null))
+        const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text('This set has frame data only, so there are no clips.',
+                key: ValueKey('no-video-notice'), style: Ui.small)),
       if (filter != null)
         Container(
           key: ValueKey('clip-filter-${card.id}'),

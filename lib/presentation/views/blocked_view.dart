@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../domain/setup_models.dart';
 import '../recorder_blocker.dart';
 import '../recorder_controller.dart';
 import '../ui/ui.dart';
@@ -83,6 +84,14 @@ class BlockedView extends StatelessWidget {
                 onRefresh: onRefresh,
                 obsConnectionCard: obsConnectionCard,
               ),
+              if (lead.id == RecorderBlockerId.obsConnection &&
+                  controller.frameCaptureSupported)
+                TextButton(
+                    key: const ValueKey('use-data-only'),
+                    onPressed: () => controller.updateOptions(
+                        controller.options.copyWith(videoMode: VideoMode.none)),
+                    child: const Text(
+                        'Or skip the video and capture frame data only')),
               if (rest.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 _RemainingStrip(blockers: rest),

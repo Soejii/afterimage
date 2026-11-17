@@ -14,10 +14,12 @@ class ReplayList extends StatefulWidget {
     super.key,
     required this.rows,
     this.maxHeight = 260,
+    this.dataOnly = false,
   });
 
   final List<ReplayRow> rows;
   final double maxHeight;
+  final bool dataOnly;
 
   @override
   State<ReplayList> createState() => _ReplayListState();
@@ -94,8 +96,8 @@ class _ReplayListState extends State<ReplayList> {
               padding: const EdgeInsets.symmetric(vertical: 6),
               itemExtent: _rowExtent,
               itemCount: widget.rows.length,
-              itemBuilder: (context, position) =>
-                  _ReplayRowTile(row: widget.rows[position]),
+              itemBuilder: (context, position) => _ReplayRowTile(
+                  row: widget.rows[position], dataOnly: widget.dataOnly),
             ),
           ),
         ),
@@ -137,9 +139,10 @@ class _CountsLine extends StatelessWidget {
 }
 
 class _ReplayRowTile extends StatelessWidget {
-  const _ReplayRowTile({required this.row});
+  const _ReplayRowTile({required this.row, required this.dataOnly});
 
   final ReplayRow row;
+  final bool dataOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -163,7 +166,7 @@ class _ReplayRowTile extends StatelessWidget {
       ReplayRowStatus.active => (
           Icons.fiber_manual_record,
           AfterimageTheme.recording,
-          'Recording now',
+          dataOnly ? 'Capturing now' : 'Recording now',
         ),
       ReplayRowStatus.pending => (
           Icons.schedule,

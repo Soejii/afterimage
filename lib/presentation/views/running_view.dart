@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
+import '../../domain/setup_models.dart';
 import '../recorder_controller.dart';
 import '../replay_timeline.dart';
 import '../widgets/replay_list.dart';
@@ -72,7 +73,9 @@ class _RunningViewState extends State<RunningView> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            phaseLabelFor(progress.state),
+                            controller.options.videoMode == VideoMode.none
+                                ? 'Capturing replays'
+                                : phaseLabelFor(progress.state),
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w700,
                             ),
@@ -126,7 +129,9 @@ class _RunningViewState extends State<RunningView> {
                 ),
               ),
               const SizedBox(height: 22),
-              ReplayList(rows: rows),
+              ReplayList(
+                  rows: rows,
+                  dataOnly: controller.options.videoMode == VideoMode.none),
               if (controller.error != null) ...[
                 const SizedBox(height: 18),
                 StatusSurface(
@@ -166,7 +171,7 @@ class _RunningViewState extends State<RunningView> {
               const SizedBox(height: 10),
               Center(
                 child: Text(
-                  'Stopping keeps whatever has been recorded so far. '
+                  '${controller.options.videoMode == VideoMode.none ? 'Stopping keeps the frame data captured so far.' : 'Stopping keeps whatever has been recorded so far.'} '
                   'Do not use the replay menu while this runs.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.labelSmall?.copyWith(

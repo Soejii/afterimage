@@ -6,6 +6,7 @@ import '../../app/theme.dart';
 import '../../domain/setup_models.dart';
 import '../recorder_blocker.dart';
 import '../recorder_controller.dart';
+import '../ui/ui.dart';
 import '../widgets/batch_form_fields.dart';
 import '../widgets/diagnostics_drawer.dart';
 import '../widgets/section_card.dart';
@@ -51,9 +52,93 @@ class ReadyView extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
               ],
+              SizedBox(
+                  width: double.infinity,
+                  child: UiPanel(
+                    key: const ValueKey('capture-gateway'),
+                    // Spans the form like the panels below it.
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const UiCaps('What to capture'),
+                          const SizedBox(height: 8),
+                          Wrap(
+                              key: const ValueKey('capture-mode'),
+                              spacing: 8,
+                              children: [
+                                ChoiceChip(
+                                    key: const ValueKey('capture-mode-video'),
+                                    label: const Text('Video'),
+                                    selected:
+                                        options.videoMode != VideoMode.none,
+                                    onSelected: (_) => controller.updateOptions(
+                                        options.copyWith(
+                                            videoMode: VideoMode.combined))),
+                                Tooltip(
+                                    message: controller.frameCaptureSupported
+                                        ? 'Capture frame data without video'
+                                        : controller
+                                            .frameCaptureUnavailableReason,
+                                    child: ChoiceChip(
+                                        key:
+                                            const ValueKey('capture-mode-data'),
+                                        label: const Text('Frame data only'),
+                                        selected:
+                                            options.videoMode == VideoMode.none,
+                                        onSelected: controller
+                                                .frameCaptureSupported
+                                            ? (_) => controller.updateOptions(
+                                                options.copyWith(
+                                                    videoMode: VideoMode.none))
+                                            : null)),
+                              ]),
+                          const SizedBox(height: 8),
+                          Text(
+                              options.videoMode == VideoMode.none
+                                  ? 'No video and no OBS. Plays the replays and saves their frame data.'
+                                  : 'Records one video with OBS.',
+                              style: Ui.small),
+                          if (options.capturesFrameData) ...[
+                            const SizedBox(height: 18),
+                            const UiCaps('Whose replays'),
+                            const SizedBox(height: 8),
+                            Wrap(
+                                key: const ValueKey('replay-owner'),
+                                spacing: 8,
+                                children: [
+                                  ChoiceChip(
+                                      key: const ValueKey('replay-owner-own'),
+                                      label: const Text('My games'),
+                                      selected: options.replayOwner ==
+                                          ReplayOwner.own,
+                                      onSelected: (_) => controller
+                                          .updateOptions(options.copyWith(
+                                              replayOwner: ReplayOwner.own))),
+                                  ChoiceChip(
+                                      key: const ValueKey(
+                                          'replay-owner-reference'),
+                                      label: const Text('High-level reference'),
+                                      selected: options.replayOwner ==
+                                          ReplayOwner.reference,
+                                      onSelected: (_) => controller
+                                          .updateOptions(options.copyWith(
+                                              replayOwner:
+                                                  ReplayOwner.reference))),
+                                ]),
+                            const SizedBox(height: 8),
+                            const Text(
+                                'Reference sets are kept out of your own history.',
+                                style: Ui.small),
+                          ],
+                        ]),
+                  )),
+              const SizedBox(height: 16),
               SectionCard(
                 title: 'How many replays',
-                subtitle: 'Afterimage records one video for the whole batch.',
+                subtitle: options.videoMode == VideoMode.none
+                    ? 'Afterimage captures frame data for the whole batch.'
+                    : 'Afterimage records one video for the whole batch.',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -179,13 +264,12 @@ class _AdvancedOptions extends StatelessWidget {
             ),
             CheckboxListTile(
               key: const ValueKey('capture-frame-data'),
-              value: options.captureFrameData,
-              onChanged: controller.frameCaptureSupported
+              value: options.capturesFrameData,
+              onChanged: controller.frameCaptureSupported &&
+                      options.videoMode != VideoMode.none
                   ? (value) => controller.updateOptions(
                         options.copyWith(
                           captureFrameData: value ?? false,
-                          referenceBatch:
-                              value == true && options.referenceBatch,
                         ),
                       )
                   : null,
@@ -202,32 +286,23 @@ class _AdvancedOptions extends StatelessWidget {
               dense: true,
             ),
             SwitchListTile(
-              key: const ValueKey('reference-batch'),
-              value: options.referenceBatch && options.captureFrameData,
-              onChanged: options.captureFrameData
-                  ? (value) => controller.updateOptions(
-                        options.copyWith(referenceBatch: value),
-                      )
-                  : null,
-              title: const Text('High-level reference replays'),
-              subtitle: const Text(
-                  'Replays of other players. Kept out of your own history.'),
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-            ),
-            SwitchListTile(
               key: const ValueKey('screen-guard-toggle'),
-              value: options.screenGuardEnabled,
-              onChanged: (value) => controller.updateOptions(
-                options.copyWith(screenGuardEnabled: value),
-              ),
+              value: options.videoMode != VideoMode.none &&
+                  options.screenGuardEnabled,
+              onChanged: options.videoMode == VideoMode.none
+                  ? null
+                  : (value) => controller.updateOptions(
+                        options.copyWith(screenGuardEnabled: value),
+                      ),
               title: const Text(
                 'Check the game screen before each menu press',
               ),
               subtitle: Text(
-                controller.screenReferencesTaught
-                    ? 'Both game screens are taught on this computer.'
-                    : 'Teach the replay list and View Replay selection first.',
+                options.videoMode == VideoMode.none
+                    ? 'Needs OBS, which this mode does not use.'
+                    : controller.screenReferencesTaught
+                        ? 'Both game screens are taught on this computer.'
+                        : 'Teach the replay list and View Replay selection first.',
               ),
               contentPadding: EdgeInsets.zero,
               dense: true,
@@ -236,9 +311,11 @@ class _AdvancedOptions extends StatelessWidget {
               alignment: Alignment.centerLeft,
               child: OutlinedButton.icon(
                 key: const ValueKey('teach-screens'),
-                onPressed: () => unawaited(
-                  showTeachScreensDialog(context, controller),
-                ),
+                onPressed: options.videoMode == VideoMode.none
+                    ? null
+                    : () => unawaited(
+                          showTeachScreensDialog(context, controller),
+                        ),
                 icon: const Icon(Icons.photo_camera_outlined),
                 label: const Text('Teach screens'),
               ),
@@ -321,7 +398,9 @@ class _StartPanel extends StatelessWidget {
               key: const ValueKey('start-batch'),
               onPressed: null,
               icon: const Icon(Icons.lock_outline),
-              label: const Text('Start recording'),
+              label: Text(controller.options.videoMode == VideoMode.none
+                  ? 'Start capturing'
+                  : 'Start recording'),
             ),
           ),
         ],
@@ -339,9 +418,8 @@ class _StartPanel extends StatelessWidget {
                 ? 'Afterimage starts at the replay you have highlighted in '
                     'GGST and works upward through the list.'
                 : 'Afterimage starts at the replay you have highlighted in '
-                    'GGST and records $count '
-                    '${count == 1 ? 'replay' : 'replays'} upward from there, '
-                    'into one video.',
+                    'GGST and ${controller.options.videoMode == VideoMode.none ? 'captures' : 'records'} $count '
+                    '${count == 1 ? 'replay' : 'replays'} upward from there${controller.options.videoMode == VideoMode.none ? '.' : ', into one video.'}',
             style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
           ),
         ),
@@ -355,14 +433,20 @@ class _StartPanel extends StatelessWidget {
                 : null,
             icon: const Icon(Icons.fiber_manual_record),
             label: Text(
-              controller.isChecking ? 'Checking…' : 'Start recording',
+              controller.isChecking
+                  ? 'Checking…'
+                  : controller.options.videoMode == VideoMode.none
+                      ? 'Start capturing'
+                      : 'Start recording',
             ),
           ),
         ),
         const SizedBox(height: 10),
         Center(
           child: Text(
-            'Keep GGST and OBS open. Existing files are never overwritten.',
+            controller.options.videoMode == VideoMode.none
+                ? 'Keep GGST open. Existing files are never overwritten.'
+                : 'Keep GGST and OBS open. Existing files are never overwritten.',
             textAlign: TextAlign.center,
             style: theme.textTheme.labelSmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,

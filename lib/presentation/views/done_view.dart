@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme.dart';
 import '../../domain/replay_batch.dart';
+import '../../domain/setup_models.dart';
 import '../../domain/notes_models.dart';
 import '../../services/notes_repository.dart';
 import '../batch_outcome_summary.dart';
@@ -42,6 +43,7 @@ class DoneView extends StatelessWidget {
     final theme = Theme.of(context);
     final rows = timelineFromResult(result);
     final elapsed = controller.elapsed;
+    final dataOnly = controller.options.videoMode == VideoMode.none;
 
     final summary = BatchOutcomeSummary.of(result);
 
@@ -78,7 +80,9 @@ class DoneView extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      summary.headline,
+                      dataOnly && result.outcome == ReplayBatchOutcome.completed
+                          ? 'Frame data captured'
+                          : summary.headline,
                       key: const ValueKey('result-headline'),
                       style: theme.textTheme.titleMedium?.copyWith(
                         color: summary.tone.color,
@@ -87,14 +91,16 @@ class DoneView extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      !videoProduced
-                          ? '$reachedTheVideo '
-                              '${reachedTheVideo == 1 ? 'replay was' : 'replays were'} '
-                              'recorded, but the video could not be saved.'
-                          : elapsed == null
-                              ? '$saved ${saved == 1 ? 'replay' : 'replays'} saved.'
-                              : '$saved ${saved == 1 ? 'replay' : 'replays'} saved '
-                                  'in ${formatElapsed(elapsed)}.',
+                      dataOnly
+                          ? '$reachedTheVideo ${reachedTheVideo == 1 ? 'replay' : 'replays'} captured${elapsed == null ? '.' : ' in ${formatElapsed(elapsed).padLeft(5, '0')}.'}'
+                          : !videoProduced
+                              ? '$reachedTheVideo '
+                                  '${reachedTheVideo == 1 ? 'replay was' : 'replays were'} '
+                                  'recorded, but the video could not be saved.'
+                              : elapsed == null
+                                  ? '$saved ${saved == 1 ? 'replay' : 'replays'} saved.'
+                                  : '$saved ${saved == 1 ? 'replay' : 'replays'} saved '
+                                      'in ${formatElapsed(elapsed)}.',
                       key: const ValueKey('result-summary'),
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
@@ -127,7 +133,7 @@ class DoneView extends StatelessWidget {
               const SizedBox(height: 20),
               _OutputPanel(controller: controller),
               const SizedBox(height: 22),
-              ReplayList(rows: rows, maxHeight: 300),
+              ReplayList(rows: rows, maxHeight: 300, dataOnly: dataOnly),
               const SizedBox(height: 24),
               SizedBox(
                 height: 54,
@@ -135,7 +141,9 @@ class DoneView extends StatelessWidget {
                   key: const ValueKey('record-another-batch'),
                   onPressed: controller.clearResult,
                   icon: const Icon(Icons.replay_rounded),
-                  label: const Text('Record another batch'),
+                  label: Text(dataOnly
+                      ? 'Capture another batch'
+                      : 'Record another batch'),
                 ),
               ),
               const SizedBox(height: 10),
@@ -374,6 +382,7 @@ class _OutputPanel extends StatelessWidget {
     final theme = Theme.of(context);
     final paths = controller.outputPaths;
     final directory = controller.batchOutputDirectory;
+    final dataOnly = controller.options.videoMode == VideoMode.none;
 
     return Card(
       child: Padding(
@@ -382,13 +391,13 @@ class _OutputPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Your video',
+              dataOnly ? 'Batch folder' : 'Your video',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 10),
-            if (paths.isEmpty)
+            if (paths.isEmpty && !dataOnly)
               Text(
                 'No video file was produced. Anything OBS had already written '
                 'has been left in place.',
@@ -397,7 +406,7 @@ class _OutputPanel extends StatelessWidget {
                   height: 1.4,
                 ),
               )
-            else
+            else if (!dataOnly)
               for (final path in paths)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
@@ -421,7 +430,7 @@ class _OutputPanel extends StatelessWidget {
             if (directory != null && directory.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                'Batch folder: $directory',
+                dataOnly ? directory : 'Batch folder: $directory',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
@@ -440,7 +449,7 @@ class _OutputPanel extends StatelessWidget {
                   icon: const Icon(Icons.folder_open_outlined),
                   label: const Text('Open folder'),
                 ),
-                if (paths.isNotEmpty)
+                if (paths.isNotEmpty && !dataOnly)
                   OutlinedButton.icon(
                     key: const ValueKey('play-latest-output'),
                     onPressed: () =>
