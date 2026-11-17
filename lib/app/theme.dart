@@ -41,6 +41,9 @@ class AfterimageTheme {
   static const statusFillAlpha = 0.08;
   static const statusBorderAlpha = 0.24;
 
+  static const _ink = Color(0xFFE9EFED);
+  static const _inkMid = Color(0xFFAEBBB8);
+
   static ThemeData dark() {
     final scheme = ColorScheme.fromSeed(
       seedColor: accentStrong,
@@ -54,9 +57,11 @@ class AfterimageTheme {
       surfaceContainerHighest: panel,
       outline: hairlineStrong,
       outlineVariant: const Color(0xFF2B3434),
+      onSurface: _ink,
+      onSurfaceVariant: _inkMid,
     );
 
-    return ThemeData(
+    final base = ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
       colorScheme: scheme,
@@ -134,6 +139,29 @@ class AfterimageTheme {
         ),
       ),
       visualDensity: VisualDensity.standard,
+    );
+    // One readable scale for every screen: nothing below 12.5, body at 14.5.
+    final text = base.textTheme;
+    return base.copyWith(
+      textTheme: text
+          .copyWith(
+            headlineSmall: text.headlineSmall
+                ?.copyWith(fontSize: 24, fontWeight: FontWeight.w700),
+            titleLarge: text.titleLarge
+                ?.copyWith(fontSize: 21, fontWeight: FontWeight.w700),
+            titleMedium: text.titleMedium
+                ?.copyWith(fontSize: 17, fontWeight: FontWeight.w700),
+            titleSmall: text.titleSmall
+                ?.copyWith(fontSize: 14.5, fontWeight: FontWeight.w700),
+            bodyLarge: text.bodyLarge?.copyWith(fontSize: 16, height: 1.45),
+            bodyMedium: text.bodyMedium?.copyWith(fontSize: 14.5, height: 1.45),
+            bodySmall: text.bodySmall?.copyWith(fontSize: 13, height: 1.4),
+            labelLarge: text.labelLarge
+                ?.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
+            labelMedium: text.labelMedium?.copyWith(fontSize: 12.5),
+            labelSmall: text.labelSmall?.copyWith(fontSize: 11.5),
+          )
+          .apply(bodyColor: _ink, displayColor: _ink),
     );
   }
 }
