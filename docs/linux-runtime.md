@@ -79,6 +79,9 @@ The current automated tests use fake procfs, memory, keyboard, and controller
 providers. They do not claim that a live GGST process, gamescope display,
 XTest event, or uinput controller has been verified on this machine.
 
+Frame data only plays replays and saves sidecars without OBS or video. Choose
+whether the replays are your own or high-level reference for every capture batch.
+
 The first recording should be one replay. Confirm the resulting video has the
 expected picture and sound before starting a larger batch. This is especially
 important on Linux because OBS scenes, PipeWire or PulseAudio sources, display

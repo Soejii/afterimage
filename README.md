@@ -1,8 +1,9 @@
 # AFTERIMAGE
 
 Afterimage records Guilty Gear -Strive- saved replays through OBS Studio on
-Windows and Linux. It guides setup checks and keeps recording locked until the
-required checks pass.
+Windows and Linux. On supported computers it can also capture frame data without
+video or OBS. It guides setup checks and keeps Start locked until the required
+checks pass.
 
 ## Requirements
 
@@ -10,11 +11,11 @@ Before you start, make sure you have:
 
 - Windows 10 or 11, 64-bit, or a 64-bit Linux desktop.
 - Guilty Gear -Strive- installed through Steam, with at least one saved replay.
-- OBS Studio 28 or later. Version 28 is the first release that bundles the
+- For video, OBS Studio 28 or later. Version 28 is the first release that bundles the
   WebSocket server Afterimage uses to start and stop recording. The WebSocket
   server must be switched on once, in OBS, under **Tools > WebSocket Server
   Settings**.
-- OBS already configured to capture the game picture and sound. Afterimage does
+- For video, OBS already configured to capture the game picture and sound. Afterimage does
   not create or change OBS scenes or sources.
 - On Linux, the GTK 3, X11, and XTest runtime libraries. See
   [`docs/linux-runtime.md`](docs/linux-runtime.md). Keyboard input requires GGST
@@ -95,7 +96,11 @@ an OBS WebSocket is.
    its progress. Windows keyboard mode targets the game window directly, but
    game acceptance while covered remains unverified for both input modes.
 
-Afterimage records the whole batch into one video file. Each batch gets its own
+For frame data only, choose **Frame data only**, then say whether the replays are
+your own games or high-level reference. OBS and screen checks are not used. This
+choice is available only when the backend supports frame capture.
+
+For video, Afterimage records the whole batch into one video file. Each batch gets its own
 folder, so a second run cannot overwrite the first.
 
 Optionally, in **Replay controls**, turn on **Check the game screen before each

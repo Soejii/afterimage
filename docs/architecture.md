@@ -25,10 +25,14 @@ silently truncates recordings.
 
 `lib/services/replay_batch_engine.dart` owns the batch state machine over
 `ReplayBatchState`. It drives per-replay recording (`VideoMode.separate`) or one
-recording per batch (`VideoMode.combined`). The interface always requests
-`VideoMode.combined`; the separate path remains a supported engine capability
+recording per batch (`VideoMode.combined`). The interface offers combined video
+or `VideoMode.none`; the separate path remains a supported engine capability
 with its own tests, but nothing in the UI selects it. `SummaryWriterPort` is its checkpoint
 sink.
+
+In `VideoMode.none`, the engine captures frame data without using OBS or the
+output organizer. The controller supplies a throwing OBS port so accidental
+OBS calls are visible errors, and screen checks are off in this mode.
 
 The engine injects a monotonic `ReplayClock`, so timeout, polling, failure, and
 stop behavior can be tested without waiting in real time. It explicitly connects
@@ -164,7 +168,7 @@ already collects into a row per replay, and collapses the twelve
 Several of these look like defensive noise until you change them and a test
 turns red. They come from `AGENTS.md`'s safety boundaries.
 
-- **Start stays locked** until every required `SetupCheck`, the OBS connection,
+- **Start stays locked** until every required `SetupCheck`, the OBS connection for video modes,
   the readiness of the selected input mode, and the output folder all pass.
   There is deliberately no default output folder, so an empty one keeps
   recording locked rather than Afterimage choosing where to write video.
@@ -180,7 +184,7 @@ turns red. They come from `AGENTS.md`'s safety boundaries.
 - **Process memory is read-only.** `process_vm_readv` first, then
   `/proc/<pid>/mem` opened read-only as fallback; no write descriptor or write
   API is exposed.
-- **Frame capture is optional and off by default.** It reads raw values only,
+- **Frame capture is optional and off by default in video modes, and required in frame-data-only mode.** It reads raw values only,
   runs away from the UI and replay-monitor loop, and a capture error is recorded
   as a diagnostic without failing or truncating the replay or its OBS recording.
 - **A failed or unavailable screen check never sends the next key.** The

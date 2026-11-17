@@ -2,6 +2,8 @@
 
 This file records what works in the current alpha and what is still unverified.
 
+- Frame-data-only batches skip OBS and video, and ask whether replays are your own or high-level reference. Live GGST behavior remains unverified.
+
 Version `0.3.6+12` is an alpha desktop release:
 
 - One Material 3 dark workspace screen that moves through four states:
@@ -14,8 +16,8 @@ Version `0.3.6+12` is an alpha desktop release:
   follows native and Flatpak Steam library folders; Windows also checks common
   environment paths and Steam's read-only registry entries.
 - Production startup selects the real Windows or Linux native backend. Start
-  remains locked until the game, OBS, replay library, selected input mode, and
-  output folder all pass their checks.
+  remains locked until the game, replay library, selected input mode, and
+  output folder pass their checks, as well as OBS for video batches.
 - Keyboard automation is implemented on Windows through `SendInput` after
   bringing GGST to the front, and on
   Linux through targeted gamescope XTest events. Linux controller mode writes
@@ -34,7 +36,7 @@ Version `0.3.6+12` is an alpha desktop release:
   for frame movement before starting a battle, requires a result event or a
   duration-derived run of missing reads to finish it, and treats frozen frames
   as an in-progress replay.
-- Every batch records into one combined video, stopped and organized once at
+- Video batches record into one combined video, stopped and organized once at
   the end. The engine still supports per-replay recording behind
   `VideoMode.separate`, but no interface offers it. Failures and stop requests
   preserve the current source output as a partial recording when possible.
