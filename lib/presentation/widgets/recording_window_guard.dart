@@ -75,6 +75,8 @@ class RecordingWindowGuardState extends State<RecordingWindowGuard>
           ),
         );
         if (confirmed != true || !mounted) return;
+      } else if (controller.liveCaptureActive) {
+        await controller.stopAndWait();
       } else if (controller.isBusy) {
         final confirmed = await showDialog<bool>(
           context: context,

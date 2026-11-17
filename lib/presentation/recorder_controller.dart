@@ -284,6 +284,7 @@ class RecorderController extends ChangeNotifier {
   }
 
   Future<void> refreshAllReadiness() {
+    if (_liveActive) return Future.value();
     final current = _allReadinessFuture;
     if (current != null) return current;
     final future = _refreshAllReadiness();
@@ -333,6 +334,11 @@ class RecorderController extends ChangeNotifier {
   }
 
   Future<void> stopAndWait() async {
+    if (_liveActive) {
+      final done = _liveDone;
+      await setLiveCapture(false);
+      await done?.future;
+    }
     final done = _batchDone;
     await requestStop();
     await done?.future;
@@ -370,6 +376,98 @@ class RecorderController extends ChangeNotifier {
   Future<void>? _readinessFuture;
   int _readinessGeneration = 0;
   bool _disposed = false;
+  bool _liveActive = false;
+  bool _liveStopping = false;
+  bool _liveStopRequested = false;
+  int _liveGames = 0;
+  LiveCapturePort? _livePort;
+  Completer<void>? _liveDone;
+
+  bool get liveCaptureSupported =>
+      backend is LiveCaptureAwareNativeRecorderBackend && frameCaptureSupported;
+  bool get liveCaptureActive => _liveActive;
+  bool get liveCaptureStopping => _liveStopping;
+  int get liveCaptureGames => _liveGames;
+
+  Future<void> setLiveCapture(bool enabled) async {
+    if (!enabled) {
+      if (!_liveActive || _liveStopping) return;
+      _liveStopping = true;
+      _liveStopRequested = true;
+      notifyListeners();
+      final port = _livePort;
+      if (port != null) {
+        try {
+          await port.stop();
+        } catch (_) {
+          // The session's completion handler reports the failure.
+        }
+      }
+      return;
+    }
+    if (_liveActive ||
+        _isBusy ||
+        isChecking ||
+        _allReadinessFuture != null ||
+        _readinessFuture != null ||
+        _isPickingDirectory ||
+        !liveCaptureSupported) {
+      return;
+    }
+    _liveActive = true;
+    _liveStopping = false;
+    _liveStopRequested = false;
+    _liveGames = 0;
+    _liveDone = Completer<void>();
+    _error = null;
+    notifyListeners();
+    try {
+      final path = _options.outputDirectory.trim();
+      if (path.isEmpty) {
+        throw StateError(
+            'Choose an output folder before starting live capture.');
+      }
+      final output = await outputPreflight.check(path);
+      if (!output.ready) throw StateError(output.detail);
+      if (_liveStopRequested || _disposed) return;
+      final port = await (backend as LiveCaptureAwareNativeRecorderBackend)
+          .openLiveCapture();
+      _livePort = port;
+      // Attach the result handler before startup: an attach failure completes
+      // both the startup and finished futures.
+      final completion = port.finished.then<(String?, Object?)>(
+          (value) => (value, null),
+          onError: (Object e) => (null, e));
+      await port.start(
+          outputParent: Directory(path).absolute.path,
+          onGame: (count) {
+            _liveGames = count;
+            notifyListeners();
+          });
+      if (_liveStopRequested || _disposed) {
+        unawaited(port.stop().catchError((Object _) {}));
+      }
+      final (directory, failure) = await completion;
+      if (failure != null) throw failure;
+      if (directory != null &&
+          finder?.available == true &&
+          _platformIsLinux()) {
+        try {
+          await finder!.startBatch(directory, reference: false, clips: false);
+        } catch (error) {
+          _finderError = 'Notes failed to start: $error';
+        }
+      }
+    } catch (error) {
+      _error = error;
+    } finally {
+      _livePort = null;
+      _liveActive = false;
+      _liveStopping = false;
+      _liveDone?.complete();
+      notifyListeners();
+    }
+  }
 
   void _onObsChanged() => notifyListeners();
 
@@ -377,6 +475,7 @@ class RecorderController extends ChangeNotifier {
   void dispose() {
     obsConnection?.removeListener(_onObsChanged);
     unawaited(requestStop());
+    unawaited(setLiveCapture(false));
     _disposed = true;
     _readinessGeneration++;
     super.dispose();
@@ -423,7 +522,7 @@ class RecorderController extends ChangeNotifier {
   }
 
   Future<RgbImage> teachScreen(ScreenCheck check) async {
-    if (_isBusy) {
+    if (_isBusy || _liveActive) {
       throw StateError('Screens cannot be taught while a batch is running.');
     }
     final source = screenThumbnailSource ??
@@ -699,7 +798,8 @@ class RecorderController extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool get canStart => !_isBusy && !isChecking && blockers.isEmpty;
+  bool get canStart =>
+      !_isBusy && !_liveActive && !isChecking && blockers.isEmpty;
 
   bool isInputModeAvailable(InputMode inputMode) {
     final readiness = readinessFor(inputMode);
@@ -744,6 +844,7 @@ class RecorderController extends ChangeNotifier {
   /// Runs backend readiness checks. A second caller shares the current check,
   /// so rapid taps cannot publish stale readiness after a newer selection.
   Future<void> refreshReadiness() {
+    if (_liveActive) return Future.value();
     final inFlight = _readinessFuture;
     if (inFlight != null) {
       return inFlight;
@@ -865,7 +966,7 @@ class RecorderController extends ChangeNotifier {
   /// Starts one batch. The synchronous guard is set before the first await,
   /// so two rapid Start taps cannot open duplicate monitor or OBS sessions.
   Future<ReplayBatchResult?> startBatch() async {
-    if (_isBusy) {
+    if (_isBusy || _liveActive) {
       _error = StateError('A recording batch is already running.');
       notifyListeners();
       return null;

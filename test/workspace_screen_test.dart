@@ -39,6 +39,49 @@ void main() {
     expect(find.byKey(const ValueKey('open-notes-from-done')), findsNothing);
   });
 
+  testWidgets('Sequences stays usable while live capture runs', (tester) async {
+    final controller = _LiveController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: WorkspaceScreen(
+      controller: controller,
+      notesRepository: NotesRepository(finderDirectory: '/unused'),
+      showNotes: true,
+      isRefreshing: false,
+      onRefresh: () async {},
+    ))));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final list = find.byKey(const ValueKey('notes-list-view'));
+    expect(list, findsOneWidget);
+    final blocking = find.ancestor(
+        of: list,
+        matching: find.byWidgetPredicate((widget) =>
+            (widget is AbsorbPointer && widget.absorbing) ||
+            (widget is IgnorePointer && widget.ignoring)));
+    expect(blocking, findsNothing);
+    expect(find.byKey(const ValueKey('live-capture-view')), findsNothing);
+  });
+
+  testWidgets('the Record tab shows the live page while live capture runs',
+      (tester) async {
+    final controller = _LiveController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: WorkspaceScreen(
+      controller: controller,
+      isRefreshing: false,
+      onRefresh: () async {},
+    ))));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('live-capture-view')), findsOneWidget);
+    expect(find.byKey(const ValueKey('live-capture-stop')), findsOneWidget);
+    expect(find.byKey(const ValueKey('done-view')), findsNothing);
+  });
+
   testWidgets('header tabs switch views and disappear during a batch',
       (tester) async {
     final controller = _DoneController();
@@ -74,6 +117,13 @@ void main() {
     expect(find.byKey(const ValueKey('open-notes')), findsNothing);
     expect(find.byKey(const ValueKey('close-notes')), findsNothing);
   });
+}
+
+class _LiveController extends _DoneController {
+  @override
+  bool get liveCaptureSupported => true;
+  @override
+  bool get liveCaptureActive => true;
 }
 
 class _DoneController extends RecorderController {

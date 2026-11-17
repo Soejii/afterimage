@@ -10,6 +10,7 @@ import '../views/ready_view.dart';
 import '../views/running_view.dart';
 import '../notes_pages.dart';
 import '../widgets/afterimage_brand.dart';
+import '../widgets/live_capture_panel.dart';
 import '../ui/ui.dart';
 import '../widgets/phase_indicator.dart';
 
@@ -94,12 +95,65 @@ class WorkspaceScreen extends StatelessWidget {
                   fit: StackFit.expand,
                   children: [...previous, if (current != null) current],
                 ),
-                child: _body(phase, message),
+                child: _page(phase, message),
               ),
             ),
           ],
         );
       },
+    );
+  }
+
+  /// The recorder page, with the live capture switch above it when the
+  /// backend supports live capture. Sequences pages are returned as they are.
+  Widget _page(RecorderPhase phase, String? message) {
+    final notes =
+        showNotes && notesRepository != null && phase != RecorderPhase.running;
+    if (notes || !controller.liveCaptureSupported) {
+      return _body(phase, message);
+    }
+    if (controller.liveCaptureActive) {
+      return SingleChildScrollView(
+        key: const ValueKey('live-page'),
+        padding: const EdgeInsets.fromLTRB(28, 36, 28, 40),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Capturing your matches', style: Ui.h1),
+                const SizedBox(height: 4),
+                const Text('The batch recorder is paused until you stop.',
+                    style: Ui.bodyMid),
+                const SizedBox(height: 20),
+                LiveCaptureCard(controller: controller),
+                const SizedBox(height: 16),
+                LiveCaptureView(controller: controller),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    if (phase == RecorderPhase.running || phase == RecorderPhase.checking) {
+      return _body(phase, message);
+    }
+    return Column(
+      key: ValueKey('recorder-page-${phase.name}'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(28, 28, 28, 0),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: LiveCaptureCard(controller: controller),
+            ),
+          ),
+        ),
+        Expanded(child: _body(phase, message)),
+      ],
     );
   }
 
