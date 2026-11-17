@@ -43,6 +43,26 @@ bool hitGap(int ownHits, int ownCount, int? refHits, int? refCount) {
   return 5 * (ownHits * refCount - refHits * ownCount) >= ownCount * refCount;
 }
 
+/// When the user's button was hit, from the finder's header on a "got hit"
+/// card ("5 times · 490 damage · 2 in startup, 3 in recovery"): startup,
+/// active and recovery counts in that order, or null when the header has none.
+List<(String, int)>? buttonPhases(String? header) {
+  if (header == null) return null;
+  final pattern = RegExp(r'(\d+) (in startup|while active|in recovery)');
+  final found = <String, int>{};
+  for (final part in header.split('·')) {
+    for (final match in pattern.allMatches(part)) {
+      final phase = match.group(2)!.split(' ').last;
+      found[phase] = (found[phase] ?? 0) + int.parse(match.group(1)!);
+    }
+  }
+  if (found.isEmpty) return null;
+  return [
+    for (final phase in const ['startup', 'active', 'recovery'])
+      if (found[phase] case final count?) (phase, count),
+  ];
+}
+
 /// The two or three numbers that sum up a matchup.
 class MatchupStats extends StatelessWidget {
   const MatchupStats({super.key, required this.document});

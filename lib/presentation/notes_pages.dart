@@ -563,6 +563,8 @@ class _NotesPageState extends State<NotesPage> {
     final gap =
         hitGap(card.hits, card.count, reference?.hits, reference?.count);
     final rated = !card.isEventCard && card.count > 0;
+    final phases = card.isEventCard ? buttonPhases(card.header) : null;
+    final top = phases?.reduce((a, b) => b.$2 > a.$2 ? b : a);
     return [
       if (move != null)
         KeyedSubtree(
@@ -612,6 +614,17 @@ class _NotesPageState extends State<NotesPage> {
                 unit: '${reference.hits} of ${reference.count}',
                 detail: reference.count! < 5
                     ? const UiPill(label: 'small sample')
+                    : null,
+              ),
+            if (phases != null)
+              UiStat(
+                key: ValueKey('button-phases-${card.id}'),
+                label: 'Your button was hit in',
+                value: top!.$1,
+                unit: '${top.$2} of ${phases.fold(0, (sum, p) => sum + p.$2)}',
+                detail: phases.length > 1
+                    ? Text(phases.map((p) => '${p.$2} ${p.$1}').join(' · '),
+                        style: Ui.small)
                     : null,
               ),
             if (card.damage > 0)

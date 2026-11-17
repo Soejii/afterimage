@@ -1022,6 +1022,28 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a hit-out-of-a-button card counts startup, active and recovery',
+      (tester) async {
+    final json = ledgerDocument()..['focus'] = <String>[];
+    final card = (json['cards'] as List).first as Map;
+    card['kind'] = 'pressing';
+    card['header'] = '5 times · 490 damage · 2 in startup, 3 in recovery';
+
+    await _pumpLedger(tester, json, width: 936);
+    await _pumpUntilFound(tester, find.byKey(const ValueKey('tab-hits')));
+    await tester.tap(find.byKey(const ValueKey('tab-hits')));
+    await tester.pumpAndSettle();
+    await _openSituation(tester, card['id'] as String);
+
+    final tile = find.byKey(ValueKey('button-phases-${card['id']}'));
+    expect(tile, findsOneWidget);
+    final text = _textWithin(tester, tile);
+    expect(text, contains('recovery'));
+    expect(text, contains('3 of 5'));
+    expect(text, contains('2 startup · 3 recovery'));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('reactable seen opponent options are marked as unc check',
       (tester) async {
     final json = ledgerDocument()..['focus'] = <String>[];

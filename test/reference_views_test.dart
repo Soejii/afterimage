@@ -17,6 +17,19 @@ void main() {
     expect(hitGap(1, 5, 0, null), isFalse);
   });
 
+  test('button phases are read from the finder header in phase order', () {
+    expect(buttonPhases('5 times · 490 damage · 2 in startup, 3 in recovery'),
+        [('startup', 2), ('recovery', 3)]);
+    expect(
+        buttonPhases('9 times · 638 damage · 2 in recovery, 1 while active, '
+            '6 in startup'),
+        [('startup', 6), ('active', 1), ('recovery', 2)]);
+    expect(buttonPhases('6 times · 678 damage · 6 in recovery'),
+        [('recovery', 6)]);
+    expect(buttonPhases('13 times · 844 damage'), isNull);
+    expect(buttonPhases(null), isNull);
+  });
+
   testWidgets('gap requires five picks and includes exactly twenty points',
       (tester) async {
     final reference = DocumentReference.fromJson({
