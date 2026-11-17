@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -9,6 +10,7 @@ import 'package:afterimage/domain/replay_summary.dart';
 import 'package:afterimage/domain/setup_models.dart';
 import 'package:afterimage/services/linux_frame_capture.dart';
 import 'package:afterimage/services/replay_batch_engine.dart';
+import 'package:afterimage/services/summary_writer.dart';
 
 void main() {
   group('ReplayCompletionDetector', () {
@@ -78,6 +80,139 @@ void main() {
   });
 
   group('ReplayBatchEngine', () {
+    test('data-only capture never calls OBS', () async {
+      final obs = _FakeObs();
+      final organizer = _FakeOrganizer();
+      final capture = _FakeFrameCapture();
+      final summary = _FakeSummaryWriter();
+      final result = await _engine(
+        monitor: _FakeMonitor(_successfulBatchSnapshots(3)),
+        menu: _FakeMenu(),
+        obs: obs,
+        organizer: organizer,
+        frameCapturePort: capture,
+        summaryWriter: summary,
+      ).startBatch(_request(count: 3, videoMode: VideoMode.none));
+      expect(obs.connectCalls, 0,
+          reason: 'Data-only must never connect to OBS.');
+      expect(
+          [obs.assertIdleCalls, obs.startCalls, obs.stopCalls, obs.closeCalls],
+          everyElement(0));
+      expect(organizer.replayCalls, isEmpty);
+      expect(organizer.combinedCalls, isEmpty);
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      expect(result.replays, hasLength(3));
+      expect(
+          result.replays.every((r) =>
+              r.status == ReplayResultStatus.recorded &&
+              r.output == null &&
+              r.sourceOutput == null),
+          isTrue);
+      expect(result.combinedOutput, isNull);
+      expect(capture.startCalls, hasLength(3));
+      expect(capture.stopCalls, 3);
+      expect(summary.summaries.last.toJson()['videoMode'], 'none');
+    });
+
+    test('data-only persists video mode in summary.json', () async {
+      final directory =
+          await Directory.systemTemp.createTemp('afterimage-summary-');
+      addTearDown(() => directory.delete(recursive: true));
+      final result = await _engine(
+              monitor: _FakeMonitor(_successfulReplaySnapshots()),
+              menu: _FakeMenu(),
+              obs: _FakeObs(),
+              organizer: _FakeOrganizer(),
+              frameCapturePort: _FakeFrameCapture(),
+              summaryWriter: FileSummaryWriter())
+          .startBatch(ReplayBatchRequest(
+              replayCount: 1,
+              options: RecordingOptions(
+                  outputDirectory: directory.path, videoMode: VideoMode.none),
+              timing: _testTiming()));
+      expect(result.outcome, ReplayBatchOutcome.completed);
+      final json = jsonDecode(
+              await File('${directory.path}/summary.json').readAsString())
+          as Map<String, dynamic>;
+      expect(json['schemaVersion'], 2);
+      expect(json['videoMode'], 'none');
+    });
+
+    test('data-only stop preserves capture without OBS', () async {
+      final obs = _FakeObs();
+      final organizer = _FakeOrganizer();
+      late ReplayBatchEngine engine;
+      final capture =
+          _FakeFrameCapture(onStart: () => unawaited(engine.requestStop()));
+      engine = _engine(
+          monitor: _FakeMonitor(_successfulBatchSnapshots(3)),
+          menu: _FakeMenu(),
+          obs: obs,
+          organizer: organizer,
+          frameCapturePort: capture);
+      final result = await engine
+          .startBatch(_request(count: 3, videoMode: VideoMode.none));
+      expect(result.outcome, ReplayBatchOutcome.stopped);
+      expect(capture.stopReasons, [FrameCaptureEndReason.stopped]);
+      expect([
+        obs.connectCalls,
+        obs.assertIdleCalls,
+        obs.startCalls,
+        obs.stopCalls,
+        obs.closeCalls
+      ], everyElement(0));
+      expect(organizer.replayCalls, isEmpty);
+      expect(organizer.combinedCalls, isEmpty);
+    });
+
+    test('data-only replay timeout never calls OBS', () async {
+      final obs = _FakeObs();
+      final capture = _FakeFrameCapture();
+      final organizer = _FakeOrganizer();
+      final result = await _engine(
+              monitor: _FakeMonitor([_snapshot(frame: 1), _snapshot(frame: 2)],
+                  fallback: _snapshot(frame: 2)),
+              menu: _FakeMenu(),
+              obs: obs,
+              organizer: organizer,
+              frameCapturePort: capture)
+          .startBatch(_request(videoMode: VideoMode.none));
+      expect(result.outcome, ReplayBatchOutcome.failed);
+      expect(
+          result.replays.single.error.toString(), contains('replay timeout'));
+      expect(capture.stopReasons, [FrameCaptureEndReason.timeout]);
+      expect([
+        obs.connectCalls,
+        obs.assertIdleCalls,
+        obs.startCalls,
+        obs.stopCalls,
+        obs.closeCalls
+      ], everyElement(0));
+      expect(organizer.replayCalls, isEmpty);
+      expect(organizer.combinedCalls, isEmpty);
+    });
+
+    test('video modes retain their OBS lifecycles', () async {
+      for (final mode in [VideoMode.combined, VideoMode.separate]) {
+        final obs = _FakeObs();
+        final organizer = _FakeOrganizer();
+        final result = await _engine(
+                monitor: _FakeMonitor(_successfulBatchSnapshots(3)),
+                menu: _FakeMenu(),
+                obs: obs,
+                organizer: organizer)
+            .startBatch(_request(count: 3, videoMode: mode));
+        expect(result.outcome, ReplayBatchOutcome.completed);
+        expect(
+            [obs.connectCalls, obs.assertIdleCalls, obs.closeCalls], [1, 1, 1]);
+        expect(obs.startCalls, mode == VideoMode.combined ? 1 : 3);
+        expect(obs.stopCalls, mode == VideoMode.combined ? 1 : 3);
+        expect(
+            organizer.combinedCalls.length, mode == VideoMode.combined ? 1 : 0);
+        expect(
+            organizer.replayCalls.length, mode == VideoMode.separate ? 3 : 0);
+      }
+    });
     test('a failed replay-menu screen check must not send the second confirm',
         () async {
       final menu = _FakeMenu();
@@ -335,7 +470,7 @@ void main() {
 
     test('capture brackets battle events and stops before result delay',
         () async {
-      for (final mode in VideoMode.values) {
+      for (final mode in [VideoMode.separate, VideoMode.combined]) {
         final markers = <String>[];
         final clock = _FakeClock()
           ..onDelayDuration = (duration) {

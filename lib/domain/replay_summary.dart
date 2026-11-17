@@ -1,4 +1,5 @@
 import 'replay_batch.dart';
+import 'setup_models.dart';
 
 enum ReplaySummaryOutcome {
   running,
@@ -60,6 +61,7 @@ class ReplayBatchSummary {
     this.combinedOutputPath,
     this.combinedPartial,
     this.error,
+    this.videoMode,
   });
 
   factory ReplayBatchSummary.fromResults({
@@ -69,6 +71,7 @@ class ReplayBatchSummary {
     OrganizedOutput? combinedOutput,
     RecordedOutput? combinedSourceOutput,
     Object? error,
+    VideoMode? videoMode,
   }) {
     return ReplayBatchSummary(
       updatedAt: updatedAt,
@@ -79,6 +82,7 @@ class ReplayBatchSummary {
       combinedOutputPath: combinedOutput?.path,
       combinedPartial: combinedOutput?.partial,
       error: error?.toString(),
+      videoMode: videoMode,
     );
   }
 
@@ -89,10 +93,12 @@ class ReplayBatchSummary {
   final String? combinedOutputPath;
   final bool? combinedPartial;
   final String? error;
+  final VideoMode? videoMode;
 
   Map<String, Object?> toJson() {
     return {
       'schemaVersion': 2,
+      if (videoMode != null) 'videoMode': videoMode!.name,
       'updatedAt': updatedAt.toUtc().toIso8601String(),
       'outcome': outcome.name,
       'replays': replays.map((replay) => replay.toJson()).toList(),

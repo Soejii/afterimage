@@ -110,6 +110,7 @@ extension ReplayCountOptionLabel on ReplayCountOption {
 }
 
 enum VideoMode {
+  none,
   separate,
   combined,
 }
@@ -117,6 +118,8 @@ enum VideoMode {
 extension VideoModeLabel on VideoMode {
   String get label {
     switch (this) {
+      case VideoMode.none:
+        return 'Frame data only';
       case VideoMode.separate:
         return 'Separate videos';
       case VideoMode.combined:
@@ -126,6 +129,8 @@ extension VideoModeLabel on VideoMode {
 
   String get description {
     switch (this) {
+      case VideoMode.none:
+        return 'Capture frame data without video.';
       case VideoMode.separate:
         return 'One output file per replay.';
       case VideoMode.combined:
@@ -159,6 +164,8 @@ extension InputModeLabel on InputMode {
   }
 }
 
+enum ReplayOwner { own, reference }
+
 class RecordingOptions {
   const RecordingOptions({
     this.replayCount = ReplayCountOption.one,
@@ -167,7 +174,7 @@ class RecordingOptions {
     this.inputMode = InputMode.keyboard,
     this.outputDirectory = '',
     this.captureFrameData = false,
-    this.referenceBatch = false,
+    this.replayOwner,
     this.screenGuardEnabled = false,
   });
 
@@ -177,7 +184,8 @@ class RecordingOptions {
   final InputMode inputMode;
   final String outputDirectory;
   final bool captureFrameData;
-  final bool referenceBatch;
+  final ReplayOwner? replayOwner;
+  bool get capturesFrameData => videoMode == VideoMode.none || captureFrameData;
   final bool screenGuardEnabled;
 
   RecordingOptions copyWith({
@@ -187,7 +195,7 @@ class RecordingOptions {
     InputMode? inputMode,
     String? outputDirectory,
     bool? captureFrameData,
-    bool? referenceBatch,
+    Object? replayOwner = _unchangedOwner,
     bool? screenGuardEnabled,
   }) {
     return RecordingOptions(
@@ -197,8 +205,12 @@ class RecordingOptions {
       inputMode: inputMode ?? this.inputMode,
       outputDirectory: outputDirectory ?? this.outputDirectory,
       captureFrameData: captureFrameData ?? this.captureFrameData,
-      referenceBatch: referenceBatch ?? this.referenceBatch,
+      replayOwner: identical(replayOwner, _unchangedOwner)
+          ? this.replayOwner
+          : replayOwner as ReplayOwner?,
       screenGuardEnabled: screenGuardEnabled ?? this.screenGuardEnabled,
     );
   }
 }
+
+const _unchangedOwner = Object();

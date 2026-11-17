@@ -38,6 +38,7 @@ class ReplayBatchEngine
   Duration? _batchRecordingStartedAt;
   Duration _frameCaptureStopTimeout = const Duration(seconds: 3);
   _CaptureAttempt? _captureAttempt;
+  bool _dataOnly = false;
 
   bool _isRunning = false;
   bool _stopRequested = false;
@@ -102,6 +103,7 @@ class ReplayBatchEngine
     _batchRecordingStartedAt = null;
     _frameCaptureStopTimeout = request.timing.frameCaptureStopTimeout;
     _captureAttempt = null;
+    _dataOnly = request.options.videoMode == VideoMode.none;
 
     final replayResults = <ReplayResult>[];
     var combinedRecordingActive = false;
@@ -123,11 +125,15 @@ class ReplayBatchEngine
       _emit(ReplayBatchEventType.started, message: 'Batch started.');
       _setState(
         ReplayBatchState.preparing,
-        'Checking the monitor and OBS before the batch starts.',
+        _dataOnly
+            ? 'Checking the monitor before capturing.'
+            : 'Checking the monitor and OBS before the batch starts.',
       );
       await monitor.attach();
-      await obs.connect();
-      await obs.assertIdle();
+      if (!_dataOnly) {
+        await obs.connect();
+        await obs.assertIdle();
+      }
       if (_stopRequested) {
         return await _finishStopped(
           request,
@@ -143,7 +149,7 @@ class ReplayBatchEngine
         _setState(
             ReplayBatchState.preparing,
             menuInput is InputSafetyPort
-                ? 'Switch to GGST now. Starting in $seconds… Keep the game active while recording.'
+                ? 'Switch to GGST now. Starting in $seconds… Keep the game active while ${_dataOnly ? 'capturing' : 'recording'}.'
                 : 'Starting in $seconds… Leave Saved Replays selected and do not use the game controls.');
         final step = remaining > const Duration(seconds: 1)
             ? const Duration(seconds: 1)
@@ -383,10 +389,12 @@ class ReplayBatchEngine
           // Closing native input must not hide the batch result.
         }
       }
-      try {
-        await obs.close();
-      } catch (_) {
-        // Closing OBS must not hide the batch result.
+      if (!_dataOnly) {
+        try {
+          await obs.close();
+        } catch (_) {
+          // Closing OBS must not hide the batch result.
+        }
       }
       if (summaryWriter case final ClosableSummaryWriterPort closableWriter) {
         try {
@@ -416,7 +424,7 @@ class ReplayBatchEngine
         message: 'Replay $index/${request.replayCount} started.',
       );
 
-      if (!combinedRecordingActive) {
+      if (!combinedRecordingActive && !_dataOnly) {
         _setState(
           ReplayBatchState.startingRecording,
           'Starting the OBS recording for replay $index.',
@@ -582,7 +590,7 @@ class ReplayBatchEngine
         );
       }
 
-      if (!combinedRecordingActive) {
+      if (!combinedRecordingActive && !_dataOnly) {
         _setState(
           ReplayBatchState.stoppingRecording,
           'Stopping the OBS recording for replay $index.',
@@ -1049,7 +1057,7 @@ class ReplayBatchEngine
     int replayIndex, {
     required Duration recordingStartedAt,
   }) async {
-    if (!request.options.captureFrameData ||
+    if (!request.options.capturesFrameData ||
         _frameCapturePort is NoopFrameCapturePort) {
       return;
     }
@@ -1189,10 +1197,11 @@ class ReplayBatchEngine
     _emit(
       ReplayBatchEventType.diagnostic,
       replayIndex: attempt.replayIndex,
-      message:
-          'Frame capture for replay ${attempt.replayIndex} failed. The video recording will continue.',
+      message: _dataOnly
+          ? 'Frame capture for replay ${attempt.replayIndex} failed. The batch will continue.'
+          : 'Frame capture for replay ${attempt.replayIndex} failed. The video recording will continue.',
       error: StateError(
-        'Frame capture for replay ${attempt.replayIndex} failed, but the video recording will continue: $detail',
+        'Frame capture for replay ${attempt.replayIndex} failed, but the ${_dataOnly ? 'batch' : 'video recording'} will continue: $detail',
       ),
     );
   }
@@ -1286,9 +1295,13 @@ class ReplayBatchEngine
     } catch (summaryError) {
       finalError = _combineErrors(finalError, summaryError);
     }
-    final detail = finalError == null
-        ? 'Recording stopped. Any available output has been preserved.'
-        : 'Recording stopped, but saving needs attention. Check OBS and your output folder.';
+    final detail = _dataOnly
+        ? (finalError == null
+            ? 'Capturing stopped. Any frame data has been preserved.'
+            : 'Capturing stopped, but saving needs attention. Check your output folder.')
+        : finalError == null
+            ? 'Recording stopped. Any available output has been preserved.'
+            : 'Recording stopped, but saving needs attention. Check OBS and your output folder.';
     _setState(ReplayBatchState.stopped, detail);
     _emit(ReplayBatchEventType.stopped, message: detail, error: finalError);
     return ReplayBatchResult(
@@ -1317,6 +1330,7 @@ class ReplayBatchEngine
         combinedOutput: combinedOutput,
         combinedSourceOutput: combinedSourceOutput,
         error: error,
+        videoMode: request.options.videoMode,
       ),
     );
   }
