@@ -11,6 +11,7 @@ import 'package:afterimage/domain/setup_models.dart';
 import 'package:afterimage/presentation/recorder_controller.dart';
 import 'package:afterimage/presentation/views/done_view.dart';
 import 'package:afterimage/presentation/views/ready_view.dart';
+import 'package:afterimage/presentation/views/blocked_view.dart';
 import 'package:afterimage/services/batch_output_directory.dart';
 import 'package:afterimage/services/notes_repository.dart';
 import 'package:afterimage/services/output_directory_preflight.dart';
@@ -47,13 +48,32 @@ void main() {
     final controller = _controller(root, finder);
     addTearDown(controller.dispose);
     await controller.refreshReadiness();
-    controller.updateOptions(controller.options.copyWith(referenceBatch: true));
+    controller.updateOptions(
+        controller.options.copyWith(replayOwner: ReplayOwner.reference));
     await controller.startBatch();
     await _waitUntil(() => finder.startedFolders.isNotEmpty);
     expect(finder.references.single, isTrue);
   });
 
-  testWidgets('reference switch requires capture and controls finder flag',
+  test('finder receives owner and clip settings for both modes', () async {
+    for (final mode in [VideoMode.combined, VideoMode.none]) {
+      for (final owner in ReplayOwner.values) {
+        final finder = _FakeFinder();
+        final controller = _controller(root, finder);
+        await controller.refreshReadiness();
+        controller.updateOptions(
+            controller.options.copyWith(videoMode: mode, replayOwner: owner));
+        await controller.startBatch();
+        await _waitUntil(() => finder.startedFolders.isNotEmpty);
+        expect(finder.references.single, owner == ReplayOwner.reference);
+        expect(finder.clips.single, mode != VideoMode.none);
+        expect(controller.options.replayOwner, isNull);
+        controller.dispose();
+      }
+    }
+  });
+
+  testWidgets('owner choices appear when frame capture is enabled',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -70,18 +90,17 @@ void main() {
     ))));
     await tester.tap(find.byKey(const ValueKey('advanced-options')));
     await tester.pumpAndSettle();
-    final reference = find.byKey(const ValueKey('reference-batch'));
-    expect(tester.widget<SwitchListTile>(reference).value, isFalse);
-    expect(tester.widget<SwitchListTile>(reference).onChanged, isNull);
+    final reference = find.byKey(const ValueKey('replay-owner-reference'));
+    expect(reference, findsNothing);
     await tester
         .ensureVisible(find.byKey(const ValueKey('capture-frame-data')));
     await tester.tap(find.byKey(const ValueKey('capture-frame-data')));
     await tester.pumpAndSettle();
-    expect(tester.widget<SwitchListTile>(reference).onChanged, isNotNull);
+    expect(reference, findsOneWidget);
     await tester.ensureVisible(reference);
     await tester.tap(reference);
     await tester.pumpAndSettle();
-    expect(tester.widget<SwitchListTile>(reference).value, isTrue);
+    expect(controller.options.replayOwner, ReplayOwner.reference);
     await tester.runAsync(() async {
       await controller.startBatch();
       await _waitUntil(() => finder.references.length == 1);
@@ -89,8 +108,10 @@ void main() {
     expect(finder.references.single, isTrue);
     controller.clearResult();
     await tester.pumpAndSettle();
-    await tester.ensureVisible(reference);
-    await tester.tap(reference);
+    expect(controller.options.replayOwner, isNull);
+    final own = find.byKey(const ValueKey('replay-owner-own'));
+    await tester.ensureVisible(own);
+    await tester.tap(own);
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
       await controller.startBatch();
@@ -99,15 +120,128 @@ void main() {
     expect(finder.references.last, isFalse);
     controller.clearResult();
     await tester.pumpAndSettle();
-    await tester.ensureVisible(reference);
-    await tester.tap(reference);
-    await tester.pumpAndSettle();
     final capture = find.byKey(const ValueKey('capture-frame-data'));
     await tester.ensureVisible(capture);
     await tester.tap(capture);
     await tester.pumpAndSettle();
-    expect(tester.widget<SwitchListTile>(reference).value, isFalse);
-    expect(tester.widget<SwitchListTile>(reference).onChanged, isNull);
+    expect(reference, findsNothing);
+  });
+
+  testWidgets('gateway switches to data-only and finished screen omits video',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = _controller(root, _FakeFinder(), capture: false);
+    addTearDown(controller.dispose);
+    await controller.refreshReadiness();
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: AnimatedBuilder(
+                animation: controller,
+                builder: (context, _) => ReadyView(
+                    controller: controller,
+                    isRefreshing: false,
+                    onRefresh: () async {})))));
+    expect(find.byKey(const ValueKey('capture-gateway')), findsOneWidget);
+    expect(find.byKey(const ValueKey('capture-mode')), findsOneWidget);
+    expect(find.text('Records one video with OBS.'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('capture-mode-data')));
+    await tester.pumpAndSettle();
+    expect(
+        find.text(
+            'No video and no OBS. Plays the replays and saves their frame data.'),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('replay-owner')), findsOneWidget);
+    expect(find.text('How many replays'), findsOneWidget);
+    expect(find.text('Start capturing'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('replay-owner-own')));
+    await tester.pumpAndSettle();
+    await tester.runAsync(controller.startBatch);
+    await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: DoneView(controller: controller))));
+    await tester.pumpAndSettle();
+    expect(find.text('Frame data captured'), findsOneWidget);
+    expect(find.text('Your video'), findsNothing);
+    expect(find.byKey(const ValueKey('play-latest-output')), findsNothing);
+    expect(find.byKey(const ValueKey('open-output-folder')), findsOneWidget);
+    expect(find.text('Capture another batch'), findsOneWidget);
+  });
+
+  testWidgets('OBS blocker offers data-only when supported', (tester) async {
+    final controller = _controller(root, _FakeFinder(), capture: false);
+    addTearDown(controller.dispose);
+    await controller.refreshReadiness();
+    controller
+        .setSetupReport(SetupReport(checkedAt: DateTime.now(), checks: const [
+      SetupCheck(
+          id: SetupCheckId.obsWebSocket,
+          title: 'OBS',
+          detail: 'Disconnected',
+          status: SetupCheckStatus.blocked,
+          required: true)
+    ]));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: AnimatedBuilder(
+                animation: controller,
+                builder: (context, _) => controller.leadBlocker == null
+                    ? ReadyView(
+                        controller: controller,
+                        isRefreshing: false,
+                        onRefresh: () async {})
+                    : BlockedView(
+                        controller: controller,
+                        isRefreshing: false,
+                        onRefresh: () async {})))));
+    expect(find.byKey(const ValueKey('use-data-only')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('use-data-only')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('capture-gateway')), findsOneWidget);
+  });
+
+  testWidgets('data-only shortcut requires an OBS lead and capture support',
+      (tester) async {
+    SetupReport blocked(SetupCheckId id) =>
+        SetupReport(checkedAt: DateTime.now(), checks: [
+          SetupCheck(
+              id: id,
+              title: id.name,
+              detail: 'Not ready',
+              status: SetupCheckStatus.blocked,
+              required: true)
+        ]);
+    final incapable =
+        RecorderController(backend: const UnavailableNativeRecorderBackend())
+          ..setSetupReport(blocked(SetupCheckId.obsWebSocket));
+    addTearDown(incapable.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: BlockedView(
+                controller: incapable,
+                isRefreshing: false,
+                onRefresh: () async {}))));
+    expect(find.byKey(const ValueKey('use-data-only')), findsNothing);
+    final capable = _controller(root, _FakeFinder())
+      ..setSetupReport(blocked(SetupCheckId.gameInstall));
+    addTearDown(capable.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: BlockedView(
+                controller: capable,
+                isRefreshing: false,
+                onRefresh: () async {}))));
+    expect(find.byKey(const ValueKey('use-data-only')), findsNothing);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: ReadyView(
+                controller: incapable,
+                isRefreshing: false,
+                onRefresh: () async {}))));
+    final chip = tester
+        .widget<ChoiceChip>(find.byKey(const ValueKey('capture-mode-data')));
+    expect(chip.onSelected, isNull);
+    expect(find.byTooltip(incapable.frameCaptureUnavailableReason),
+        findsOneWidget);
   });
 
   test('reference batch is not saved or restored between launches', () async {
@@ -120,8 +254,8 @@ void main() {
       backend: _CaptureBackend(),
       preferences: preferences,
     );
-    first.updateOptions(
-        first.options.copyWith(captureFrameData: true, referenceBatch: true));
+    first.updateOptions(first.options
+        .copyWith(captureFrameData: true, replayOwner: ReplayOwner.reference));
     await preferences.flush();
     expect(stored, isNot(contains('referenceBatch')));
     first.dispose();
@@ -130,7 +264,7 @@ void main() {
     addTearDown(second.dispose);
     await second.initialize();
     expect(second.options.captureFrameData, isTrue);
-    expect(second.options.referenceBatch, isFalse);
+    expect(second.options.replayOwner, isNull);
   });
 
   test('does not start on Windows, without captures, or without the finder',
@@ -278,6 +412,7 @@ RecorderController _controller(
     options: RecordingOptions(
       outputDirectory: root.path,
       captureFrameData: capture,
+      replayOwner: capture ? ReplayOwner.own : null,
     ),
     batchDirectories: _BatchDirectories(root),
     outputPreflight: const _ReadyPreflight(),
@@ -332,11 +467,14 @@ class _FakeFinder implements FinderPort {
   final Object? failure;
   final List<String> startedFolders = <String>[];
   final List<bool> references = <bool>[];
+  final List<bool> clips = <bool>[];
 
   @override
-  Future<void> startBatch(String batchFolder, {bool reference = false}) async {
+  Future<void> startBatch(String batchFolder,
+      {bool reference = false, bool clips = true}) async {
     if (failure != null) throw failure!;
     references.add(reference);
+    this.clips.add(clips);
     startedFolders.add(batchFolder);
   }
 }

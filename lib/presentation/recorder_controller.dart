@@ -535,6 +535,10 @@ class RecorderController extends ChangeNotifier {
       ));
     } else {
       for (final check in report.blockingChecks) {
+        if (_options.videoMode == VideoMode.none &&
+            check.id == SetupCheckId.obsWebSocket) {
+          continue;
+        }
         final blocker = blockerForCheck(check);
         if (blocker != null) {
           add(blocker);
@@ -542,7 +546,9 @@ class RecorderController extends ChangeNotifier {
       }
     }
 
-    if (obsConnection != null && obsConnection!.result?.ready != true) {
+    if (_options.videoMode != VideoMode.none &&
+        obsConnection != null &&
+        obsConnection!.result?.ready != true) {
       add(RecorderBlocker(
         id: RecorderBlockerId.obsConnection,
         label: 'OBS',
@@ -572,7 +578,25 @@ class RecorderController extends ChangeNotifier {
       ));
     }
 
-    if (_options.screenGuardEnabled && !screenReferencesTaught) {
+    if (_options.videoMode == VideoMode.none && !frameCaptureSupported) {
+      add(const RecorderBlocker(
+          id: RecorderBlockerId.frameCaptureUnavailable,
+          label: 'Frame data',
+          message:
+              'Frame data only needs frame capture, which is not available on this computer.',
+          source: RecorderBlockerSource.options));
+    }
+    if (_options.capturesFrameData && _options.replayOwner == null) {
+      add(const RecorderBlocker(
+          id: RecorderBlockerId.replayOwner,
+          label: 'Whose replays',
+          message: 'pick My games or High-level reference above.',
+          source: RecorderBlockerSource.options));
+    }
+
+    if (_options.videoMode != VideoMode.none &&
+        _options.screenGuardEnabled &&
+        !screenReferencesTaught) {
       add(const RecorderBlocker(
         id: RecorderBlockerId.screenReferences,
         label: 'Screen references',
@@ -874,7 +898,9 @@ class RecorderController extends ChangeNotifier {
       totalReplays: replayCount,
       currentReplay: 0,
       completedReplays: 0,
-      detail: 'Opening the recorder connections safely.',
+      detail: _options.videoMode == VideoMode.none
+          ? 'Preparing to capture frame data.'
+          : 'Opening the recorder connections safely.',
     );
     _events.clear();
     _outputPaths.clear();
@@ -923,11 +949,13 @@ class RecorderController extends ChangeNotifier {
       _throwIfCancelled();
       menuInput = await backend.openMenuInput(_options.inputMode);
       _throwIfCancelled();
-      obs = await backend.openObsRecorder();
+      obs = _options.videoMode == VideoMode.none
+          ? const _ForbiddenObsRecorder()
+          : await backend.openObsRecorder();
       _throwIfCancelled();
       final organizer = await backend.openOutputOrganizer();
       _throwIfCancelled();
-      if (_options.captureFrameData &&
+      if (_options.capturesFrameData &&
           backend is FrameCaptureAwareNativeRecorderBackend &&
           (backend as FrameCaptureAwareNativeRecorderBackend)
               .supportsFrameCapture) {
@@ -949,19 +977,21 @@ class RecorderController extends ChangeNotifier {
         organizer: organizer,
         onEvent: _onEngineEvent,
       );
-      final screenGuard = !_options.screenGuardEnabled
-          ? const NoopScreenGuard()
-          : obs is ObsThumbnailSource
-              ? ObsScreenGuard(
-                  source: obs as ObsThumbnailSource,
-                  references: _screenReferenceStore,
-                )
-              : const UnavailableScreenGuard(
-                  'The active OBS connection cannot capture screen thumbnails.',
-                );
+      final screenGuard =
+          _options.videoMode == VideoMode.none || !_options.screenGuardEnabled
+              ? const NoopScreenGuard()
+              : obs is ObsThumbnailSource
+                  ? ObsScreenGuard(
+                      source: obs as ObsThumbnailSource,
+                      references: _screenReferenceStore,
+                    )
+                  : const UnavailableScreenGuard(
+                      'The active OBS connection cannot capture screen thumbnails.',
+                    );
       if (engine case final ScreenGuardAwareRecordingEngine aware) {
         aware.configureScreenGuard(screenGuard);
-      } else if (_options.screenGuardEnabled) {
+      } else if (_options.videoMode != VideoMode.none &&
+          _options.screenGuardEnabled) {
         throw StateError(
           'The configured recording engine cannot verify the game screen.',
         );
@@ -977,7 +1007,6 @@ class RecorderController extends ChangeNotifier {
           replayCount: replayCount,
           options: _options.copyWith(
             outputDirectory: batchOutputDirectory,
-            videoMode: VideoMode.combined,
           ),
         ),
       );
@@ -1011,7 +1040,9 @@ class RecorderController extends ChangeNotifier {
           totalReplays: replayCount ?? 0,
           currentReplay: 0,
           completedReplays: 0,
-          detail: 'Stopped before recording started.');
+          detail: _options.videoMode == VideoMode.none
+              ? 'Stopped before capturing started.'
+              : 'Stopped before recording started.');
       return _result;
     } catch (error) {
       _state = ReplayBatchState.failed;
@@ -1032,9 +1063,11 @@ class RecorderController extends ChangeNotifier {
       if (!engineStarted) {
         await _closePort(monitor);
         await _closePort(menuInput);
-        await _closePort(obs);
+        if (_options.videoMode != VideoMode.none) await _closePort(obs);
       }
       await _closePort(frameCapture);
+      final finishedOptions = _options;
+      _options = _options.copyWith(replayOwner: null);
       _activeEngine = null;
       _isBusy = false;
       _batchEndedAt = DateTime.now();
@@ -1043,7 +1076,7 @@ class RecorderController extends ChangeNotifier {
       notifyListeners();
       final result = _result;
       if (result != null && result.outcome == ReplayBatchOutcome.completed) {
-        unawaited(_startFinder(result));
+        unawaited(_startFinder(result, finishedOptions));
       }
     }
   }
@@ -1056,13 +1089,14 @@ class RecorderController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _startFinder(ReplayBatchResult result) async {
+  Future<void> _startFinder(
+      ReplayBatchResult result, RecordingOptions options) async {
     final finder = this.finder;
     final batchDirectory = batchOutputDirectory;
     if (finder == null ||
         !finder.available ||
         !_platformIsLinux() ||
-        !_options.captureFrameData ||
+        !options.capturesFrameData ||
         batchDirectory == null ||
         !_hasCaptureFile(result, batchDirectory)) {
       return;
@@ -1073,7 +1107,8 @@ class RecorderController extends ChangeNotifier {
     notifyListeners();
     try {
       await finder.startBatch(batchDirectory,
-          reference: _options.referenceBatch);
+          reference: options.replayOwner == ReplayOwner.reference,
+          clips: options.videoMode != VideoMode.none);
       await refreshFinderStatus();
     } on Object catch (error) {
       // Finder startup is auxiliary. The completed recording remains the
@@ -1309,4 +1344,20 @@ class UnavailableNativeRecorderBackend implements NativeRecorderBackend {
 
 class _PreparationCancelled implements Exception {
   const _PreparationCancelled();
+}
+
+class _ForbiddenObsRecorder implements ObsRecorderPort {
+  const _ForbiddenObsRecorder();
+  Never _forbidden() =>
+      throw StateError('OBS must not be used for frame data only.');
+  @override
+  Future<void> connect() => _forbidden();
+  @override
+  Future<void> assertIdle() => _forbidden();
+  @override
+  Future<void> startRecording() => _forbidden();
+  @override
+  Future<RecordedOutput> stopRecording() => _forbidden();
+  @override
+  Future<void> close() => _forbidden();
 }

@@ -15,6 +15,84 @@ import 'package:afterimage/services/obs_screen_guard.dart';
 import 'support/screen_test_support.dart';
 
 void main() {
+  test('data-only ignores OBS but requires capability and replay owner',
+      () async {
+    final capable = RecorderController(
+        backend: _CaptureAwareBackend(_RecordingCapture()),
+        options: const RecordingOptions(
+            outputDirectory: '/tmp/afterimage', videoMode: VideoMode.none))
+      ..setSetupReport(SetupReport(checkedAt: DateTime.now(), checks: const [
+        SetupCheck(
+            id: SetupCheckId.obsWebSocket,
+            title: 'OBS',
+            detail: 'Disconnected',
+            status: SetupCheckStatus.blocked,
+            required: true)
+      ]));
+    addTearDown(capable.dispose);
+    await capable.refreshReadiness();
+    expect(capable.phase, RecorderPhase.ready);
+    expect(capable.blockers.map((b) => b.id),
+        isNot(contains(RecorderBlockerId.obsConnection)));
+    expect(capable.blockers.map((b) => b.id),
+        contains(RecorderBlockerId.replayOwner));
+    capable
+        .updateOptions(capable.options.copyWith(replayOwner: ReplayOwner.own));
+    expect(capable.canStart, isTrue);
+    capable.updateOptions(capable.options.copyWith(
+        videoMode: VideoMode.combined,
+        replayOwner: null,
+        captureFrameData: true));
+    expect(capable.blockers.map((b) => b.id),
+        contains(RecorderBlockerId.replayOwner));
+    capable.updateOptions(capable.options.copyWith(captureFrameData: false));
+    expect(capable.blockers.map((b) => b.id),
+        isNot(contains(RecorderBlockerId.replayOwner)));
+
+    final incapable = RecorderController(
+        backend: _FakeBackend(),
+        options: const RecordingOptions(
+            outputDirectory: '/tmp/afterimage',
+            videoMode: VideoMode.none,
+            replayOwner: ReplayOwner.own))
+      ..setSetupReport(_readyReport());
+    addTearDown(incapable.dispose);
+    await incapable.refreshReadiness();
+    expect(incapable.phase, RecorderPhase.ready);
+    expect(incapable.blockers.map((b) => b.id),
+        contains(RecorderBlockerId.frameCaptureUnavailable));
+    expect(incapable.canStart, isFalse);
+  });
+
+  test('data-only batch does not open OBS and clears owner after finish',
+      () async {
+    for (final outcome in ReplayBatchOutcome.values) {
+      final backend = _CaptureAwareBackend(_RecordingCapture());
+      final engine = _FakeEngine();
+      final controller = RecorderController(
+          backend: backend,
+          options: const RecordingOptions(
+              outputDirectory: '/tmp/afterimage',
+              videoMode: VideoMode.none,
+              replayOwner: ReplayOwner.reference),
+          engineFactory: (
+                  {required monitor,
+                  required menuInput,
+                  required obs,
+                  required organizer,
+                  required onEvent}) =>
+              engine..onEvent = onEvent)
+        ..setSetupReport(_readyReport());
+      addTearDown(controller.dispose);
+      await controller.refreshReadiness();
+      final run = controller.startBatch();
+      await _waitUntil(() => engine.startCalls == 1);
+      expect(backend.obsOpens, 0);
+      engine.complete(ReplayBatchResult(outcome: outcome, replays: const []));
+      await run;
+      expect(controller.options.replayOwner, isNull);
+    }
+  });
   test('readiness checks each input mode and does not claim unsupported input',
       () async {
     final backend = _FakeBackend(
@@ -209,6 +287,7 @@ void main() {
       options: const RecordingOptions(
         outputDirectory: '/tmp/afterimage',
         captureFrameData: true,
+        replayOwner: ReplayOwner.own,
       ),
       engineFactory: ({
         required monitor,
@@ -357,6 +436,7 @@ void main() {
       options: const RecordingOptions(
         outputDirectory: '/tmp/afterimage',
         captureFrameData: true,
+        replayOwner: ReplayOwner.own,
       ),
       engineFactory: ({
         required monitor,

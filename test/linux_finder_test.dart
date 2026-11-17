@@ -20,9 +20,17 @@ void main() {
     );
     await finder.startBatch('${root.path}/batch');
     await finder.startBatch('${root.path}/batch', reference: true);
+    await finder.startBatch('${root.path}/batch', clips: false);
+    await finder.startBatch('${root.path}/batch',
+        reference: true, clips: false);
     expect(commands.first, isNot(contains('--reference')));
-    expect(commands.last,
+    expect(commands.first, isNot(contains('--no-clips')));
+    expect(commands[1],
         contains("'${finder.scriptPath}' '--reference' '${root.path}/batch'"));
+    expect(commands[1], isNot(contains('--no-clips')));
+    expect(commands[2], contains("'--no-clips'"));
+    expect(commands[2], isNot(contains('--reference')));
+    expect(commands.last, contains("'--reference' '--no-clips'"));
   });
   test('prepends local bin to PATH with the PATH list separator', () async {
     final root = await Directory.systemTemp.createTemp('afterimage-finder-');

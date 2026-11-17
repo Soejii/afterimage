@@ -159,6 +159,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('start-batch')));
     await tester.tap(find.byKey(const ValueKey('start-batch')));
     await tester.pumpAndSettle();
 
@@ -193,6 +194,8 @@ void main() {
         recorderController: controller,
       ),
     );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('start-batch')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('start-batch')));
     await tester.pumpAndSettle();

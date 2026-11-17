@@ -20,6 +20,8 @@ enum RecorderBlockerId {
   replayLibrary,
   inputUnavailable,
   inputChecking,
+  frameCaptureUnavailable,
+  replayOwner,
   screenReferences,
   outputFolder,
   replayCountUnavailable,

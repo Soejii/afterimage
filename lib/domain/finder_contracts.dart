@@ -5,5 +5,6 @@
 abstract interface class FinderPort {
   bool get available;
 
-  Future<void> startBatch(String batchFolder, {bool reference = false});
+  Future<void> startBatch(String batchFolder,
+      {bool reference = false, bool clips = true});
 }
