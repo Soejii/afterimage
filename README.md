@@ -100,6 +100,10 @@ For frame data only, choose **Frame data only**, then say whether the replays ar
 your own games or high-level reference. OBS and screen checks are not used. This
 choice is available only when the backend supports frame capture.
 
+On Linux, **Capture my matches** collects frame data while you play online,
+without replay controls, OBS, or video. Choose an output folder first; switch it
+off to finish the session. This live mode has not yet been verified end to end.
+
 For video, Afterimage records the whole batch into one video file. Each batch gets its own
 folder, so a second run cannot overwrite the first.
 

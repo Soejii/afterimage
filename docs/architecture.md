@@ -71,6 +71,9 @@ controller evdev node selected from the processes in GGST's Wine prefix. See
 [`linux-runtime.md`](linux-runtime.md) and
 [`linux-controller.md`](linux-controller.md) for runtime packages, safe
 process-memory permission troubleshooting, and controller setup.
+The live capture watcher runs in its own read-only isolate, detects games from
+the replay-manager write head, and uses throwing input and OBS ports. It writes
+frame-only session summaries and starts the finder once after a nonempty session.
 
 The Windows adapter lives in `lib/services/windows_process_memory.dart`,
 `windows_replay_monitor.dart`, `windows_menu_input.dart`, and

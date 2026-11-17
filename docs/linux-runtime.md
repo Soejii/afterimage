@@ -81,6 +81,8 @@ XTest event, or uinput controller has been verified on this machine.
 
 Frame data only plays replays and saves sidecars without OBS or video. Choose
 whether the replays are your own or high-level reference for every capture batch.
+The separate **Capture my matches** switch watches online matches without OBS
+or replay input; this live session path is not yet verified against GGST.
 
 The first recording should be one replay. Confirm the resulting video has the
 expected picture and sound before starting a larger batch. This is especially

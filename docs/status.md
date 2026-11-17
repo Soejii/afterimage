@@ -3,6 +3,8 @@
 This file records what works in the current alpha and what is still unverified.
 
 - Frame-data-only batches skip OBS and video, and ask whether replays are your own or high-level reference. Live GGST behavior remains unverified.
+- The development branch adds Linux live match capture without input or OBS;
+  end-to-end operation against a real online set remains unverified.
 
 Version `0.3.7+13` is an alpha desktop release:
 
