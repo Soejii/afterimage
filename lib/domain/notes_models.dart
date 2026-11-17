@@ -16,6 +16,9 @@ class NotePreview {
     required this.createdAt,
     required this.modifiedAt,
     this.isReference = false,
+    this.replays,
+    this.situationCount,
+    this.hasReference = false,
   });
 
   final String batchLabel;
@@ -27,6 +30,15 @@ class NotePreview {
   final DateTime? createdAt;
   final DateTime? modifiedAt;
   final bool isReference;
+
+  /// Games in the set, when the list says so.
+  final int? replays;
+
+  /// Situation cards, without the cards for other ways of getting hit.
+  final int? situationCount;
+
+  /// True when the list carries a high-level comparison.
+  final bool hasReference;
 
   DateTime? get sortDate => createdAt ?? modifiedAt;
 }
@@ -58,6 +70,7 @@ class SequenceDocument {
     this.moves = const {},
     this.isReference = false,
     this.reference,
+    this.replays,
   });
 
   factory SequenceDocument.fromJson(Map<String, Object?> json) {
@@ -66,6 +79,9 @@ class SequenceDocument {
       throw FormatException('Unknown sequence list schema: $schema');
     }
     return SequenceDocument(
+      replays: json['replays'] is int && (json['replays'] as int) >= 0
+          ? json['replays'] as int
+          : null,
       isReference: json['is_reference'] == true,
       reference: DocumentReference.parse(json['reference']),
       trend: SequenceTrend.parse(json['trend']),
@@ -110,6 +126,9 @@ class SequenceDocument {
   final SequenceTrend? trend;
   final bool isReference;
   final DocumentReference? reference;
+
+  /// Games in the set.
+  final int? replays;
 
   /// Move card id (the vault note's name, `Ky 2H`) to the note behind it.
   final Map<String, MoveCard> moves;

@@ -54,11 +54,15 @@ class _MoveImage extends StatelessWidget {
 
 /// Picture plus the frame data on one line: the header of a card about a move.
 class MoveStrip extends StatelessWidget {
-  const MoveStrip({super.key, required this.move, this.label, this.size = 96});
+  const MoveStrip(
+      {super.key, required this.move, this.label, this.size = 96, this.title});
 
   final MoveCard move;
   final String? label;
   final double size;
+
+  /// Shown in place of the move's own name line, for a page header.
+  final Widget? title;
 
   @override
   Widget build(BuildContext context) {
@@ -73,17 +77,20 @@ class MoveStrip extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                [
-                  if (label != null) label!,
-                  move.id,
-                  if (move.input != null && move.input != move.name)
-                    '(${move.input})',
-                ].join(' '),
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 4),
+              if (title != null)
+                title!
+              else
+                Text(
+                  [
+                    if (label != null) label!,
+                    move.id,
+                    if (move.input != null && move.input != move.name)
+                      '(${move.input})',
+                  ].join(' '),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              SizedBox(height: title == null ? 4 : 10),
               Wrap(
                 spacing: 6,
                 runSpacing: 4,

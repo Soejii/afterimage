@@ -50,25 +50,12 @@ Version `0.3.5+11` is an alpha desktop release:
   unverified on both Linux and Windows.
 - On Linux, when frame capture is enabled and a completed batch contains a capture
   sidecar, Afterimage can start the optional `ggst-input-tracker` sequence finder
-  in the background. The Sequences page lists each opponent's defensive
-  situations (flagged ones first, with the reason, in character names), a
-  small card per guard-crushing move, plays a clip of a sequence directly under
-  its row, and saves the opponent's inputs for a sequence (Save) or for every
-  option after one lead-in (Save mixup) as StriveLabs `.txt` recordings in the
-  batch folder and, when StriveLabs is installed, its `recordings` folder.
-  The sequence UI adds an expandable damage ledger and up to
-  three focus cards, with other flagged situations grouped below. Cards can also show answer
-  outcomes and a secondary reversal note. Event cards group other ways the player
-  got hit and start collapsed unless focused. Ledger category links expand and
-  reveal their matching cards. Finder-supplied trends show set history, damage
-  comparisons per replay, and earlier card frequencies or cards no longer seen.
-  A situation card's Read tab shows one headline verdict, a who-beats-who grid
-  that fits the card, solid marks for results that hold at any spacing and
-  outlined marks for frame-only results, what happened in each pairing, and
-  Watch links that open the matching clips.
-  Reference lists are labelled and kept distinct from the player's history.
-  Own lists can compare high-level picks and damage when the finder supplies reference data.
-  Older sequence files keep their layout.
+  in the background. The Sequences list groups the player's sets separately from
+  high-level reference sets. Each matchup opens with numbers, situations to work
+  on, and a table of situations against the opponent. Each situation has its own
+  view with options, clips, and frame data. Clips and mixups can be saved as
+  StriveLabs `.txt` recordings in the batch folder and, when installed, the
+  StriveLabs `recordings` folder.
   Loading those files into the training dummy through StriveLabs is unverified;
   the Windows entry points remain hidden.
 - OBS WebSocket v5 control now supports localhost configuration discovery,

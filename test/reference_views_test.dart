@@ -1,9 +1,22 @@
 import 'package:afterimage/domain/notes_models.dart';
+import 'package:afterimage/presentation/widgets/options_table.dart';
 import 'package:afterimage/presentation/widgets/reference_views.dart';
+import 'package:afterimage/presentation/widgets/sequence_overview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('hit gap requires both samples and includes the twenty point boundary',
+      () {
+    expect(hitGap(1, 5, 0, 5), isTrue);
+    expect(hitGap(1, 5, 0, 6), isTrue);
+    expect(hitGap(1, 6, 0, 5), isFalse);
+    expect(hitGap(1, 4, 0, 5), isFalse);
+    expect(hitGap(1, 5, 0, 4), isFalse);
+    expect(hitGap(1, 5, null, 5), isFalse);
+    expect(hitGap(1, 5, 0, null), isFalse);
+  });
+
   testWidgets('gap requires five picks and includes exactly twenty points',
       (tester) async {
     final reference = DocumentReference.fromJson({
@@ -44,7 +57,8 @@ void main() {
       'kind': 'turn',
       'count': 14,
       'player_rows': [
-        {'name': 'walk forward', 'seen': true, 'count': 5}
+        {'name': 'walk forward', 'seen': true, 'count': 5},
+        {'name': '6P', 'seen': false, 'count': 0},
       ],
     });
     final reference = CardReference.fromJson({
@@ -61,17 +75,35 @@ void main() {
     });
     await tester.pumpWidget(MaterialApp(
         home: Scaffold(
-            body: SpotReferenceView(
-                player: 'Ky', spot: spot, reference: reference))));
+            body: OptionsTable(
+                player: 'Ky',
+                opponent: 'Elphelt',
+                moves: const {},
+                spot: spot,
+                reference: reference,
+                recommended: const {'6P'}))));
     expect(
         find.byKey(const ValueKey('reference-small-sample')), findsOneWidget);
     final walk = find.byKey(const ValueKey('reference-pick-walk forward'));
-    expect(find.descendant(of: walk, matching: find.text('5 of 14')),
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('option-row-walk forward')),
+            matching: find.text('5 of 14')),
         findsOneWidget);
     expect(find.descendant(of: walk, matching: find.text('1 of 4')),
         findsOneWidget);
     final fs = find.byKey(const ValueKey('reference-pick-f.S'));
-    expect(find.descendant(of: fs, matching: find.text('0 of 14')),
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('option-row-f.S')),
+            matching: find.text('not tried')),
+        findsOneWidget);
+    expect(
+        find.descendant(of: fs, matching: find.text('1 of 4')), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('option-row-6P')),
+            matching: find.text('not tried')),
         findsOneWidget);
   });
 
@@ -102,9 +134,8 @@ void main() {
           home: Scaffold(
               body: ReferencePanel(
                   player: 'Ky', reference: reference, ledger: null))));
-      expect(find.text('You: 220 spots, hit 57 (26%)'), findsOneWidget);
-      expect(
-          find.text('High-level Ky: 169 spots, hit 40 (24%)'), findsOneWidget);
+      expect(find.text('You: 26% hit  ·  57 of 220'), findsOneWidget);
+      expect(find.text('High-level Ky: 24% hit  ·  40 of 169'), findsOneWidget);
       expect(
           find.byKey(const ValueKey('reference-answer-block')), findsOneWidget);
       expect(tester.takeException(), isNull);

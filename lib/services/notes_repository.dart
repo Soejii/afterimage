@@ -59,6 +59,10 @@ class NotesRepository {
             createdAt: document.createdAt,
             modifiedAt: stat.modified,
             isReference: document.isReference,
+            replays: document.replays ?? document.ledger?.replays,
+            situationCount:
+                document.cards.where((card) => !card.isEventCard).length,
+            hasReference: !document.isReference && document.reference != null,
           ),
         );
       }

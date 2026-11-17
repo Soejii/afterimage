@@ -7,9 +7,12 @@ import 'package:flutter/material.dart';
 import '../app/theme.dart';
 import '../domain/notes_models.dart';
 import '../services/notes_repository.dart';
+import 'ui/ui.dart';
 import 'widgets/move_card_views.dart';
 import 'widgets/notes_clip_player.dart';
+import 'widgets/options_table.dart';
 import 'widgets/reference_views.dart';
+import 'widgets/sequence_overview.dart';
 import 'widgets/status_surface.dart';
 
 // The sequence list: the finder's situations per opponent, with Save and Save
@@ -58,61 +61,80 @@ class _NotesListPageState extends State<NotesListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final previews = _previews;
+    DateTime? played(NotePreview preview) =>
+        batchPlayedAt(preview.batchLabel) ?? preview.sortDate;
+    int byDate(NotePreview a, NotePreview b) =>
+        (played(b) ?? DateTime(0)).compareTo(played(a) ?? DateTime(0));
+    final own = [...?previews?.where((preview) => !preview.isReference)]
+      ..sort(byDate);
+    final reference = [...?previews?.where((preview) => preview.isReference)]
+      ..sort(byDate);
     return SingleChildScrollView(
       key: const ValueKey('notes-list'),
-      padding: const EdgeInsets.fromLTRB(28, 24, 28, 36),
+      padding: const EdgeInsets.fromLTRB(28, 26, 28, 40),
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 820),
+          constraints: const BoxConstraints(maxWidth: 1080),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
+              const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: Text(
-                      'SEQUENCES',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.3,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Sequences', style: Ui.h1),
+                        SizedBox(height: 4),
+                        Text(
+                            'What happened in your recorded sets, situation '
+                            'by situation.',
+                            style: Ui.bodyMid),
+                      ],
                     ),
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey('close-notes'),
-                    onPressed: widget.onClose,
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    label: const Text('Back'),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Defensive situations from your replay batches. Save one as a '
-                'StriveLabs recording to lab it.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 24),
               if (_error != null)
                 StatusSurface(
                   tone: StatusTone.failed,
                   icon: Icons.error_outline,
                   child: Text('Sequences could not be loaded: $_error'),
                 )
-              else if (_previews == null)
+              else if (previews == null)
                 const Center(child: CircularProgressIndicator())
-              else if (_previews!.isEmpty)
+              else if (previews.isEmpty)
                 const _EmptyNotes()
-              else
-                for (final preview in _previews!)
-                  _NotesListTile(
-                    preview: preview,
-                    onOpen: () => widget.onOpen(preview),
-                  ),
+              else ...[
+                if (own.isNotEmpty) ...[
+                  const UiCaps('Your sets'),
+                  const SizedBox(height: 10),
+                  for (final preview in own)
+                    _NotesListTile(
+                      preview: preview,
+                      onOpen: () => widget.onOpen(preview),
+                    ),
+                ],
+                if (reference.isNotEmpty) ...[
+                  SizedBox(height: own.isEmpty ? 0 : 22),
+                  const UiCaps('High-level reference sets'),
+                  const SizedBox(height: 4),
+                  const Text(
+                      "Other players' games, used to compare against. They "
+                      'are not part of your history.',
+                      style: Ui.small),
+                  const SizedBox(height: 10),
+                  for (final preview in reference)
+                    _NotesListTile(
+                      preview: preview,
+                      onOpen: () => widget.onOpen(preview),
+                    ),
+                ],
+              ],
             ],
           ),
         ),
@@ -129,69 +151,53 @@ class _NotesListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final date = formatNoteDate(preview.createdAt);
-    final cards = preview.cardCount;
-    final flagged = preview.flaggedCount;
-    return Card(
+    final played = batchPlayedAt(preview.batchLabel) ?? preview.sortDate;
+    final situations = preview.situationCount ?? preview.cardCount;
+    final facts = [
+      if (played != null) formatPlayedDate(played),
+      if (preview.replays != null) games(preview.replays!),
+      '$situations ${situations == 1 ? 'situation' : 'situations'}',
+    ].join('  ·  ');
+    return Padding(
       key: ValueKey('notes-entry-${preview.documentPath}'),
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 15, 14, 15),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    date == null
-                        ? preview.batchLabel
-                        : '${preview.batchLabel}  ·  $date',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Row(
-                    children: [
-                      Flexible(
-                          child: Text(
-                        'vs ${preview.opponent}',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      )),
-                      if (preview.isReference) ...[
-                        const SizedBox(width: 8),
-                        Chip(
-                          key:
-                              ValueKey('reference-badge-${preview.batchLabel}'),
-                          label: const Text('Reference'),
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    '$cards ${cards == 1 ? 'situation' : 'situations'}'
-                    '  ·  $flagged flagged',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Tooltip(
+        message: preview.batchLabel,
+        waitDuration: const Duration(milliseconds: 700),
+        child: UiPanel(
+          onTap: onOpen,
+          padding: const EdgeInsets.fromLTRB(20, 16, 10, 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('vs ${preview.opponent}', style: Ui.h2),
+                    const SizedBox(height: 4),
+                    Text(facts, style: Ui.small.copyWith(fontSize: 13.5)),
+                  ],
+                ),
               ),
-            ),
-            TextButton(
-              key: const ValueKey('open-notes-entry'),
-              onPressed: onOpen,
-              child: const Text('Open'),
-            ),
-          ],
+              if (preview.isReference)
+                UiPill(
+                    key: ValueKey('reference-badge-${preview.batchLabel}'),
+                    label: 'Reference',
+                    color: Ui.reference)
+              else if (preview.hasReference)
+                const UiPill(
+                    label: 'Compared with high-level',
+                    color: Ui.reference,
+                    icon: Icons.compare_arrows_rounded),
+              const SizedBox(width: 4),
+              IconButton(
+                key: const ValueKey('open-notes-entry'),
+                tooltip: 'Open',
+                onPressed: onOpen,
+                icon: const UiChevron(),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -237,14 +243,12 @@ class _NotesPageState extends State<NotesPage> {
   Object? _error;
   bool _saving = false;
   final Set<String> _saved = <String>{};
-  final Set<String> _expanded = <String>{};
   _PageTab _tab = _PageTab.spots;
-  // Card id to its open tab (0 read, 1 clips, 2 frame grid) and the cards with a
-  // read that were opened by hand; focus cards are always open.
+  // The situation shown on its own; null on the landing.
+  String? _selected;
+  final _scroll = ScrollController();
+  // Card id to its open tab (0 read, 1 clips, 2 frame grid).
   final Map<String, int> _cardTab = {};
-  final Set<String> _openCards = <String>{};
-  final Map<String, GlobalKey> _cardAnchors = {};
-  final _flaggedController = ExpansibleController();
   // The one sequence whose clip is open, under its row; null when none is.
   String? _openSequence;
   final Map<String, (Set<String>, String)> _clipFilters = {};
@@ -264,7 +268,7 @@ class _NotesPageState extends State<NotesPage> {
 
   @override
   void dispose() {
-    _flaggedController.dispose();
+    _scroll.dispose();
     final messenger = _scaffoldMessenger;
     if (messenger != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -319,13 +323,41 @@ class _NotesPageState extends State<NotesPage> {
     );
   }
 
+  SequenceCard? _selectedCard(NoteSequenceData data) {
+    final id = _selected;
+    if (id == null) return null;
+    for (final card in data.document.cards) {
+      if (card.id == id) return card;
+    }
+    return null;
+  }
+
+  /// The cards a situation is stepped through with: its own kind, in page order.
+  List<SequenceCard> _siblings(SequenceDocument document, SequenceCard card) =>
+      [
+        for (final other in document.cards)
+          if (other.isEventCard == card.isEventCard) other
+      ];
+
+  void _open(SequenceCard? card) {
+    setState(() {
+      _selected = card?.id;
+      _openSequence = null;
+      if (card != null) {
+        _tab = card.isEventCard ? _PageTab.hits : _PageTab.spots;
+      }
+    });
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = _data;
-    final theme = Theme.of(context);
+    final selected = data == null ? null : _selectedCard(data);
     return SingleChildScrollView(
       key: const ValueKey('notes-page'),
-      padding: const EdgeInsets.fromLTRB(28, 24, 28, 36),
+      controller: _scroll,
+      padding: const EdgeInsets.fromLTRB(28, 20, 28, 44),
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
@@ -333,26 +365,10 @@ class _NotesPageState extends State<NotesPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      'SEQUENCES  ·  ${widget.preview.batchLabel}  ·  vs ${widget.preview.opponent}',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.7,
-                      ),
-                    ),
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey('back-from-sequences'),
-                    onPressed: _saving ? null : widget.onBack,
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    label: const Text('Back'),
-                  ),
-                ],
-              ),
+              if (data != null && selected != null)
+                _detailCrumb(data, selected)
+              else
+                _pageHeader(data),
               const SizedBox(height: 20),
               if (_error != null)
                 StatusSurface(
@@ -362,48 +378,255 @@ class _NotesPageState extends State<NotesPage> {
                 )
               else if (data == null)
                 const Center(child: CircularProgressIndicator())
-              else ...[
-                _PageNotices(document: data.document),
-                ..._buildTabs(context, data),
-                if (_tab == _PageTab.damage) ...[
-                  if (data.document.ledger case final ledger?
-                      when ledger.totalDamage > 0)
-                    _DamageLedgerPanel(
-                        ledger: ledger,
-                        player: data.document.player,
-                        cards: data.document.cards,
-                        onCard: _revealCard),
-                  if (!data.document.isReference &&
-                      data.document.reference != null)
-                    ReferencePanel(
-                        player: data.document.player ?? 'player',
-                        reference: data.document.reference!,
-                        ledger: data.document.ledger),
-                  if (data.document.trend case final trend?)
-                    _TrendPanel(trend: trend),
-                ] else
-                  ..._buildGroups(context, data),
-                if (data.document.cards.isEmpty && _tab == _PageTab.spots)
-                  const StatusSurface(
-                    tone: StatusTone.blocked,
-                    icon: Icons.playlist_play_rounded,
-                    child: Text('No defensive situations in this batch.'),
-                  ),
-                if (data.document.clipErrors.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  Text(
-                    data.document.clipErrors.join('\n'),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+              else if (selected != null)
+                ..._buildDetail(context, data, selected)
+              else
+                ..._buildLanding(context, data),
+              if (data != null && data.document.clipErrors.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text(
+                  data.document.clipErrors.join('\n'),
+                  style: Ui.small.copyWith(color: Ui.inkLow),
+                ),
               ],
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _pageHeader(NoteSequenceData? data) {
+    final document = data?.document;
+    final played = batchPlayedAt(widget.preview.batchLabel);
+    final replays = document?.replays ?? document?.ledger?.replays;
+    final referenceGames =
+        document == null || document.isReference ? null : document.reference;
+    final facts = [
+      if (document?.player case final player?) player,
+      if (played != null) formatPlayedDate(played),
+      if (replays != null && replays > 0) games(replays),
+    ].join('  ·  ');
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        IconButton(
+          key: const ValueKey('back-from-sequences'),
+          tooltip: 'All sets',
+          onPressed: _saving ? null : widget.onBack,
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Tooltip(
+            message: widget.preview.batchLabel,
+            waitDuration: const Duration(milliseconds: 700),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('vs ${widget.preview.opponent}', style: Ui.h1),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (facts.isNotEmpty)
+                      Text(facts, style: Ui.small.copyWith(fontSize: 13.5)),
+                    if (document?.isReference ?? false)
+                      const UiPill(label: 'Reference', color: Ui.reference),
+                    if (referenceGames?.replays case final count?)
+                      UiPill(
+                          label:
+                              'Compared with ${games(count)} of high-level ${document?.player ?? 'play'}',
+                          color: Ui.reference,
+                          icon: Icons.compare_arrows_rounded),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _detailCrumb(NoteSequenceData data, SequenceCard card) {
+    final siblings = _siblings(data.document, card);
+    final index = siblings.indexOf(card);
+    return Row(
+      children: [
+        TextButton.icon(
+          key: const ValueKey('back-to-situations'),
+          onPressed: () => _open(null),
+          icon: const Icon(Icons.arrow_back_rounded, size: 18),
+          label: Text('vs ${widget.preview.opponent}'),
+        ),
+        const Spacer(),
+        Text('${index + 1} of ${siblings.length}',
+            style: Ui.small.copyWith(color: Ui.inkLow)),
+        const SizedBox(width: 6),
+        IconButton(
+          key: const ValueKey('previous-situation'),
+          tooltip: 'Previous',
+          visualDensity: VisualDensity.compact,
+          onPressed: index > 0 ? () => _open(siblings[index - 1]) : null,
+          icon: const Icon(Icons.chevron_left_rounded),
+        ),
+        IconButton(
+          key: const ValueKey('next-situation'),
+          tooltip: 'Next',
+          visualDensity: VisualDensity.compact,
+          onPressed: index >= 0 && index < siblings.length - 1
+              ? () => _open(siblings[index + 1])
+              : null,
+          icon: const Icon(Icons.chevron_right_rounded),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildLanding(BuildContext context, NoteSequenceData data) {
+    final document = data.document;
+    final situations =
+        document.cards.where((card) => !card.isEventCard).toList();
+    final events = document.cards.where((card) => card.isEventCard).toList();
+    final focus = <SequenceCard>[
+      for (final id in document.focus)
+        for (final card in situations)
+          if (card.id == id) card
+    ];
+    return [
+      _PageNotices(document: document, saveHint: false),
+      MatchupStats(document: document),
+      const SizedBox(height: 22),
+      ..._buildTabs(context, data),
+      if (_tab == _PageTab.damage) ...[
+        if (document.ledger case final ledger? when ledger.totalDamage > 0)
+          _DamageLedgerPanel(
+              ledger: ledger,
+              player: document.player,
+              cards: document.cards,
+              onCard: _revealCard,
+              reference:
+                  document.isReference ? null : document.reference?.ledger),
+        if (!document.isReference && document.reference != null)
+          ReferencePanel(
+              player: document.player ?? 'player',
+              reference: document.reference!,
+              ledger: document.ledger),
+        if (document.trend case final trend?) _TrendPanel(trend: trend),
+      ] else if (_tab == _PageTab.hits)
+        EventsTable(
+            key: const ValueKey('event-cards'),
+            cards: events,
+            document: document,
+            onOpen: _open)
+      else ...[
+        if (focus.isNotEmpty)
+          Column(
+            key: const ValueKey('focus-group'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const UiCaps('Work on these'),
+              const SizedBox(height: 10),
+              for (var index = 0; index < focus.length; index++)
+                LeakRow(
+                    key: ValueKey('focus-row-${focus[index].id}'),
+                    card: focus[index],
+                    document: document,
+                    onOpen: () => _open(focus[index]),
+                    number: index + 1),
+              const SizedBox(height: 14),
+            ],
+          ),
+        if (situations.isNotEmpty) ...[
+          const UiCaps('All situations'),
+          const SizedBox(height: 10),
+          SituationsTable(cards: situations, document: document, onOpen: _open),
+        ] else
+          const StatusSurface(
+            tone: StatusTone.blocked,
+            icon: Icons.playlist_play_rounded,
+            child: Text('No defensive situations in this batch.'),
+          ),
+      ],
+    ];
+  }
+
+  List<Widget> _buildDetail(
+      BuildContext context, NoteSequenceData data, SequenceCard card) {
+    final document = data.document;
+    final player = document.player ?? 'player';
+    final reference = document.isReference ? null : card.reference;
+    final move = document.moves[card.moveId];
+    final gap =
+        hitGap(card.hits, card.count, reference?.hits, reference?.count);
+    final rated = !card.isEventCard && card.count > 0;
+    return [
+      if (move != null)
+        KeyedSubtree(
+          key: ValueKey('move-strip-${card.id}'),
+          child: MoveStrip(
+              move: move,
+              size: 84,
+              title: Text(card.title,
+                  key: ValueKey('detail-title-${card.id}'), style: Ui.h1)),
+        )
+      else
+        Text(card.title,
+            key: ValueKey('detail-title-${card.id}'), style: Ui.h1),
+      const SizedBox(height: 16),
+      UiPanel(
+        key: ValueKey('detail-stats-${card.id}'),
+        padding: const EdgeInsets.fromLTRB(22, 16, 22, 16),
+        child: Wrap(
+          spacing: 44,
+          runSpacing: 18,
+          children: [
+            UiStat(
+                label: 'Happened',
+                value: '${card.count}',
+                unit: card.count == 1 ? 'time' : 'times'),
+            if (rated)
+              UiStat(
+                label: 'You got hit',
+                marker: Ui.bad,
+                value: Ui.percent(card.hits, card.count),
+                unit: '${card.hits} of ${card.count}',
+                detail: gap
+                    ? const UiPill(
+                        label: 'far more often than high-level',
+                        color: Ui.bad,
+                        icon: Icons.arrow_upward_rounded)
+                    : null,
+              ),
+            if (reference != null &&
+                reference.hits != null &&
+                (reference.count ?? 0) > 0)
+              UiStat(
+                key: ValueKey('card-reference-${card.id}'),
+                label: 'High-level $player got hit',
+                marker: Ui.reference,
+                value: Ui.percent(reference.hits!, reference.count!),
+                unit: '${reference.hits} of ${reference.count}',
+                detail: reference.count! < 5
+                    ? const UiPill(label: 'small sample')
+                    : null,
+              ),
+            if (card.damage > 0)
+              UiStat(
+                  label: 'Damage taken',
+                  value: Ui.thousands(card.damage),
+                  unit: card.count > 0
+                      ? '${(card.damage / card.count).round()} each time'
+                      : null),
+          ],
+        ),
+      ),
+      const SizedBox(height: 6),
+      _buildCard(context, data, card),
+    ];
   }
 
   List<Widget> _buildTabs(BuildContext context, NoteSequenceData data) {
@@ -415,145 +638,36 @@ class _NotesPageState extends State<NotesPage> {
         (!document.isReference && document.reference != null);
     if (events == 0 && !damage) return const [];
     return [
-      Align(
-        alignment: Alignment.centerLeft,
-        child: SegmentedButton<_PageTab>(
-          key: const ValueKey('page-tabs'),
-          showSelectedIcon: false,
-          segments: [
-            ButtonSegment(
-                value: _PageTab.spots,
-                icon: const Icon(Icons.grid_view_rounded),
-                label:
-                    Text('Spots ($spots)', key: const ValueKey('tab-spots'))),
-            if (events > 0)
-              ButtonSegment(
-                  value: _PageTab.hits,
-                  icon: const Icon(Icons.flash_on_rounded),
-                  label: Text('Got hit ($events)',
-                      key: const ValueKey('tab-hits'))),
-            if (damage)
-              const ButtonSegment(
-                  value: _PageTab.damage,
-                  icon: Icon(Icons.bar_chart_rounded),
-                  label: Text('Damage', key: ValueKey('tab-damage'))),
-          ],
-          selected: {_tab},
-          onSelectionChanged: (value) => setState(() => _tab = value.first),
-        ),
-      ),
-      const SizedBox(height: 18),
-    ];
-  }
-
-  List<Widget> _buildGroups(BuildContext context, NoteSequenceData data) {
-    final document = data.document;
-
-    final events = document.cards.where((card) => card.isEventCard).toList();
-    Widget eventGroup(Iterable<SequenceCard> cards) => Column(
-          key: const ValueKey('event-cards'),
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('HOW ELSE ${document.player?.toUpperCase() ?? 'YOU'} GOT HIT',
-                style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 10),
-            for (final card in cards) _buildCard(context, data, card),
-          ],
-        );
-    if (_tab == _PageTab.hits) return [eventGroup(events)];
-    if (document.focus.isEmpty) {
-      return [
-        for (final card in document.cards.where((card) => !card.isEventCard))
-          _buildCard(context, data, card),
-      ];
-    }
-    final focus = <SequenceCard>[];
-    for (final id in document.focus) {
-      for (final card in document.cards) {
-        if (card.id == id && !focus.contains(card)) {
-          focus.add(card);
-          break;
-        }
-      }
-    }
-    final others = document.cards.where((card) => !focus.contains(card));
-    final flagged = others
-        .where(
-            (card) => !card.isEventCard && (card.flagged || card.isGuardCrush))
-        .toList();
-    return [
-      Column(
-        key: const ValueKey('focus-group'),
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('WORK ON THESE', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 10),
-          for (var index = 0; index < focus.length; index++)
-            _buildCard(context, data, focus[index], focusNumber: index + 1),
+      UiTabs<_PageTab>(
+        key: const ValueKey('page-tabs'),
+        tabs: [
+          (_PageTab.spots, 'Situations  $spots', const ValueKey('tab-spots')),
+          if (events > 0)
+            (_PageTab.hits, 'Got hit  $events', const ValueKey('tab-hits')),
+          if (damage) (_PageTab.damage, 'Damage', const ValueKey('tab-damage')),
         ],
+        selected: _tab,
+        onChanged: (value) => setState(() => _tab = value),
       ),
-      ExpansionTile(
-        key: const ValueKey('other-flagged'),
-        controller: _flaggedController,
-        title: Text('Other flagged situations (${flagged.length})'),
-        children: [for (final card in flagged) _buildCard(context, data, card)],
-      ),
-      for (final card in others.where(
-          (card) => !card.isEventCard && !card.flagged && !card.isGuardCrush))
-        _buildCard(context, data, card),
+      const SizedBox(height: 20),
     ];
   }
 
-  Future<void> _revealCard(SequenceCard card) async {
-    setState(() {
-      _expanded.add(card.id);
-      _openCards.add(card.id);
-      _tab = card.isEventCard ? _PageTab.hits : _PageTab.spots;
-    });
-    final document = _data!.document;
-    if (document.focus.isNotEmpty &&
-        !document.focus.contains(card.id) &&
-        !card.isEventCard &&
-        (card.flagged || card.isGuardCrush)) {
-      _flaggedController.expand();
-    }
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    final target = _cardAnchors[card.id]?.currentContext;
-    if (target != null && target.mounted) {
-      await Scrollable.ensureVisible(target,
-          duration: const Duration(milliseconds: 300));
-    }
-  }
+  Future<void> _revealCard(SequenceCard card) async => _open(card);
 
   Widget _buildCard(
     BuildContext context,
     NoteSequenceData data,
-    SequenceCard card, {
-    int? focusNumber,
-  }) {
+    SequenceCard card,
+  ) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    final crush = card.isGuardCrush;
-    final small = crush || card.isEventCard;
-    final expanded = focusNumber != null ||
-        (!card.isEventCard && card.flagged) ||
-        crush ||
-        _expanded.contains(card.id);
-    final header = card.header ??
-        [
-          '${card.count} ${card.count == 1 ? 'time' : 'times'}',
-          if (card.decided > 0) 'hit ${card.hits} of ${card.decided}',
-          if (card.damage > 0) '${card.damage} damage',
-        ].join('  ·  ');
     final leadIns = card.leadInText ??
         (card.leadIns.isEmpty
             ? null
             : 'lead-ins: ${card.leadIns.map((leadIn) => '${leadIn.label} x${leadIn.count}').join(', ')}');
     final summary = card.read?.summary;
     final hasSummary = summary != null && summary.spots.isNotEmpty;
-    final collapsed =
-        hasSummary && focusNumber == null && !_openCards.contains(card.id);
     final cardTab = _cardTab[card.id] ?? 0;
     final moves = data.document.moves;
     final eventMoves = [
@@ -564,64 +678,71 @@ class _NotesPageState extends State<NotesPage> {
     final visibleSequences = filter == null
         ? card.sequences
         : card.sequences.where((s) => filter.$1.contains(s.id)).toList();
+    final strivelabs = data.document.strivelabsRecordings;
     final clips = <Widget>[
       if (filter != null)
-        Row(key: ValueKey('clip-filter-${card.id}'), children: [
-          Expanded(
-              child: Text(
-                  'Showing ${visibleSequences.length} of ${card.sequences.length} clips: ${filter.$2}')),
-          TextButton(
-              key: ValueKey('clip-filter-clear-${card.id}'),
-              onPressed: () => setState(() => _clipFilters.remove(card.id)),
-              child: const Text('Show all')),
-        ]),
-      if (filter == null && card.reversalNote != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(
-            card.reversalNote!,
-            key: ValueKey('reversal-note-${card.id}'),
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+        Container(
+          key: ValueKey('clip-filter-${card.id}'),
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
+          decoration: BoxDecoration(
+            color: AfterimageTheme.panelRaised,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(children: [
+            const Icon(Icons.filter_alt_outlined, size: 16, color: Ui.inkMid),
+            const SizedBox(width: 8),
+            Expanded(
+                child: Text(
+                    'Showing ${visibleSequences.length} of ${card.sequences.length} clips: ${filter.$2}',
+                    style: Ui.body)),
+            TextButton(
+                key: ValueKey('clip-filter-clear-${card.id}'),
+                onPressed: () => setState(() => _clipFilters.remove(card.id)),
+                child: const Text('Show all')),
+          ]),
+        ),
+      if (filter == null && card.mixups.isNotEmpty) ...[
+        const UiCaps('Practice it in training mode'),
+        const SizedBox(height: 8),
+        UiPanel(
+          padding: const EdgeInsets.fromLTRB(16, 6, 12, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var index = 0; index < card.mixups.length; index++)
+                _buildMixup(card, index),
+              const SizedBox(height: 8),
+              Text(
+                strivelabs == null
+                    ? 'StriveLabs was not found. Save writes to the batch folder only.'
+                    : 'Save writes to StriveLabs recordings and the batch folder. '
+                        'In game: F5, Recordings, Load into Game\'s Slot N, Player '
+                        'Side = the dummy\'s side.',
+                key: const ValueKey('strivelabs-notice'),
+                style: Ui.small.copyWith(color: Ui.inkLow),
+              ),
+            ],
           ),
         ),
-      if (filter == null && card.answers.isNotEmpty)
-        _AnswerScoreboard(card: card),
-      if (filter == null && leadIns != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(
-            leadIns,
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
-          ),
-        ),
-      if (filter == null)
-        for (var index = 0; index < card.mixups.length; index++)
-          _buildMixup(card, index),
-      if (filter == null &&
-          card.isEventCard &&
-          card.count > card.sequences.length)
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(
-            'Showing the ${card.sequences.length} most damaging of ${card.count}.',
-            key: ValueKey('event-more-${card.id}'),
-            style: theme.textTheme.bodySmall?.copyWith(color: muted),
-          ),
-        ),
-      if (!expanded && !hasSummary)
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            key: ValueKey('show-sequences-${card.id}'),
-            onPressed: () => setState(() => _expanded.add(card.id)),
+        const SizedBox(height: 20),
+      ],
+      ...[
+        if (visibleSequences.isNotEmpty) ...[
+          UiCaps(filter == null ? 'Clips' : 'Matching clips'),
+          const SizedBox(height: 4),
+        ],
+        if (filter == null &&
+            card.isEventCard &&
+            card.count > card.sequences.length)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
             child: Text(
-              'Show ${card.sequences.length} '
-              '${card.sequences.length == 1 ? 'sequence' : 'sequences'}',
+              'Showing the ${card.sequences.length} most damaging of ${card.count}.',
+              key: ValueKey('event-more-${card.id}'),
+              style: Ui.small,
             ),
           ),
-        )
-      else ...[
-        SizedBox(height: small ? 6 : 10),
         for (final sequence in visibleSequences) ...[
           _buildSequence(sequence),
           if (_openSequence == sequence.id && sequence.clip != null)
@@ -638,81 +759,36 @@ class _NotesPageState extends State<NotesPage> {
             ),
         ],
       ],
+      if (filter == null && card.answers.isNotEmpty) ...[
+        const SizedBox(height: 22),
+        const UiCaps('Every answer and what it led to'),
+        const SizedBox(height: 8),
+        _AnswerScoreboard(card: card, player: data.document.player),
+      ],
+      if (filter == null && leadIns != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Text(leadIns, style: Ui.small),
+        ),
+      if (filter == null && card.reversalNote != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            card.reversalNote!,
+            key: ValueKey('reversal-note-${card.id}'),
+            style: Ui.small,
+          ),
+        ),
     ];
     return KeyedSubtree(
-      key: _cardAnchors.putIfAbsent(card.id, () => GlobalKey()),
-      child: Card(
+      child: Padding(
         key: ValueKey('sequence-card-${card.id}'),
-        margin: const EdgeInsets.only(bottom: 14),
+        padding: EdgeInsets.zero,
         child: Padding(
-          padding: small
-              ? const EdgeInsets.fromLTRB(18, 12, 18, 10)
-              : const EdgeInsets.fromLTRB(18, 16, 18, 17),
+          padding: EdgeInsets.zero,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      focusNumber == null
-                          ? card.title
-                          : '$focusNumber. ${card.title}',
-                      style: (small
-                              ? theme.textTheme.titleSmall
-                              : theme.textTheme.titleMedium)
-                          ?.copyWith(
-                        color: small
-                            ? AfterimageTheme.blockedText
-                            : AfterimageTheme.accent,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Flexible(
-                    child: Text(
-                      header,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: muted,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ),
-                  if (hasSummary && focusNumber == null)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 6),
-                      child: IconButton(
-                        key: ValueKey('toggle-card-${card.id}'),
-                        visualDensity: VisualDensity.compact,
-                        tooltip: collapsed ? 'Open' : 'Close',
-                        onPressed: () => setState(() => collapsed
-                            ? _openCards.add(card.id)
-                            : _openCards.remove(card.id)),
-                        icon: Icon(collapsed
-                            ? Icons.expand_more_rounded
-                            : Icons.expand_less_rounded),
-                      ),
-                    ),
-                ],
-              ),
-              if (!data.document.isReference &&
-                  card.reference != null &&
-                  (card.reference!.count ?? 0) > 0)
-                Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                        'High-level ${data.document.player ?? 'player'}: ${card.reference!.count} times${card.reference!.hits == null ? '' : ' · hit ${card.reference!.hits} (${(100 * card.reference!.hits! / card.reference!.count!).round()}%)'}',
-                        key: ValueKey('card-reference-${card.id}'),
-                        style:
-                            theme.textTheme.bodySmall?.copyWith(color: muted))),
-              if (!collapsed && moves[card.moveId] != null)
-                Padding(
-                  key: ValueKey('move-strip-${card.id}'),
-                  padding: const EdgeInsets.only(top: 10),
-                  child: MoveStrip(move: moves[card.moveId]!),
-                ),
               if (eventMoves.isNotEmpty)
                 Padding(
                   key: ValueKey('event-moves-${card.id}'),
@@ -781,48 +857,25 @@ class _NotesPageState extends State<NotesPage> {
                     ],
                   ),
                 ),
-              if (hasSummary && collapsed)
+              if (hasSummary) ...[
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    _headline(summary.spots.first)?.text ??
-                        (summary.spots.first.lines.isEmpty
-                            ? summary.spots.first.title
-                            : '${summary.spots.first.title}: ${summary.spots.first.lines.first}'),
-                    key: ValueKey('card-teaser-${card.id}'),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                  ),
-                )
-              else if (hasSummary) ...[
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: SegmentedButton<int>(
-                      key: ValueKey('card-tabs-${card.id}'),
-                      showSelectedIcon: false,
-                      segments: [
-                        ButtonSegment(
-                            value: 0,
-                            label: Text('Read',
-                                key: ValueKey('card-tab-read-${card.id}'))),
-                        ButtonSegment(
-                            value: 1,
-                            label: Text('Clips (${card.sequences.length})',
-                                key: ValueKey('card-tab-clips-${card.id}'))),
-                        ButtonSegment(
-                            value: 2,
-                            label: Text('Frame grid',
-                                key: ValueKey('card-tab-grid-${card.id}'))),
-                      ],
-                      selected: {cardTab},
-                      onSelectionChanged: (value) => setState(() {
-                        _cardTab[card.id] = value.first;
-                        _clipFilters.remove(card.id);
-                      }),
-                    ),
+                  padding: const EdgeInsets.only(top: 14, bottom: 16),
+                  child: UiTabs<int>(
+                    key: ValueKey('card-tabs-${card.id}'),
+                    tabs: [
+                      (0, 'Options', ValueKey('card-tab-read-${card.id}')),
+                      (
+                        1,
+                        'Clips  ${card.sequences.length}',
+                        ValueKey('card-tab-clips-${card.id}')
+                      ),
+                      (2, 'Frame data', ValueKey('card-tab-grid-${card.id}')),
+                    ],
+                    selected: cardTab,
+                    onChanged: (value) => setState(() {
+                      _cardTab[card.id] = value;
+                      _clipFilters.remove(card.id);
+                    }),
                   ),
                 ),
                 if (cardTab == 0)
@@ -876,7 +929,6 @@ class _NotesPageState extends State<NotesPage> {
 
   Widget _buildMixup(SequenceCard card, int index) {
     final mixup = card.mixups[index];
-    final theme = Theme.of(context);
     final savedKey = 'mixup-${card.id}-$index';
     final options =
         mixup.files.map((file) => '${file.followUp} x${file.count}').join(', ');
@@ -887,18 +939,13 @@ class _NotesPageState extends State<NotesPage> {
         children: [
           Expanded(
             child: heading == null
-                ? Text(
-                    'mixup ${mixup.label}: $options',
-                    style: theme.textTheme.bodyMedium,
-                  )
+                ? Text('mixup ${mixup.label}: $options', style: Ui.body)
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(heading, style: theme.textTheme.bodyMedium),
-                      Padding(
-                        padding: const EdgeInsets.only(left: 14, top: 2),
-                        child: Text(options, style: theme.textTheme.bodyMedium),
-                      ),
+                      Text(heading,
+                          style: Ui.body.copyWith(fontWeight: FontWeight.w600)),
+                      Text(options, style: Ui.small),
                     ],
                   ),
           ),
@@ -920,99 +967,118 @@ class _NotesPageState extends State<NotesPage> {
   }
 
   Widget _buildSequence(LabSequence sequence) {
-    final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
     final recording = sequence.recording;
     final open = _openSequence == sequence.id;
     final line = sequence.line;
     final result = sequence.result;
+    final hasClip = sequence.clip != null;
     return Container(
       key: ValueKey('sequence-${sequence.id}'),
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.fromLTRB(6, 4, 4, 4),
       decoration: BoxDecoration(
         color: open ? AfterimageTheme.panelRaised : null,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(10),
+        border: const Border(bottom: BorderSide(color: Color(0xFF1B2322))),
       ),
-      child: Row(
-        children: [
-          IconButton(
-            key: ValueKey('play-${sequence.id}'),
-            tooltip: sequence.clip == null
-                ? 'No clip'
-                : open
-                    ? 'Close clip'
-                    : 'Play clip',
-            onPressed: sequence.clip == null
-                ? null
-                : () => setState(
-                      () => _openSequence = open ? null : sequence.id,
-                    ),
-            icon: Icon(open ? Icons.stop_rounded : Icons.play_arrow_rounded),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          hoverColor: Colors.white.withValues(alpha: 0.035),
+          onTap: hasClip
+              ? () => setState(() => _openSequence = open ? null : sequence.id)
+              : null,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(6, 7, 6, 7),
+            child: Row(
               children: [
+                IconButton(
+                  key: ValueKey('play-${sequence.id}'),
+                  tooltip: !hasClip
+                      ? 'No clip'
+                      : open
+                          ? 'Close clip'
+                          : 'Play clip',
+                  style: IconButton.styleFrom(
+                    backgroundColor: hasClip
+                        ? AfterimageTheme.accent.withValues(alpha: 0.12)
+                        : null,
+                  ),
+                  onPressed: hasClip
+                      ? () => setState(
+                            () => _openSequence = open ? null : sequence.id,
+                          )
+                      : null,
+                  icon: Icon(
+                      open ? Icons.stop_rounded : Icons.play_arrow_rounded),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (line != null && result != null) ...[
+                        Text(line,
+                            style:
+                                Ui.body.copyWith(fontWeight: FontWeight.w600)),
+                        Text(result, style: Ui.small),
+                      ] else
+                        Text(sequence.summary, style: Ui.body),
+                      if (sequence.read case final read?) ...[
+                        if (read.kind.isNotEmpty &&
+                            !const {
+                              'punish',
+                              "player's turn",
+                              "opponent's turn",
+                              'even',
+                              'unclear',
+                              'mixed',
+                            }.contains(read.kind))
+                          Text(
+                            'Spot: ${read.kind}',
+                            key: ValueKey('sequence-read-kind-${sequence.id}'),
+                            style: Ui.small.copyWith(color: Ui.inkLow),
+                          ),
+                        if (read.mistake != null || read.reason != null)
+                          Text(
+                            read.mistake == null
+                                ? 'Read: ${read.reason}'
+                                : 'Mistake: ${read.mistake}'
+                                    '${read.reason == null || read.reason!.isEmpty ? '' : ' · ${read.reason}'}',
+                            key: ValueKey('sequence-read-${sequence.id}'),
+                            style: Ui.small.copyWith(color: Ui.inkLow),
+                          ),
+                      ],
+                      if (recording == null && sequence.recordingError != null)
+                        Text(
+                          'cannot save: ${sequence.recordingError}',
+                          style: Ui.small.copyWith(color: Ui.inkLow),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
                 Text(
                   sequence.where,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: muted,
+                  style: Ui.small.copyWith(
+                    color: Ui.inkLow,
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-                if (line != null && result != null) ...[
-                  Text(line, style: theme.textTheme.bodyMedium),
-                  Text(
-                    result,
-                    style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                  ),
-                ] else
-                  Text(sequence.summary, style: theme.textTheme.bodyMedium),
-                if (sequence.read case final read?) ...[
-                  if (read.kind.isNotEmpty &&
-                      !const {
-                        'punish',
-                        "player's turn",
-                        "opponent's turn",
-                        'even',
-                        'unclear',
-                        'mixed',
-                      }.contains(read.kind))
-                    Text(
-                      'Spot: ${read.kind}',
-                      key: ValueKey('sequence-read-kind-${sequence.id}'),
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                  if (read.mistake != null || read.reason != null)
-                    Text(
-                      read.mistake == null
-                          ? 'Read: ${read.reason}'
-                          : 'Mistake: ${read.mistake}'
-                              '${read.reason == null || read.reason!.isEmpty ? '' : ' · ${read.reason}'}',
-                      key: ValueKey('sequence-read-${sequence.id}'),
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                ],
-                if (recording == null && sequence.recordingError != null)
-                  Text(
-                    'cannot save: ${sequence.recordingError}',
-                    style: theme.textTheme.labelSmall?.copyWith(color: muted),
-                  ),
+                const SizedBox(width: 12),
+                _SaveButton(
+                  buttonKey: ValueKey('save-${sequence.id}'),
+                  label: recording == null
+                      ? 'Save'
+                      : 'Save (${recording.frames}f)',
+                  saved: _saved.contains(sequence.id),
+                  onPressed: recording == null || _saving
+                      ? null
+                      : () => unawaited(_save(sequence.id, [recording])),
+                ),
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          _SaveButton(
-            buttonKey: ValueKey('save-${sequence.id}'),
-            label: recording == null ? 'Save' : 'Save (${recording.frames}f)',
-            saved: _saved.contains(sequence.id),
-            onPressed: recording == null || _saving
-                ? null
-                : () => unawaited(_save(sequence.id, [recording])),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1038,7 +1104,7 @@ class _SaveButton extends StatelessWidget {
 
   /// One width for every Save button, so they line up down the page whatever
   /// the frame count in the label.
-  static const double width = 172;
+  static const double width = 150;
 
   @override
   Widget build(BuildContext context) {
@@ -1048,11 +1114,14 @@ class _SaveButton extends StatelessWidget {
         key: buttonKey,
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
         ),
         icon: Icon(
           saved ? Icons.check_rounded : Icons.save_alt_rounded,
-          size: 18,
+          size: 16,
         ),
         label: FittedBox(
           fit: BoxFit.scaleDown,
@@ -1064,9 +1133,12 @@ class _SaveButton extends StatelessWidget {
 }
 
 class _PageNotices extends StatelessWidget {
-  const _PageNotices({required this.document});
+  const _PageNotices({required this.document, this.saveHint = true});
 
   final SequenceDocument document;
+
+  /// Where Save writes to. Shown next to the clips, not on the landing.
+  final bool saveHint;
 
   @override
   Widget build(BuildContext context) {
@@ -1101,18 +1173,19 @@ class _PageNotices extends StatelessWidget {
           ),
           const SizedBox(height: 12),
         ],
-        Text(
-          strivelabs == null
-              ? 'StriveLabs was not found. Save writes to the batch folder only.'
-              : 'Save writes to StriveLabs recordings and the batch folder. '
-                  'In game: F5, Recordings, Load into Game\'s Slot N, Player '
-                  'Side = the dummy\'s side.',
-          key: const ValueKey('strivelabs-notice'),
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+        if (saveHint)
+          Text(
+            strivelabs == null
+                ? 'StriveLabs was not found. Save writes to the batch folder only.'
+                : 'Save writes to StriveLabs recordings and the batch folder. '
+                    'In game: F5, Recordings, Load into Game\'s Slot N, Player '
+                    'Side = the dummy\'s side.',
+            key: const ValueKey('strivelabs-notice'),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
+        if (saveHint) const SizedBox(height: 16),
       ],
     );
   }
@@ -1168,8 +1241,8 @@ class _TrendPanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('ACROSS SETS', style: theme.textTheme.titleSmall),
-            const SizedBox(height: 6),
+            const UiCaps('Across your sets'),
+            const SizedBox(height: 8),
             Text(
                 [
                   if (earlier > 0) '$earlier earlier',
@@ -1278,7 +1351,8 @@ class _DamageLedgerPanel extends StatelessWidget {
       {required this.ledger,
       required this.player,
       required this.cards,
-      required this.onCard});
+      required this.onCard,
+      this.reference});
 
   final List<SequenceCard> cards;
   final ValueChanged<SequenceCard> onCard;
@@ -1286,91 +1360,185 @@ class _DamageLedgerPanel extends StatelessWidget {
   final DamageLedger ledger;
   final String? player;
 
+  /// The high-level ledger to show beside each category, when there is one.
+  final DamageLedger? reference;
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final name = player ?? 'You';
-    final largest = ledger.categories.fold<int>(
-        0,
-        (largest, category) =>
-            category.damage > largest ? category.damage : largest);
-    return Card(
-      key: const ValueKey('damage-ledger'),
-      margin: const EdgeInsets.only(bottom: 14),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
+    final other = {
+      if (reference != null)
+        for (final category in reference!.categories) category.key: category
+    };
+    final top = [
+      ...ledger.categories.map((category) => category.share),
+      ...other.values.map((category) => category.share),
+    ].fold<double>(0, (most, share) => share > most ? share : most);
+    double scaled(double share) => top > 0 ? share / top : 0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: UiPanel(
+        key: const ValueKey('damage-ledger'),
+        padding: const EdgeInsets.fromLTRB(20, 16, 12, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('WHERE THE DAMAGE CAME FROM',
-                style: theme.textTheme.titleSmall),
+            Wrap(
+              spacing: 16,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                const UiCaps('Where the damage came from'),
+                const UiKey(color: Ui.you, label: 'You'),
+                if (reference != null)
+                  UiKey(
+                      color: Ui.reference,
+                      label: 'High-level ${player ?? 'player'}'),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+                '$name lost ${_groupedNumber(ledger.totalDamage)} health over '
+                '${ledger.replays} ${ledger.replays == 1 ? 'game' : 'games'}. '
+                'Situations cover ${_groupedNumber(ledger.coveredByCards)} of it '
+                '(${(100 * ledger.coveredByCards / ledger.totalDamage).round()}%).',
+                style: Ui.small.copyWith(fontSize: 13.5)),
             const SizedBox(height: 6),
-            Text('$name lost ${_groupedNumber(ledger.totalDamage)} HP over '
-                '${ledger.replays} ${ledger.replays == 1 ? 'replay' : 'replays'}. The cards below cover '
-                '${_groupedNumber(ledger.coveredByCards)} '
-                '(${(100 * ledger.coveredByCards / ledger.totalDamage).round()}%).'),
             for (final category in ledger.categories)
-              ExpansionTile(
-                key: ValueKey('ledger-category-${category.key}'),
-                tilePadding: EdgeInsets.zero,
-                title: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(category.label),
-                    const SizedBox(height: 4),
-                    LinearProgressIndicator(
-                      value: largest > 0
-                          ? (category.damage / largest).clamp(0, 1)
-                          : 0,
-                      color: AfterimageTheme.accent,
-                      backgroundColor: AfterimageTheme.panelRaised,
+              Theme(
+                data: Theme.of(context)
+                    .copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  key: ValueKey('ledger-category-${category.key}'),
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.fromLTRB(0, 0, 12, 12),
+                  title: Row(children: [
+                    Expanded(
+                      child: Text(category.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Ui.body.copyWith(fontWeight: FontWeight.w600)),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                        '${_groupedNumber(category.damage)} damage '
-                        '(${(100 * category.damage / ledger.totalDamage).round()}%)'
-                        ' · ${category.events} events',
-                        style: theme.textTheme.bodySmall),
+                    const SizedBox(width: 10),
+                    UiMeter(
+                        fraction: scaled(category.share),
+                        color: Ui.you,
+                        width: 110),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                        width: 38,
+                        child: Text('${(category.share * 100).round()}%',
+                            textAlign: TextAlign.right, style: Ui.figure)),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                        width: 56,
+                        child: Text(_groupedNumber(category.damage),
+                            textAlign: TextAlign.right, style: Ui.small)),
+                    if (reference != null) ...[
+                      const SizedBox(width: 18),
+                      KeyedSubtree(
+                        key: ValueKey('reference-category-${category.key}'),
+                        child: UiMeter(
+                            fraction: scaled(other[category.key]?.share ?? 0),
+                            color: Ui.reference,
+                            width: 110),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                          width: 38,
+                          child: Text(
+                              other[category.key] == null
+                                  ? '0%'
+                                  : '${(other[category.key]!.share * 100).round()}%',
+                              textAlign: TextAlign.right,
+                              style: Ui.figure)),
+                    ],
+                  ]),
+                  children: [
+                    Column(
+                      key: ValueKey('ledger-starters-${category.key}'),
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                            Ui.times(category.events)
+                                .replaceFirst('time', 'event'),
+                            style: Ui.small),
+                        const SizedBox(height: 4),
+                        for (final starter in category.starters) ...[
+                          Text(
+                              '${starter.move} · ${_times(starter.events)} · '
+                              '${_groupedNumber(starter.damage)} damage'
+                              '${starter.counterHits > 0 ? ' · ${starter.counterHits} on counter hit' : ''}',
+                              style: Ui.body),
+                          for (final example in starter.examples)
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  left: 14, top: 2, bottom: 4),
+                              child: Text(
+                                  'replay ${example.replay}, round ${example.round}'
+                                  '${example.videoTime == null ? '' : ' at ${_ledgerTime(example.videoTime!)}'}'
+                                  ' (${example.damage})',
+                                  style: Ui.small),
+                            ),
+                        ],
+                        for (final id in category.cards)
+                          for (final card
+                              in cards.where((card) => card.id == id))
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                key: ValueKey('ledger-card-${card.id}'),
+                                onPressed: () => onCard(card),
+                                child: Text(card.title),
+                              ),
+                            ),
+                        if (category.key == 'pressing' &&
+                            category.hisMoves.isNotEmpty)
+                          Text(
+                              '${player == null ? 'You were' : '$name was'} pressing: ${category.hisMoves.map((move) => '${move.move} x${move.events}').join(', ')}',
+                              style: Ui.small),
+                      ],
+                    ),
                   ],
                 ),
-                children: [
-                  Column(
-                    key: ValueKey('ledger-starters-${category.key}'),
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (final starter in category.starters) ...[
-                        Text('${starter.move} · ${_times(starter.events)} · '
-                            '${_groupedNumber(starter.damage)} damage'
-                            '${starter.counterHits > 0 ? ' · ${starter.counterHits} on counter hit' : ''}'),
-                        for (final example in starter.examples)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                                left: 14, top: 2, bottom: 4),
-                            child: Text(
-                                'replay ${example.replay}, round ${example.round}'
-                                '${example.videoTime == null ? '' : ' at ${_ledgerTime(example.videoTime!)}'}'
-                                ' (${example.damage})',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant)),
-                          ),
-                      ],
-                      for (final id in category.cards)
-                        for (final card in cards.where((card) => card.id == id))
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              key: ValueKey('ledger-card-${card.id}'),
-                              onPressed: () => onCard(card),
-                              child: Text(card.title),
-                            ),
-                          ),
-                      if (category.key == 'pressing' &&
-                          category.hisMoves.isNotEmpty)
-                        Text(
-                            '${player == null ? 'You were' : '$name was'} pressing: ${category.hisMoves.map((move) => '${move.move} x${move.events}').join(', ')}'),
-                    ],
+              ),
+            for (final category in other.values.where((category) =>
+                !ledger.categories.any((own) => own.key == category.key)))
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: Row(children: [
+                  Expanded(
+                    child: Text(category.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Ui.body.copyWith(
+                            fontWeight: FontWeight.w600, color: Ui.inkMid)),
                   ),
-                ],
+                  const SizedBox(width: 10),
+                  const UiMeter(fraction: 0, color: Ui.you, width: 110),
+                  const SizedBox(width: 8),
+                  const SizedBox(
+                      width: 38,
+                      child: Text('0%',
+                          textAlign: TextAlign.right, style: Ui.figure)),
+                  const SizedBox(width: 10),
+                  const SizedBox(width: 56),
+                  const SizedBox(width: 18),
+                  KeyedSubtree(
+                    key: ValueKey('reference-category-${category.key}'),
+                    child: UiMeter(
+                        fraction: scaled(category.share),
+                        color: Ui.reference,
+                        width: 110),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                      width: 38,
+                      child: Text('${(category.share * 100).round()}%',
+                          textAlign: TextAlign.right, style: Ui.figure)),
+                  // Lines up with the expand arrow of the rows above.
+                  const SizedBox(width: 40),
+                ]),
               ),
           ],
         ),
@@ -1380,59 +1548,81 @@ class _DamageLedgerPanel extends StatelessWidget {
 }
 
 class _AnswerScoreboard extends StatelessWidget {
-  const _AnswerScoreboard({required this.card});
+  const _AnswerScoreboard({required this.card, this.player});
 
   final SequenceCard card;
+  final String? player;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
+    return UiPanel(
       key: ValueKey('answers-${card.id}'),
-      padding: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const Wrap(spacing: 16, runSpacing: 6, children: [
+            UiKey(color: Ui.bad, label: 'got hit'),
+            UiKey(color: Ui.warn, label: 'still under pressure'),
+            UiKey(color: Ui.idle, label: 'back to neutral'),
+            UiKey(color: Ui.good, label: 'won'),
+          ]),
+          const SizedBox(height: 10),
+          const Divider(height: 1),
           for (final answer in card.answers)
-            Builder(builder: (context) {
-              final most = [
-                answer.gotHit,
-                answer.won,
-                answer.pressure,
-                answer.neutral
-              ].reduce((a, b) => a > b ? a : b);
-              TextSpan outcome(String text, int count, [Color? color]) =>
-                  TextSpan(
-                    text: text,
-                    style: TextStyle(
-                      color: count > 0 ? color : null,
-                      fontWeight:
-                          count > 0 && count == most ? FontWeight.w800 : null,
-                    ),
-                  );
-              return Text.rich(
-                  TextSpan(children: [
-                    TextSpan(
-                        text: '${answer.text} · ${_times(answer.count)} · '),
-                    outcome('hit ${answer.gotHit}', answer.gotHit,
-                        AfterimageTheme.failedText),
-                    const TextSpan(text: ' · '),
-                    outcome('won ${answer.won}', answer.won,
-                        AfterimageTheme.readyText),
-                    const TextSpan(text: ' · '),
-                    outcome('still under pressure ${answer.pressure}',
-                        answer.pressure),
-                    const TextSpan(text: ' · '),
-                    outcome(
-                        'back to neutral ${answer.neutral}', answer.neutral),
-                    TextSpan(text: ' · ${answer.damage} damage'),
-                  ]),
-                  style: theme.textTheme.bodySmall);
-            }),
+            Padding(
+              key: ValueKey('answer-row-${answer.text}'),
+              padding: const EdgeInsets.symmetric(vertical: 7),
+              // Keeps its columns and scrolls sideways in a narrow window.
+              child: LayoutBuilder(
+                  builder: (context, constraints) => constraints.maxWidth >= 560
+                      ? _answerRow(answer)
+                      : SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child:
+                              SizedBox(width: 560, child: _answerRow(answer)))),
+            ),
         ],
       ),
     );
   }
+
+  Widget _answerRow(SequenceAnswer answer) => Row(children: [
+        Expanded(
+          child: Text(answer.text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Ui.body.copyWith(fontWeight: FontWeight.w600)),
+        ),
+        const SizedBox(width: 10),
+        SizedBox(
+            width: 64,
+            child: Text(_times(answer.count),
+                textAlign: TextAlign.right, style: Ui.small)),
+        const SizedBox(width: 14),
+        UiSplitBar(width: 120, parts: [
+          (answer.gotHit, Ui.bad),
+          (answer.pressure, Ui.warn),
+          (answer.neutral, Ui.idle),
+          (answer.won, Ui.good),
+        ]),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 110,
+          child: Text(
+              [
+                if (answer.gotHit > 0) 'hit ${answer.gotHit}',
+                if (answer.won > 0) 'won ${answer.won}',
+                if (answer.gotHit == 0 && answer.won == 0) 'not hit',
+              ].join(' · '),
+              style: Ui.small.copyWith(color: Ui.ink)),
+        ),
+        SizedBox(
+          width: 92,
+          child: Text(answer.damage > 0 ? '${answer.damage} damage' : '',
+              textAlign: TextAlign.right, style: Ui.small),
+        ),
+      ]);
 }
 
 class _SituationColumnGroup {
@@ -1593,10 +1783,13 @@ class _ReadSummaryViewState extends State<_ReadSummaryView> {
                   if ((widget.summary.unread?.count ?? 0) > 0)
                     Tooltip(
                         message: widget.summary.unread?.reason ?? '',
-                        child: Chip(
-                            key: const ValueKey('spot-unread'),
-                            label: Text(
-                                '${widget.summary.unread!.count} not read'))),
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 7),
+                          child: UiPill(
+                              key: const ValueKey('spot-unread'),
+                              label:
+                                  '${widget.summary.unread!.count} not read'),
+                        )),
                 ],
               ),
             ),
@@ -1615,81 +1808,28 @@ class _ReadSummaryViewState extends State<_ReadSummaryView> {
             Text(note.text,
                 style: theme.textTheme.bodySmall?.copyWith(color: muted)),
           if (spot.lines.isNotEmpty || spot.notes.isNotEmpty)
-            Container(
-              key: const ValueKey('spot-verdict'),
-              margin: const EdgeInsets.only(top: 10),
-              padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
-              decoration: BoxDecoration(
-                color: AfterimageTheme.panelRaised,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AfterimageTheme.hairline),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (spot.notes.isEmpty)
-                    for (final line in spot.lines)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Text(line, style: theme.textTheme.bodyMedium),
-                      ),
-                  if (_headline(spot) case final headline?) ...[
-                    if (headline.kind == 'unproven')
-                      const Text('On paper, not proven'),
-                    if (headline.kind == 'guess')
-                      const Text('No single answer'),
-                    if (const {'answer', 'fast', 'mix'}.contains(headline.kind))
-                      const Align(
-                          alignment: Alignment.centerLeft,
-                          child: Icon(Icons.check_circle_rounded,
-                              color: AfterimageTheme.accentStrong)),
-                    Text(headline.text,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                            color: headline.kind == 'unproven'
-                                ? AfterimageTheme.blocked
-                                : headline.kind == 'guess'
-                                    ? null
-                                    : AfterimageTheme.accentStrong)),
-                  ],
-                  for (final note in spot.notes.where((n) => !{
-                        'answer',
-                        'fast',
-                        'mix',
-                        'unproven',
-                        'guess',
-                        'habit',
-                        'route',
-                        'disproved',
-                        'losses'
-                      }.contains(n.kind)))
-                    Text(note.text, style: theme.textTheme.bodySmall),
-                  for (final note
-                      in spot.notes.where((n) => n.kind == 'disproved'))
-                    for (final row in note.rows)
-                      Row(
-                          key: ValueKey('disproved-$row|${note.versus}'),
-                          children: [
-                            Expanded(
-                                child: Text(
-                                    '$row lost to ${note.versus ?? 'opponent'} ${note.points.length} ${note.points.length == 1 ? 'time' : 'times'}, timing says it should win')),
-                            TextButton(
-                                onPressed: () => widget.onWatch(note.points,
-                                    row, note.versus ?? 'opponent'),
-                                child: const Text('Watch')),
-                          ]),
-                  for (final note
-                      in spot.notes.where((n) => n.kind == 'losses'))
-                    Text(note.text,
-                        style:
-                            theme.textTheme.bodySmall?.copyWith(color: muted)),
-                ],
+            _verdict(context, spot),
+          if (spot.playerRows.isNotEmpty) ...[
+            const SizedBox(height: 22),
+            UiCaps('What ${widget.player} can do here'),
+            const SizedBox(height: 10),
+            UiPanel(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+              child: OptionsTable(
+                spot: spot,
+                player: widget.referencePlayer,
+                opponent: widget.opponent,
+                moves: widget.moves,
+                reference: widget.reference,
+                recommended: {...?_headline(spot)?.rows},
+                recommendedProven: _headline(spot)?.kind != 'unproven',
               ),
             ),
-          if (widget.reference case final reference?)
-            SpotReferenceView(
-                player: widget.referencePlayer,
-                spot: spot,
-                reference: reference),
+          ],
+          if (spot.opponentRows.isNotEmpty && spot.playerRows.isNotEmpty) ...[
+            const SizedBox(height: 22),
+            const UiCaps('What beats what'),
+          ],
           if (spot.opponentRows.isNotEmpty && spot.playerRows.isNotEmpty)
             _table(context, spot)
           else if (spot.playerRows.isNotEmpty)
@@ -1726,6 +1866,107 @@ class _ReadSummaryViewState extends State<_ReadSummaryView> {
     );
   }
 
+  Widget _verdict(BuildContext context, SituationSpot spot) {
+    final headline = _headline(spot);
+    final (Color tone, IconData icon, String? label) = switch (headline?.kind) {
+      'answer' || 'fast' || 'mix' => (
+          Ui.good,
+          Icons.check_circle_rounded,
+          'Answer'
+        ),
+      'unproven' => (Ui.warn, Icons.science_outlined, 'On paper, not proven'),
+      'guess' => (Ui.inkMid, Icons.casino_outlined, 'No single answer'),
+      _ => (Ui.inkMid, Icons.info_outline_rounded, null),
+    };
+    const handled = {
+      'answer',
+      'fast',
+      'mix',
+      'unproven',
+      'guess',
+      'habit',
+      'route',
+      'disproved',
+      'losses'
+    };
+    return Container(
+      key: const ValueKey('spot-verdict'),
+      margin: const EdgeInsets.only(top: 14),
+      decoration: BoxDecoration(
+        color: AfterimageTheme.panelRaised,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 20, color: tone),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (label != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(label,
+                        style: Ui.small.copyWith(
+                            color: Ui.inkMid, fontWeight: FontWeight.w700)),
+                  ),
+                if (spot.notes.isEmpty)
+                  for (final line in spot.lines)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Text(line, style: Ui.body),
+                    ),
+                if (headline != null)
+                  Text(headline.text,
+                      style: Ui.body.copyWith(
+                          fontSize: 15.5, fontWeight: FontWeight.w600)),
+                for (final note
+                    in spot.notes.where((n) => !handled.contains(n.kind)))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(note.text, style: Ui.small),
+                  ),
+                for (final note
+                    in spot.notes.where((n) => n.kind == 'disproved'))
+                  for (final row in note.rows)
+                    Row(
+                        key: ValueKey('disproved-$row|${note.versus}'),
+                        children: [
+                          const Icon(Icons.warning_amber_rounded,
+                              size: 15, color: Ui.warn),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Text(
+                                  '$row lost to ${note.versus ?? 'opponent'} ${note.points.length} ${note.points.length == 1 ? 'time' : 'times'}, timing says it should win',
+                                  style: Ui.small.copyWith(color: Ui.ink))),
+                          TextButton(
+                              style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact),
+                              onPressed: () => widget.onWatch(
+                                  note.points, row, note.versus ?? 'opponent'),
+                              child: const Text('Watch')),
+                        ]),
+                for (final note in spot.notes.where((n) => n.kind == 'losses'))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(note.text,
+                        style: Ui.small.copyWith(color: Ui.inkLow)),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _table(BuildContext context, SituationSpot spot) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
@@ -1757,40 +1998,23 @@ class _ReadSummaryViewState extends State<_ReadSummaryView> {
       if (mine) {
         return SizedBox(
             key: ValueKey('row-label-${row.name}'),
-            height: 70,
+            height: 52,
             child: Row(children: [
               SizedBox(
-                  width: 40,
-                  height: 40,
+                  width: 36,
+                  height: 36,
                   child: move == null
                       ? null
-                      : FittedBox(child: MoveThumb(move: move, size: 40))),
-              const SizedBox(width: 6),
+                      : FittedBox(child: MoveThumb(move: move, size: 36))),
+              const SizedBox(width: 10),
               Expanded(
                   child: Tooltip(
                       message: row.how,
-                      child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(row.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodyMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700)),
-                            Text(
-                                row.seen
-                                    ? 'picked ${row.count}${row.hit > 0 ? ' · got hit ${row.hit}' : ''}'
-                                    : 'not tried',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: small?.copyWith(color: muted)),
-                            if (row.how.isNotEmpty)
-                              Text(row.how,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: small?.copyWith(color: muted)),
-                          ]))),
+                      child: Text(row.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              Ui.body.copyWith(fontWeight: FontWeight.w700)))),
             ]));
       }
       return Tooltip(
@@ -1892,9 +2116,7 @@ class _ReadSummaryViewState extends State<_ReadSummaryView> {
                           ? color.withValues(alpha: .75)
                           : color)
                 else if (details.isEmpty)
-                  Text('·',
-                      style:
-                          theme.textTheme.titleMedium?.copyWith(color: muted)),
+                  const SizedBox(height: 20),
                 if (details.isNotEmpty)
                   Text(details,
                       textAlign: TextAlign.center,
@@ -1907,79 +2129,95 @@ class _ReadSummaryViewState extends State<_ReadSummaryView> {
     }
 
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          LayoutBuilder(builder: (context, constraints) {
-            final width = columns.isEmpty
-                ? 76.0
-                : ((constraints.maxWidth - 250) / columns.length)
-                    .clamp(76.0, 130.0);
-            final tableWidth = 250.0 + width * columns.length;
-            final table = SizedBox(
-                width: tableWidth,
-                child: Table(
-                  key: const ValueKey('rps-table'),
-                  defaultColumnWidth: FixedColumnWidth(width),
-                  columnWidths: const {0: FixedColumnWidth(250)},
-                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                  border: const TableBorder(
-                    horizontalInside:
-                        BorderSide(color: AfterimageTheme.hairline),
-                  ),
-                  children: [
-                    TableRow(children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-                        child: Text('$player ↓   $opponent →'.toUpperCase(),
-                            style: small?.copyWith(
-                                color: muted, letterSpacing: 0.6)),
+      padding: const EdgeInsets.only(top: 10),
+      child: UiPanel(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              LayoutBuilder(builder: (context, constraints) {
+                final width = columns.isEmpty
+                    ? 76.0
+                    : ((constraints.maxWidth - 190) / columns.length)
+                        .clamp(76.0, 150.0);
+                final tableWidth = 190.0 + width * columns.length;
+                final table = SizedBox(
+                    width: tableWidth,
+                    child: Table(
+                      key: const ValueKey('rps-table'),
+                      defaultColumnWidth: FixedColumnWidth(width),
+                      columnWidths: const {0: FixedColumnWidth(190)},
+                      defaultVerticalAlignment:
+                          TableCellVerticalAlignment.middle,
+                      border: const TableBorder(
+                        horizontalInside:
+                            BorderSide(color: AfterimageTheme.hairline),
                       ),
-                      for (final column in columns)
-                        heading(column, mine: false),
-                    ]),
-                    for (final row in rows)
-                      TableRow(children: [
-                        heading(row, mine: true),
-                        for (final column in columns) cell(row, column),
-                      ]),
+                      children: [
+                        TableRow(children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                            child: Text('$player ↓   $opponent →'.toUpperCase(),
+                                style: small?.copyWith(
+                                    color: muted, letterSpacing: 0.6)),
+                          ),
+                          for (final column in columns)
+                            heading(column, mine: false),
+                        ]),
+                        for (final row in rows)
+                          TableRow(children: [
+                            heading(row, mine: true),
+                            for (final column in columns) cell(row, column),
+                          ]),
+                      ],
+                    ));
+                if (tableWidth <= constraints.maxWidth) {
+                  return Align(alignment: Alignment.centerLeft, child: table);
+                }
+                return _HorizontalReadScroll(child: table);
+              }),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Wrap(
+                  spacing: 16,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _legend(
+                        Icons.check_circle_rounded,
+                        AfterimageTheme.accentStrong,
+                        'proven win',
+                        small,
+                        muted),
+                    _legend(Icons.cancel_rounded, AfterimageTheme.failed,
+                        'proven loss', small, muted),
+                    if (spot.playerRows.any((row) => row.proof.isNotEmpty)) ...[
+                      _legend(
+                          Icons.check_circle_outline_rounded,
+                          AfterimageTheme.accentStrong,
+                          'on paper win',
+                          small,
+                          muted),
+                      _legend(
+                          Icons.highlight_off_rounded,
+                          AfterimageTheme.failed,
+                          'on paper loss',
+                          small,
+                          muted),
+                    ],
+                    _legend(
+                        Icons.warning_amber_rounded,
+                        AfterimageTheme.blocked,
+                        'should win, lost here',
+                        small,
+                        muted),
+                    Text('empty: not settled',
+                        style: small?.copyWith(color: muted)),
                   ],
-                ));
-            if (tableWidth <= constraints.maxWidth) {
-              return Align(alignment: Alignment.centerLeft, child: table);
-            }
-            return _HorizontalReadScroll(child: table);
-          }),
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Wrap(
-              spacing: 16,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _legend(Icons.check_circle_rounded,
-                    AfterimageTheme.accentStrong, 'proven win', small, muted),
-                _legend(Icons.cancel_rounded, AfterimageTheme.failed,
-                    'proven loss', small, muted),
-                if (spot.playerRows.any((row) => row.proof.isNotEmpty)) ...[
-                  _legend(
-                      Icons.check_circle_outline_rounded,
-                      AfterimageTheme.accentStrong,
-                      'on paper win',
-                      small,
-                      muted),
-                  _legend(Icons.highlight_off_rounded, AfterimageTheme.failed,
-                      'on paper loss', small, muted),
-                ],
-                _legend(Icons.warning_amber_rounded, AfterimageTheme.blocked,
-                    'should win, lost here', small, muted),
-                Text('·  not settled', style: small?.copyWith(color: muted)),
-              ],
-            ),
-          ),
-        ],
-      ),
+                ),
+              ),
+            ],
+          )),
     );
   }
 

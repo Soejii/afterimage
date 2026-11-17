@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:afterimage/app/theme.dart';
 import 'package:afterimage/domain/notes_models.dart';
 import 'package:afterimage/presentation/notes_pages.dart';
+import 'package:afterimage/presentation/ui/ui.dart';
 import 'package:afterimage/presentation/widgets/move_card_views.dart';
 import 'package:afterimage/presentation/widgets/notes_clip_player.dart';
 import 'package:afterimage/services/notes_repository.dart';
@@ -53,23 +54,168 @@ Future<void> _tapKey(WidgetTester tester, String key) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _openSituation(WidgetTester tester, String id) async {
+  final row = find.byKey(ValueKey('situation-row-$id'));
+  await _pumpUntilFound(tester, row);
+  await tester.ensureVisible(row);
+  final rect = tester.getRect(row);
+  await tester.tapAt(Offset(rect.left + 24, rect.center.dy));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   Map<String, Object?> step13() => decodeObject(
       File('test/support/step13/elphelt_2h.json').readAsStringSync());
   Map<String, Object?> step14() => decodeObject(
       File('test/support/step14/elphelt_2h_reference.json').readAsStringSync());
 
+  testWidgets('landing shows matchup numbers without rendering cards',
+      (tester) async {
+    await _pumpLedger(tester, step14(), width: 936, height: 1006);
+    expect(find.byKey(const ValueKey('matchup-stats')), findsOneWidget);
+    expect(_textWithin(tester, find.byKey(const ValueKey('stat-after-block'))),
+        contains('26%'));
+    expect(_textWithin(tester, find.byKey(const ValueKey('stat-after-block'))),
+        contains('57 of 220'));
+    expect(find.byKey(const ValueKey('sequence-card-c14')), findsNothing);
+  });
+
+  testWidgets('landing stat tiles show damage, hit rate and biggest source',
+      (tester) async {
+    final json = step14();
+    json['ledger'] = {
+      'total_damage': 1200,
+      'replays': 12,
+      'categories': [
+        {'key': 'pressing', 'label': 'Pressing', 'damage': 900, 'share': .75},
+      ],
+    };
+    await _pumpLedger(tester, json, width: 1400, height: 1000);
+    expect(_textWithin(tester, find.byKey(const ValueKey('stat-damage'))),
+        contains('100'));
+    expect(_textWithin(tester, find.byKey(const ValueKey('stat-after-block'))),
+        contains('26%'));
+    expect(_textWithin(tester, find.byKey(const ValueKey('stat-top-source'))),
+        contains('75%'));
+  });
+
+  testWidgets('far more often pill requires a twenty point hit gap',
+      (tester) async {
+    for (final hits in [7, 6]) {
+      final json = step14();
+      final card = (json['cards'] as List).single as Map;
+      card['count'] = 10;
+      card['hits'] = hits;
+      card['reference'] = {'count': 10, 'hits': 5};
+      await _pumpLedger(tester, json, width: 1400, height: 1000);
+      await _tapKey(tester, 'focus-row-c14');
+      expect(find.text('far more often than high-level'),
+          hits == 7 ? findsOneWidget : findsNothing);
+    }
+  });
+
+  testWidgets('set list groups own and reference sets newest first',
+      (tester) async {
+    NotePreview preview(String name, String date, bool reference) =>
+        NotePreview(
+          batchLabel: 'batch_${date}_120000',
+          opponent: name,
+          directoryPath: '/$name',
+          documentPath: '/$name/sequences.json',
+          cardCount: 2,
+          flaggedCount: 0,
+          createdAt: DateTime(2027),
+          modifiedAt: null,
+          isReference: reference,
+        );
+    final entries = [
+      preview('Own old', '20261101', false),
+      preview('Ref old', '20261102', true),
+      preview('Own new', '20261113', false),
+      preview('Ref new', '20261114', true),
+    ];
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_app(NotesListPage(
+        repository: _ListNotesRepository(entries),
+        onOpen: (_) {},
+        onClose: () {})));
+    await tester.pumpAndSettle();
+    double y(String text) => tester.getTopLeft(find.text(text)).dy;
+    expect(y('YOUR SETS'), lessThan(y('vs Own new')));
+    expect(y('vs Own new'), lessThan(y('vs Own old')));
+    expect(y('vs Own old'), lessThan(y('HIGH-LEVEL REFERENCE SETS')));
+    expect(y('HIGH-LEVEL REFERENCE SETS'), lessThan(y('vs Ref new')));
+    expect(y('vs Ref new'), lessThan(y('vs Ref old')));
+  });
+
+  for (final size in [const Size(936, 1006), const Size(700, 1000)]) {
+    testWidgets('focus row opens and returns without overflow at $size',
+        (tester) async {
+      await _pumpLedger(tester, step14(),
+          width: size.width, height: size.height);
+      expect(tester.takeException(), isNull);
+      await _tapKey(tester, 'focus-row-c14');
+      expect(find.byKey(const ValueKey('detail-title-c14')), findsOneWidget);
+      expect(find.byKey(const ValueKey('sequence-card-c14')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _tapKey(tester, 'back-to-situations');
+      expect(find.byKey(const ValueKey('focus-row-c14')), findsOneWidget);
+      expect(find.byKey(const ValueKey('sequence-card-c14')), findsNothing);
+    });
+  }
+
+  testWidgets('situation navigation stays within kind and stops at ends',
+      (tester) async {
+    await _pumpLedger(tester, eventDocument(), width: 1400, height: 1000);
+    await _tapKey(tester, 'situation-row-c1');
+    IconButton button(String key) =>
+        tester.widget<IconButton>(find.byKey(ValueKey(key)));
+    expect(button('previous-situation').onPressed, isNull);
+    for (var i = 2; i <= 6; i++) {
+      await _tapKey(tester, 'next-situation');
+      expect(find.byKey(ValueKey('detail-title-c$i')), findsOneWidget);
+    }
+    expect(button('next-situation').onPressed, isNull);
+    await _tapKey(tester, 'previous-situation');
+    expect(find.byKey(const ValueKey('detail-title-c5')), findsOneWidget);
+  });
+
+  testWidgets('sorting situations toggles back to original order',
+      (tester) async {
+    final json = ledgerDocument();
+    final cards = json['cards'] as List;
+    for (var i = 0; i < cards.length; i++) {
+      (cards[i] as Map)['count'] = i + 1;
+    }
+    await _pumpLedger(tester, json, width: 1400, height: 1000);
+    double y(String id) =>
+        tester.getTopLeft(find.byKey(ValueKey('situation-row-$id'))).dy;
+    expect(y('c1'), lessThan(y('c6')));
+    await _tapKey(tester, 'sort-times');
+    expect(y('c6'), lessThan(y('c1')));
+    await _tapKey(tester, 'sort-times');
+    expect(y('c1'), lessThan(y('c6')));
+  });
+
   testWidgets('card header shows reference hit count and rate', (tester) async {
     await _pumpLedger(tester, step14(), width: 1400, height: 1000);
-    expect(find.byKey(const ValueKey('card-reference-c14')), findsOneWidget);
-    expect(find.text('High-level Ky: 9 times · hit 2 (22%)'), findsOneWidget);
+    await _tapKey(tester, 'focus-row-c14');
+    final reference = find.byKey(const ValueKey('card-reference-c14'));
+    expect(reference, findsOneWidget);
+    expect(_textWithin(tester, reference), contains('22%'));
+    expect(_textWithin(tester, reference), contains('2 of 9'));
   });
 
   testWidgets('spot comparison shows shares and small sample', (tester) async {
     await _pumpLedger(tester, step14(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     expect(find.byKey(const ValueKey('spot-reference')), findsOneWidget);
     final walk = find.byKey(const ValueKey('reference-pick-walk forward'));
-    expect(_textWithin(tester, walk), contains('5 of 14'));
+    expect(
+        _textWithin(
+            tester, find.byKey(const ValueKey('option-row-walk forward'))),
+        contains('5 of 14'));
     expect(_textWithin(tester, walk), contains('1 of 4'));
     expect(
         find.byKey(const ValueKey('reference-small-sample')), findsOneWidget);
@@ -77,47 +223,55 @@ void main() {
 
   testWidgets('spot comparison is compact at desktop width', (tester) async {
     await _pumpLedger(tester, step14(), width: 1400, height: 1000);
-    final spot = find.byKey(const ValueKey('spot-reference'));
-    expect(tester.getSize(spot).height, lessThanOrEqualTo(260));
+    await _tapKey(tester, 'focus-row-c14');
+    final spot = find.byKey(const ValueKey('options-table'));
     expect(
         find.descendant(
             of: spot, matching: find.byKey(const ValueKey('reference-legend'))),
         findsOneWidget);
-    final row = find.byKey(const ValueKey('reference-pick-walk forward'));
+    final row = find.byKey(const ValueKey('option-row-walk forward'));
     final you =
         find.descendant(of: row, matching: find.textContaining('5 of 14'));
     final other = find.descendant(of: row, matching: find.text('1 of 4'));
     expect(tester.getTopLeft(you).dy, tester.getTopLeft(other).dy);
     final bars = tester
-        .widgetList<LinearProgressIndicator>(find.descendant(
-            of: row, matching: find.byType(LinearProgressIndicator)))
+        .widgetList<UiMeter>(
+            find.descendant(of: row, matching: find.byType(UiMeter)))
         .toList();
     expect(bars, hasLength(2));
-    expect(bars[0].color, AfterimageTheme.accent);
-    expect(bars[1].color, isNot(AfterimageTheme.accent));
-    expect(bars[1].color, isNot(AfterimageTheme.accentStrong));
+    expect(bars[0].color, Ui.you);
+    expect(bars[1].color, Ui.reference);
   });
 
-  testWidgets('spot comparison stacks without overflow at 700px',
+  testWidgets('spot comparison scrolls without overflow at 700px',
       (tester) async {
     await _pumpLedger(tester, step14(), width: 700, height: 1000);
-    final row = find.byKey(const ValueKey('reference-pick-walk forward'));
+    await _tapKey(tester, 'focus-row-c14');
+    final row = find.byKey(const ValueKey('option-row-walk forward'));
     final you =
         find.descendant(of: row, matching: find.textContaining('5 of 14'));
     final other = find.descendant(of: row, matching: find.text('1 of 4'));
-    expect(tester.getTopLeft(you).dy, lessThan(tester.getTopLeft(other).dy));
+    expect(tester.getTopLeft(you).dy, tester.getTopLeft(other).dy);
+    expect(
+        find.ancestor(
+            of: row,
+            matching: find.byWidgetPredicate((w) =>
+                w is SingleChildScrollView &&
+                w.scrollDirection == Axis.horizontal)),
+        findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('reference-only pick shows zero for the user', (tester) async {
     await _pumpLedger(tester, step14(), width: 1400, height: 1000);
-    expect(
-        _textWithin(tester, find.byKey(const ValueKey('reference-pick-f.S'))),
-        contains('0 of 14'));
+    await _tapKey(tester, 'focus-row-c14');
+    expect(_textWithin(tester, find.byKey(const ValueKey('option-row-f.S'))),
+        contains('not tried'));
   });
 
   testWidgets('switching spots changes the reference picks', (tester) async {
     await _pumpLedger(tester, step14(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     await _tapKey(tester, 'spot-chip-1');
     expect(find.byKey(const ValueKey('reference-pick-stand block')),
         findsOneWidget);
@@ -131,23 +285,23 @@ void main() {
       await _pumpLedger(tester, step14(),
           width: width, height: 1000, tab: 'damage');
       expect(find.byKey(const ValueKey('reference-panel')), findsOneWidget);
-      expect(find.text('You: 220 spots, hit 57 (26%)'), findsOneWidget);
-      expect(
-          find.text('High-level Ky: 169 spots, hit 40 (24%)'), findsOneWidget);
+      expect(find.text('You: 26% hit  ·  57 of 220'), findsOneWidget);
+      expect(find.text('High-level Ky: 24% hit  ·  40 of 169'), findsOneWidget);
       for (final text in ['block', 'walk forward', '2P']) {
         expect(find.byKey(ValueKey('reference-answer-$text')), findsOneWidget);
       }
       expect(
-          find.descendant(
-              of: find.byKey(const ValueKey('reference-panel')),
-              matching: find.byKey(const ValueKey('reference-legend'))),
-          findsOneWidget);
+          find.byKey(const ValueKey('reference-after-block')), findsOneWidget);
       expect(find.byKey(const ValueKey('reference-gap-block')), findsOneWidget);
       expect(find.byKey(const ValueKey('reference-gap-2P')), findsNothing);
       final gap = tester
           .widget<Text>(find.byKey(const ValueKey('reference-gap-block')));
-      expect(gap.style?.color, AfterimageTheme.failed);
+      expect(gap.style?.color, Ui.ink);
       expect(gap.data, '40%');
+      final arrow = find.descendant(
+          of: find.byKey(const ValueKey('reference-answer-block')),
+          matching: find.byIcon(Icons.arrow_upward_rounded));
+      expect(tester.widget<Icon>(arrow).color, Ui.bad);
       expect(tester.takeException(), isNull);
     });
   }
@@ -171,11 +325,12 @@ void main() {
     final referenceOnly =
         find.byKey(const ValueKey('reference-category-throw'));
     expect(tester.getTopLeft(own).dy, lessThan(tester.getTopLeft(pressing).dy));
+    expect(referenceOnly, findsOneWidget);
     expect(tester.getTopLeft(pressing).dy,
         lessThan(tester.getTopLeft(referenceOnly).dy));
-    expect(_textWithin(tester, pressing), contains('70%'));
-    expect(_textWithin(tester, pressing), contains('60%'));
-    expect(find.byKey(const ValueKey('reference-category-tiny')), findsNothing);
+    final pressingRow = find.byKey(const ValueKey('ledger-category-pressing'));
+    expect(_textWithin(tester, pressingRow), contains('70%'));
+    expect(_textWithin(tester, pressingRow), contains('60%'));
   });
 
   testWidgets('old step13 list shows no reference UI', (tester) async {
@@ -213,11 +368,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('reference-badge-batch-reference')),
         findsOneWidget);
-    final title = find.text('vs Elphelt Valentine');
-    final badge = find.byKey(const ValueKey('reference-badge-batch-reference'));
-    expect(tester.getCenter(badge).dy, closeTo(tester.getCenter(title).dy, 1));
-    expect(
-        tester.getTopLeft(badge).dx, greaterThan(tester.getTopRight(title).dx));
+    expect(find.text('vs Elphelt Valentine'), findsOneWidget);
     await tester.pumpWidget(_app(NotesPage(
         repository: fake,
         preview: preview,
@@ -235,6 +386,7 @@ void main() {
       (tester) async {
     for (final width in [1400.0, 700.0]) {
       await _pumpLedger(tester, step13(), width: width, height: 1000);
+      await _tapKey(tester, 'focus-row-c14');
       await _tapKey(tester, 'toggle-unseen');
       final table = find.byKey(const ValueKey('rps-table'));
       final card = find.byKey(const ValueKey('sequence-card-c14'));
@@ -258,11 +410,13 @@ void main() {
   testWidgets('headline answer remains visible before showing unseen options',
       (tester) async {
     await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     expect(find.byKey(const ValueKey('row-label-5P')), findsOneWidget);
   });
 
   testWidgets('all player row labels have equal height', (tester) async {
     await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     await _tapKey(tester, 'toggle-unseen');
     final labels = find.byWidgetPredicate((w) =>
         w.key is ValueKey<String> &&
@@ -277,6 +431,7 @@ void main() {
   testWidgets('paper wins and rule wins have distinct icons and legend entries',
       (tester) async {
     await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     await _tapKey(tester, 'toggle-unseen');
     final paper = tester
         .widget<Icon>(find.byKey(const ValueKey('cell-proof-5P|f.S-paper')));
@@ -291,6 +446,7 @@ void main() {
   testWidgets('unsettled walk forward versus f.S displays hit 3',
       (tester) async {
     await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     expect(
         _textWithin(
             tester, find.byKey(const ValueKey('cell-walk forward|f.S-open'))),
@@ -300,6 +456,7 @@ void main() {
   testWidgets('Watch lists exactly c14-s19 and Show all restores 33 clips',
       (tester) async {
     await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     final disproved = find.byKey(const ValueKey('disproved-2P|f.S'));
     final watch = find.descendant(of: disproved, matching: find.text('Watch'));
     await tester.ensureVisible(watch);
@@ -327,6 +484,7 @@ void main() {
   testWidgets('context uses character names and column bars sort by frequency',
       (tester) async {
     await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     final text =
         _textWithin(tester, find.byKey(const ValueKey('read-summary')));
     expect(text, contains('Where: far 13 · close 1 · Ky cornered 7'));
@@ -339,12 +497,13 @@ void main() {
     final bar = find.byKey(const ValueKey('opponent-bar-5H'));
     expect(tester.getTopLeft(first).dx, lessThan(tester.getTopLeft(bar).dx));
     final label = find.byKey(const ValueKey('row-label-2P'));
-    expect(tester.getSize(label).width, 250);
+    expect(tester.getSize(label).width, 190);
   });
 
   testWidgets('spot chips and unread count account for all 33 occurrences',
       (tester) async {
     await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     expect(_textWithin(tester, find.byKey(const ValueKey('spot-chip-0'))),
         contains('14 times'));
     expect(_textWithin(tester, find.byKey(const ValueKey('spot-chip-1'))),
@@ -356,6 +515,7 @@ void main() {
   testWidgets('Clips does not expose raw opponent timing or section center',
       (tester) async {
     await _pumpLedger(tester, step13(), width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     await _tapKey(tester, 'card-tab-clips-c14');
     final text =
         _textWithin(tester, find.byKey(const ValueKey('sequence-card-c14')));
@@ -376,6 +536,7 @@ void main() {
       }
     }
     await _pumpLedger(tester, json, width: 1400, height: 1000);
+    await _tapKey(tester, 'focus-row-c14');
     expect(_textWithin(tester, find.byKey(const ValueKey('spot-verdict'))),
         contains('Habit:'));
     final cell = find.byKey(const ValueKey('cell-5P|f.S-win'));
@@ -406,6 +567,8 @@ void main() {
 
     await _pumpLedger(tester, json, width: 360);
 
+    await _openSituation(tester, 'c1');
+
     expect(find.byKey(const ValueKey('read-headline')), findsOneWidget);
     expect(
         tester.widget<Text>(find.byKey(const ValueKey('read-headline'))).data,
@@ -434,7 +597,6 @@ void main() {
       'Mistakes · knowledge 1 · execution 2 · guess 3 · unc check 4 · unclear 5',
     );
 
-    await _tapKey(tester, 'show-sequences-c1');
     expect(
       find.text('Mistake: guess · Ky dashed and I-No 2P beat the dash.'),
       findsOneWidget,
@@ -454,6 +616,8 @@ void main() {
       final matrix = card.read!.matrix!;
 
       await _pumpLedger(tester, sourceDocument, width: 1280);
+
+      await _openSituation(tester, card.id);
 
       final panel = find.byKey(const ValueKey('situation-read'));
       final defaultText = _textWithin(tester, panel);
@@ -516,6 +680,9 @@ void main() {
       );
 
       await _pumpLedger(tester, sourceDocument, width: 1280);
+
+      await _openSituation(
+          tester, SequenceDocument.fromJson(sourceDocument).cards.single.id);
 
       final panel = find.byKey(const ValueKey('situation-read'));
       final defaultText = _textWithin(tester, panel);
@@ -627,6 +794,7 @@ void main() {
     card['read'] = read;
 
     await _pumpLedger(tester, json, width: 1280);
+    await _openSituation(tester, 'c1');
     await tester.ensureVisible(find.byKey(const ValueKey('read-show-all')));
     await tester.tap(find.byKey(const ValueKey('read-show-all')));
     await tester.pumpAndSettle();
@@ -729,10 +897,9 @@ void main() {
       expect(tester.takeException(), isNull);
       final id = card['id'];
 
-      // A card that is not a focus card starts closed, with a one-line teaser.
+      // Cards are opened from their situation row.
       expect(find.byKey(const ValueKey('read-summary')), findsNothing);
-      expect(find.byKey(ValueKey('card-teaser-$id')), findsOneWidget);
-      await _tapKey(tester, 'toggle-card-$id');
+      await _openSituation(tester, id as String);
 
       // Read tab: verdict first, then the who-beats-who table.
       final text =
@@ -740,7 +907,8 @@ void main() {
       expect(text, contains("Ky's turn · I-No is -2 · 14 times"));
       expect(text, contains('Habit: I-No picked backdash 7 of 14.'));
       expect(text, contains('7 of 14'));
-      expect(text, contains('picked 9 · got hit 2'));
+      expect(text, contains('9 of 14'));
+      expect(text, contains('hit 2'));
       expect(
           find.byKey(const ValueKey('cell-2K|backdash-lose')), findsOneWidget);
       expect(find.byKey(const ValueKey('cell-2K|2P / 5P-disproved')),
@@ -791,9 +959,10 @@ void main() {
     };
 
     await _pumpLedger(tester, json, width: 1280);
+    await _openSituation(tester, card['id'] as String);
     final strip = find.byKey(ValueKey('move-strip-${card['id']}'));
     final text = _textWithin(tester, strip);
-    expect(text, contains('I-No H Stroke (236H)'));
+    expect(text, contains('Situation 1'));
     expect(text, contains('Startup 28'));
     expect(text, contains('On block -2'));
     expect(text, contains('My note: Instant block it, then throw.'));
@@ -825,6 +994,8 @@ void main() {
     ];
 
     await _pumpLedger(tester, json, width: 1280);
+
+    await _openSituation(tester, card['id'] as String);
 
     final text =
         _textWithin(tester, find.byKey(ValueKey('event-read-${card['id']}')));
@@ -861,6 +1032,8 @@ void main() {
 
     await _pumpLedger(tester, json, width: 1280);
 
+    await _openSituation(tester, card['id'] as String);
+
     expect(
       find.byKey(const ValueKey('read-opponent-options')),
       findsOneWidget,
@@ -884,6 +1057,9 @@ void main() {
       );
 
       await _pumpLedger(tester, sourceDocument, width: 1280);
+
+      await _openSituation(
+          tester, SequenceDocument.fromJson(sourceDocument).cards.single.id);
 
       final panel = find.byKey(const ValueKey('situation-read'));
       final defaultText = _textWithin(tester, panel);
@@ -919,6 +1095,8 @@ void main() {
 
     await _pumpLedger(tester, json, width: 360);
 
+    await _openSituation(tester, 'c1');
+
     expect(find.byKey(const ValueKey('read-headline')), findsOneWidget);
     expect(
         tester.widget<Text>(find.byKey(const ValueKey('read-headline'))).data,
@@ -930,7 +1108,6 @@ void main() {
     expect(text, contains('corner: near corner'));
     expect(text, contains('throw_range'));
     expect(text, contains('fuzzy_candidates'));
-    await _tapKey(tester, 'show-sequences-c1');
     expect(find.text('Spot: future point kind'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -1005,18 +1182,15 @@ void main() {
       (tester) async {
     await _pumpLedger(tester, trendDocument());
     for (final id in ['c1', 'c5', 'e1', 'e2']) {
+      if (id.startsWith('e')) await _openTab(tester, 'hits');
+      await _openSituation(tester, id);
       final line = find.byKey(ValueKey('trend-text-$id'));
-      if (line.evaluate().isEmpty) await _openTab(tester, 'hits');
       expect(line, findsOneWidget);
       expect(
           tester.widget<Text>(line).data, 'Earlier set: $id. Now seen again.');
       expect(tester.widget<Text>(line).style!.color,
           AfterimageTheme.dark().colorScheme.onSurfaceVariant);
-    }
-    for (final id in ['c5', 'e1']) {
-      await _openTab(tester, id.startsWith('e') ? 'hits' : 'spots');
-      await _tapKey(tester, 'show-sequences-$id');
-      expect(find.byKey(ValueKey('trend-text-$id')), findsOneWidget);
+      await _tapKey(tester, 'back-to-situations');
     }
   });
 
@@ -1038,8 +1212,7 @@ void main() {
     }
   });
 
-  testWidgets(
-      'events render finder text, start collapsed, and reuse Save and clips',
+  testWidgets('events render finder text and reuse Save and clips',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1280, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -1058,17 +1231,9 @@ void main() {
     expect(find.byKey(const ValueKey('sequence-card-e1')), findsNothing,
         reason: 'event cards live in the Got hit tab');
     await _openTab(tester, 'hits');
+    await _openSituation(tester, 'e1');
     final event = find.byKey(const ValueKey('sequence-card-e1'));
-    expect(
-        find.descendant(
-            of: event, matching: find.text('I-No hit Ky out of pressing')),
-        findsOneWidget);
-    expect(
-        find.descendant(
-            of: event,
-            matching: find.text(
-                '11 times · 606 damage · 8 in startup, 1 while active, 2 in recovery')),
-        findsOneWidget);
+    expect(find.text('I-No hit Ky out of pressing'), findsOneWidget);
     expect(
         find.descendant(
             of: event,
@@ -1080,8 +1245,7 @@ void main() {
             of: event,
             matching: find.text('Showing the 1 most damaging of 11.')),
         findsOneWidget);
-    expect(find.byKey(const ValueKey('sequence-e1-s1')), findsNothing);
-    await _tapKey(tester, 'show-sequences-e1');
+    expect(find.byKey(const ValueKey('sequence-e1-s1')), findsOneWidget);
     expect(find.descendant(of: event, matching: find.text('I-No j.S > Ky 6P')),
         findsOneWidget);
     expect(
@@ -1095,7 +1259,8 @@ void main() {
     expect(find.byKey(const ValueKey('save-done')), findsOneWidget);
     await _tapKey(tester, 'play-e1-s1');
     expect(find.byKey(const ValueKey('clip-e1-s1')), findsOneWidget);
-    await _tapKey(tester, 'show-sequences-e5');
+    await _tapKey(tester, 'back-to-situations');
+    await _openSituation(tester, 'e5');
     expect(find.byKey(const ValueKey('sequence-e5-s1')), findsOneWidget);
   });
 
@@ -1103,24 +1268,12 @@ void main() {
     testWidgets('event cards have their own tab, focus $focus', (tester) async {
       await _pumpLedger(tester,
           {...eventDocument(focus: focus), 'ledger': null, 'player': null});
-      // Spots tab: situations only, plus an event card when it is a focus card.
+      // The landing has situation rows, while events have their own tab.
       expect(find.byKey(const ValueKey('event-cards')), findsNothing);
       expect(find.byKey(const ValueKey('sequence-card-e5')), findsNothing);
-      if (focus) {
-        expect(find.text('1. I-No hit Ky out of wakeup'), findsOneWidget);
-        expect(find.byKey(const ValueKey('sequence-e2-s1')), findsOneWidget);
-        expect(find.byKey(const ValueKey('show-sequences-e2')), findsNothing);
-        await _tapKey(tester, 'other-flagged');
-        expect(
-            find.descendant(
-                of: find.byKey(const ValueKey('other-flagged')),
-                matching: find.byKey(const ValueKey('sequence-card-e1'))),
-            findsNothing);
-      } else {
-        expect(find.byKey(const ValueKey('sequence-card-c6')), findsOneWidget);
-      }
+      expect(find.byKey(const ValueKey('situation-row-c6')), findsOneWidget);
+      expect(find.byKey(const ValueKey('situation-row-e1')), findsNothing);
       await _openTab(tester, 'hits');
-      expect(find.text('HOW ELSE YOU GOT HIT'), findsOneWidget);
       expect(find.byKey(const ValueKey('sequence-card-c6')), findsNothing);
       final group = find.byKey(const ValueKey('event-cards'));
       final positions = [
@@ -1128,7 +1281,7 @@ void main() {
           tester
               .getTopLeft(find.descendant(
                   of: group,
-                  matching: find.byKey(ValueKey('sequence-card-$id'))))
+                  matching: find.byKey(ValueKey('situation-row-$id'))))
               .dy
       ];
       expect(positions, orderedEquals([...positions]..sort()));
@@ -1159,18 +1312,21 @@ void main() {
       await _tapKey(tester, 'ledger-category-neutral');
       await _tapKey(tester, 'ledger-category-pressing');
       await _openTab(tester, 'spots');
-      await _tapKey(tester, 'other-flagged');
       for (final id in ['c3', 'c5', 'c6', 'e5', 'e4', 'e3', 'e1']) {
         if (id == 'e5') await _openTab(tester, 'hits');
-        await _tapKey(tester, 'show-sequences-$id');
+        await _openSituation(tester, id);
         expect(tester.takeException(), isNull);
+        await _tapKey(tester, 'back-to-situations');
       }
     });
   }
 
   testWidgets('ledger renders totals, proportional bars and expanded evidence',
       (tester) async {
-    await _pumpLedger(tester, ledgerDocument());
+    final json = ledgerDocument();
+    final categories = (json['ledger'] as Map)['categories'] as List;
+    (categories[1] as Map)['share'] = 0.148;
+    await _pumpLedger(tester, json);
     expect(find.byKey(const ValueKey('damage-ledger')), findsNothing,
         reason: 'the ledger lives in the Damage tab');
     await _openTab(tester, 'damage');
@@ -1178,16 +1334,18 @@ void main() {
     expect(find.text('WHERE THE DAMAGE CAME FROM'), findsOneWidget);
     expect(
         find.text(
-            'Ky lost 10,469 HP over 12 replays. The cards below cover 2,506 (24%).'),
+            'Ky lost 10,469 health over 12 games. Situations cover 2,506 of it (24%).'),
         findsOneWidget);
-    expect(find.text('3,100 damage (30%) · 41 events'), findsOneWidget);
+    expect(find.text('3,100'), findsOneWidget);
     final bars = tester
-        .widgetList<LinearProgressIndicator>(
-            find.byType(LinearProgressIndicator))
+        .widgetList<UiMeter>(find.descendant(
+            of: find.byKey(const ValueKey('damage-ledger')),
+            matching: find.byType(UiMeter)))
         .toList();
-    expect(bars.map((bar) => bar.value), [1.0, 0.5]);
+    expect(bars.map((bar) => bar.fraction), [1.0, 0.5]);
     expect(find.byKey(const ValueKey('ledger-starters-neutral')), findsNothing);
     await _tapKey(tester, 'ledger-category-neutral');
+    expect(find.text('41 events'), findsOneWidget);
     expect(
         find.byKey(const ValueKey('ledger-starters-neutral')), findsOneWidget);
     expect(find.text('j.S · 9 times · 900 damage · 2 on counter hit'),
@@ -1206,7 +1364,7 @@ void main() {
         tab: 'damage');
     expect(
         find.text(
-            'You lost 10,469 HP over 12 replays. The cards below cover 2,506 (24%).'),
+            'You lost 10,469 health over 12 games. Situations cover 2,506 of it (24%).'),
         findsOneWidget);
     await _tapKey(tester, 'ledger-category-pressing');
     expect(find.text('You were pressing: f.S x4, 2K x2'), findsOneWidget);
@@ -1223,43 +1381,34 @@ void main() {
     }
   });
 
-  testWidgets(
-      'focus preserves order, ignores unknown ids and groups other flags',
-      (tester) async {
+  testWidgets('focus preserves order and ignores unknown ids', (tester) async {
     await _pumpLedger(tester, {...ledgerDocument(), 'ledger': null});
     final group = find.byKey(const ValueKey('focus-group'));
     expect(find.text('WORK ON THESE'), findsOneWidget);
-    final cards = tester
-        .widgetList<Card>(
-            find.descendant(of: group, matching: find.byType(Card)))
-        .toList();
-    expect(cards.map((card) => card.key), [
-      const ValueKey('sequence-card-c3'),
-      const ValueKey('sequence-card-c1')
-    ]);
-    expect(find.text('1. Situation 3'), findsOneWidget);
-    expect(find.text('2. Situation 1'), findsOneWidget);
-    expect(find.byKey(const ValueKey('sequence-c3-s1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('sequence-c1-s1')), findsOneWidget);
-    expect(find.text('Other flagged situations (2)'), findsOneWidget);
-    expect(find.byKey(const ValueKey('sequence-card-c2')), findsNothing);
-    expect(find.byKey(const ValueKey('sequence-card-c4')), findsNothing);
-    expect(find.byKey(const ValueKey('show-sequences-c5')), findsOneWidget);
-    await _tapKey(tester, 'other-flagged');
-    expect(find.byKey(const ValueKey('sequence-c2-s1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('sequence-c4-s1')), findsOneWidget);
+    final first = find.descendant(
+        of: group, matching: find.byKey(const ValueKey('focus-row-c3')));
+    final second = find.descendant(
+        of: group, matching: find.byKey(const ValueKey('focus-row-c1')));
+    expect(first, findsOneWidget);
+    expect(second, findsOneWidget);
+    expect(tester.getTopLeft(first).dy, lessThan(tester.getTopLeft(second).dy));
+    expect(find.byKey(const ValueKey('focus-row-missing')), findsNothing);
+    for (final id in ['c2', 'c4', 'c5']) {
+      expect(find.byKey(ValueKey('situation-row-$id')), findsOneWidget);
+    }
   });
 
-  testWidgets('three focus cards are numbered in finder order', (tester) async {
+  testWidgets('three focus rows follow finder order', (tester) async {
     await _pumpLedger(tester, {
       ...ledgerDocument(),
       'focus': ['c6', 'c3', 'c1'],
       'ledger': null,
     });
-    for (final entry in [(1, 6), (2, 3), (3, 1)]) {
-      expect(find.text('${entry.$1}. Situation ${entry.$2}'), findsOneWidget);
-      expect(find.byKey(ValueKey('sequence-c${entry.$2}-s1')), findsOneWidget);
-    }
+    final positions = [
+      for (final id in ['c6', 'c3', 'c1'])
+        tester.getTopLeft(find.byKey(ValueKey('focus-row-$id'))).dy
+    ];
+    expect(positions, orderedEquals([...positions]..sort()));
   });
 
   testWidgets('empty answers and a null reversal note leave no blocks',
@@ -1273,54 +1422,41 @@ void main() {
     expect(find.byKey(const ValueKey('reversal-note-empty')), findsNothing);
   });
 
-  testWidgets('empty focus keeps the original card order and expansion',
-      (tester) async {
+  testWidgets('empty focus keeps the original situation order', (tester) async {
     await _pumpLedger(
         tester, {...ledgerDocument(), 'focus': <String>[], 'ledger': null});
     expect(find.byKey(const ValueKey('focus-group')), findsNothing);
     expect(find.byKey(const ValueKey('other-flagged')), findsNothing);
-    final cards = tester.widgetList<Card>(find.byType(Card)).toList();
-    expect(cards.map((card) => card.key),
-        [for (var i = 1; i <= 6; i++) ValueKey('sequence-card-c$i')]);
-    expect(find.byKey(const ValueKey('show-sequences-c1')), findsOneWidget);
+    final positions = [
+      for (var i = 1; i <= 6; i++)
+        tester.getTopLeft(find.byKey(ValueKey('situation-row-c$i'))).dy
+    ];
+    expect(positions, orderedEquals([...positions]..sort()));
+    await _openSituation(tester, 'c2');
     expect(find.byKey(const ValueKey('sequence-c2-s1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('sequence-c4-s1')), findsOneWidget);
   });
 
   testWidgets('answer scoreboard and muted reversal note render under flags',
       (tester) async {
     await _pumpLedger(tester, {...ledgerDocument(), 'ledger': null});
+    await _tapKey(tester, 'focus-row-c3');
     final answers = find.byKey(const ValueKey('answers-c3'));
     expect(answers, findsOneWidget);
-    final text =
-        find.descendant(of: answers, matching: find.byType(Text)).first;
-    final spans = (tester.widget<Text>(text).textSpan! as TextSpan)
-        .children!
-        .cast<TextSpan>();
-    expect(spans.map((span) => span.text).join(),
-        'Ky blocked · 9 times · hit 3 · won 0 · still under pressure 5 · back to neutral 1 · 240 damage');
-    expect(spans.firstWhere((span) => span.text == 'hit 3').style!.color,
-        AfterimageTheme.failedText);
-    expect(
-        spans
-            .firstWhere((span) => span.text == 'still under pressure 5')
-            .style!
-            .fontWeight,
-        FontWeight.w800);
-    final wonRow = tester
-        .widgetList<Text>(
-            find.descendant(of: answers, matching: find.byType(Text)))
-        .last;
-    final wonSpans = (wonRow.textSpan! as TextSpan).children!.cast<TextSpan>();
-    expect(wonSpans.firstWhere((span) => span.text == 'won 2').style!.color,
-        AfterimageTheme.readyText);
+    final row = find.byKey(const ValueKey('answer-row-Ky blocked'));
+    final text = _textWithin(tester, row);
+    for (final value in ['Ky blocked', '9 times', 'hit 3', '240 damage']) {
+      expect(text, contains(value));
+    }
+    final bar = tester.widget<UiSplitBar>(
+        find.descendant(of: row, matching: find.byType(UiSplitBar)));
+    expect(bar.parts, [(3, Ui.bad), (5, Ui.warn), (1, Ui.idle), (0, Ui.good)]);
+    expect(_textWithin(tester, answers), contains('won 2'));
     final note = find.byKey(const ValueKey('reversal-note-c3'));
     expect(tester.widget<Text>(note).data, contains('S Vapor Thrust'));
-    expect(tester.widget<Text>(note).style!.color,
-        AfterimageTheme.dark().colorScheme.onSurfaceVariant);
+    expect(tester.widget<Text>(note).style!.color, Ui.inkMid);
     expect(tester.getTopLeft(find.byKey(const ValueKey('flag-c3-losing'))).dy,
         lessThan(tester.getTopLeft(note).dy));
-    expect(tester.getTopLeft(note).dy, lessThan(tester.getTopLeft(answers).dy));
+    expect(tester.getTopLeft(answers).dy, lessThan(tester.getTopLeft(note).dy));
   });
 
   testWidgets('old cards omit ledger, focus, scoreboard and reversal note',
@@ -1332,8 +1468,7 @@ void main() {
         repository: _FakeNotesRepository(preview, _data(preview)),
         preview: preview,
         onBack: () {})));
-    await _pumpUntilFound(
-        tester, find.byKey(const ValueKey('sequence-card-c1')));
+    await _openSituation(tester, 'c1');
     for (final key in [
       'damage-ledger',
       'trend-panel',
@@ -1355,23 +1490,20 @@ void main() {
       await _tapKey(tester, 'ledger-category-neutral');
       await _tapKey(tester, 'ledger-category-pressing');
       await _openTab(tester, 'spots');
-      await _tapKey(tester, 'other-flagged');
-      for (final id in ['c5', 'c6']) {
-        await _tapKey(tester, 'show-sequences-$id');
-      }
       for (var i = 1; i <= 6; i++) {
+        await _openSituation(tester, 'c$i');
         final sequence = find.byKey(ValueKey('sequence-c$i-s1'));
         expect(sequence, findsOneWidget);
         await tester.ensureVisible(sequence);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
+        await _tapKey(tester, 'back-to-situations');
       }
       expect(tester.takeException(), isNull);
     });
   }
 
-  testWidgets('flagged cards show flags, lead-ins and mixups; others collapse',
-      (tester) async {
+  testWidgets('flagged cards show flags, lead-ins and mixups', (tester) async {
     final preview = _preview(directory: '/out/batch-a/May');
     final repository = _FakeNotesRepository(preview, _data(preview));
 
@@ -1381,21 +1513,18 @@ void main() {
       onBack: () {},
       playerFactory: (_) => _FakeClipSession(),
     )));
-    await _pumpUntilFound(
-        tester, find.byKey(const ValueKey('sequence-card-c1')));
+    await _openSituation(tester, 'c1');
 
     expect(find.text('blocked S Mr. Dolphin Vertical'), findsOneWidget);
     expect(find.text('keeps losing: hit 2 of 3'), findsOneWidget);
     expect(find.text('lead-ins: 2K x2, string opener x1'), findsOneWidget);
     expect(find.text('mixup after 2K: 5H x1, jump back x1'), findsOneWidget);
     expect(find.byKey(const ValueKey('save-c1-s1')), findsOneWidget);
-    // The unflagged card starts collapsed.
     expect(find.byKey(const ValueKey('save-c2-s1')), findsNothing);
-    await tester.ensureVisible(find.byKey(const ValueKey('show-sequences-c2')));
-    await tester.tap(find.byKey(const ValueKey('show-sequences-c2')));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('save-c2-s1')), findsOneWidget);
     expect(find.byKey(const ValueKey('strivelabs-notice')), findsOneWidget);
+    await _tapKey(tester, 'back-to-situations');
+    await _openSituation(tester, 'c2');
+    expect(find.byKey(const ValueKey('save-c2-s1')), findsOneWidget);
   });
 
   testWidgets('Save writes that sequence and says where it went',
@@ -1411,7 +1540,7 @@ void main() {
       onSavingChanged: saving.add,
       playerFactory: (_) => _FakeClipSession(),
     )));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s1')));
+    await _openSituation(tester, 'c1');
     await tester.tap(find.byKey(const ValueKey('save-c1-s1')));
     await tester.pump();
     await tester.pump();
@@ -1434,8 +1563,7 @@ void main() {
       onBack: () {},
       playerFactory: (_) => _FakeClipSession(),
     )));
-    await _pumpUntilFound(
-        tester, find.byKey(const ValueKey('save-mixup-c1-0')));
+    await _openSituation(tester, 'c1');
     await tester.tap(find.byKey(const ValueKey('save-mixup-c1-0')));
     await tester.pump();
     await tester.pump();
@@ -1457,7 +1585,7 @@ void main() {
       onBack: () {},
       playerFactory: (_) => _FakeClipSession(),
     )));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s3')));
+    await _openSituation(tester, 'c1');
 
     expect(
       tester
@@ -1484,7 +1612,7 @@ void main() {
       onBack: () {},
       playerFactory: (_) => _FakeClipSession(),
     )));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s1')));
+    await _openSituation(tester, 'c1');
     await tester.tap(find.byKey(const ValueKey('save-c1-s1')));
     await tester.pump();
 
@@ -1495,13 +1623,14 @@ void main() {
         reason: '$key while saving',
       );
     }
+    await _tapKey(tester, 'back-to-situations');
     expect(
-      tester
-          .widget<OutlinedButton>(
-              find.byKey(const ValueKey('back-from-sequences')))
-          .onPressed,
-      isNull,
-    );
+        tester
+            .widget<IconButton>(
+                find.byKey(const ValueKey('back-from-sequences')))
+            .onPressed,
+        isNull);
+    await _openSituation(tester, 'c1');
     repository.gate!.complete();
     await tester.pump();
     await tester.pump();
@@ -1540,7 +1669,7 @@ void main() {
         return session;
       },
     )));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('play-c1-s2')));
+    await _openSituation(tester, 'c1');
     expect(find.byType(NotesClipPlayer), findsNothing);
     expect(opened, isEmpty);
 
@@ -1558,7 +1687,7 @@ void main() {
     expect(sessions.single.disposeCalls, 1);
   });
 
-  testWidgets('the list shows each opponent with flagged counts',
+  testWidgets('the list shows each opponent and situation counts',
       (tester) async {
     final preview = _preview(directory: '/out/batch-a/May');
     final opened = <NotePreview>[];
@@ -1570,7 +1699,7 @@ void main() {
     )));
     await _pumpUntilFound(tester, find.text('vs May'));
 
-    expect(find.text('2 situations  ·  1 flagged'), findsOneWidget);
+    expect(find.textContaining('2 situations'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('open-notes-entry')));
     expect(opened, [preview]);
   });
@@ -1918,7 +2047,7 @@ void main() {
         return session;
       },
     )));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('play-c1-s2')));
+    await _openSituation(tester, 'c1');
     expect(find.byType(NotesClipPlayer), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('play-c1-s2')));
@@ -1945,11 +2074,10 @@ void main() {
     await tester.pump();
     expect(find.byType(NotesClipPlayer), findsNothing);
 
-    await tester.ensureVisible(find.byKey(const ValueKey('show-sequences-c2')));
-    await tester.tap(find.byKey(const ValueKey('show-sequences-c2')));
-    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('play-c1-s3')));
     await tester.pump();
+    await _tapKey(tester, 'back-to-situations');
+    await _openSituation(tester, 'c2');
     await tester.ensureVisible(find.byKey(const ValueKey('play-c2-s1')));
     await tester.tap(find.byKey(const ValueKey('play-c2-s1')));
     await tester.pump();
@@ -1967,7 +2095,7 @@ void main() {
       onBack: () {},
       playerFactory: (_) => _FakeClipSession(),
     )));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s1')));
+    await _openSituation(tester, 'c1');
 
     expect(find.text('Save (95f)'), findsOneWidget);
     expect(find.text('Save (798f)'), findsOneWidget);
@@ -1987,11 +2115,14 @@ void main() {
       onBack: () {},
       playerFactory: (_) => _FakeClipSession(),
     )));
-    await _pumpUntilFound(tester, find.byKey(const ValueKey('save-c1-s1')));
+    await _openSituation(tester, 'c1');
 
     expect(find.text("Ky blocked May's j.H"), findsOneWidget);
-    expect(
-        find.text('5 times · May hit Ky 1 time · 78 damage'), findsOneWidget);
+    final stats =
+        _textWithin(tester, find.byKey(const ValueKey('detail-stats-c1')));
+    expect(stats, contains('5'));
+    expect(stats, contains('1 of 5'));
+    expect(stats, contains('78'));
     expect(
       find.text(
           "What May did before j.H: S Mr. Dolphin Horizontal x2, nothing x2, 2S x1"),
@@ -2005,7 +2136,8 @@ void main() {
     expect(find.text('Ky crouch-blocked · May hit Ky (78 damage)'),
         findsOneWidget);
     expect(find.text('r2 · round 1 · 04:17.2'), findsWidgets);
-    // A guard-crush card is never collapsed.
+    await _tapKey(tester, 'back-to-situations');
+    await _openSituation(tester, 'c2');
     expect(find.text("May's 6H guard-crushed Ky"), findsOneWidget);
     expect(find.byKey(const ValueKey('save-c2-s1')), findsOneWidget);
     expect(find.byKey(const ValueKey('show-sequences-c2')), findsNothing);
@@ -2266,6 +2398,15 @@ NoteSequenceData _data(NotePreview preview) => NoteSequenceData(
         ],
       }),
     );
+
+class _ListNotesRepository extends NotesRepository {
+  _ListNotesRepository(this.entries) : super(finderDirectory: '/unused');
+
+  final List<NotePreview> entries;
+
+  @override
+  Future<List<NotePreview>> list() async => entries;
+}
 
 class _FakeNotesRepository extends NotesRepository {
   _FakeNotesRepository(this.preview, this.data)
