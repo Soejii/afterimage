@@ -228,6 +228,7 @@ enum FrameCaptureEndReason {
   stopped,
   timeout,
   failed,
+  aborted,
 }
 
 /// Statistics returned by a frame-capture adapter when a replay is stopped.

@@ -198,7 +198,9 @@ void main() {
         () {
       final memory = _frameMemory()
         ..putUint32(_peerTable + 0x10, 3716)
-        ..putUint32(_peerTable + _peerStride + 0x10, 3717);
+        ..putUint32(_peerTable + _peerStride + 0x10, 3717)
+        ..putUint32(_peerTable + 0x1c, 42)
+        ..putUint32(_peerTable + _peerStride + 0x1c, 43);
 
       final withManager = decodeLinuxFrameRow(
         memory: memory,
@@ -216,6 +218,7 @@ void main() {
 
       expect(withManager['rp'], [3716, 3717],
           reason: 'rp is the read head solid position per seat.');
+      expect(withManager['wp'], [42, 43]);
       expect(withoutManager.containsKey('rp'), isTrue);
       expect(withoutManager['rp'], isNull);
     });
@@ -348,6 +351,8 @@ void main() {
       'rows': 3,
       'frameGaps': 2,
       'maxFrameGap': 2,
+      'rewinds': 0,
+      'maxRewind': 0,
       'polls': 5,
       'tornRows': 1,
       'readErrors': 0,
@@ -357,7 +362,48 @@ void main() {
     expect(time.requestedDelays, everyElement(const Duration(milliseconds: 1)));
   });
 
+  test('capture loop preserves rollback rows and counts rewinds', () async {
+    final time = _FakeCaptureTime(stopAfterDelays: 7);
+    final source = _FakeCaptureSource(
+      frames: [100, 101, 102, 100, 101, 102, 103],
+      reads: {
+        for (final frame in [100, 101, 102, 103])
+          frame: LinuxFrameRowRead(row: {'type': 'frame', 'f': frame}),
+      },
+    );
+    final sink = _FakeCaptureSink();
+    await _loop(source, sink, time).run(shouldStop: () => time.stopRequested);
+    expect(
+        sink.lines
+            .where((row) => row['type'] == 'frame')
+            .map((row) => row['f']),
+        [100, 101, 102, 100, 101, 102, 103]);
+    expect(sink.lines.last['rewinds'], 1);
+    expect(sink.lines.last['maxRewind'], 2);
+  });
+
   group('replay input stream', () {
+    test('live stream uses write cursors instead of stale trailing words', () {
+      final memory = _FakeMemory()
+        ..putPointer(_peerTable, _seat1Buffer)
+        ..putPointer(_peerTable + _peerStride, _seat2Buffer)
+        ..putUint32(_peerTable + 0x14, 1)
+        ..putUint32(_peerTable + _peerStride + 0x14, 1)
+        ..putWords(_seat1Buffer, [0x00020025, 0x00040005])
+        ..putWords(_seat2Buffer, [0x00060012, 0x00090005]);
+      final row = readLinuxReplayInputStream(
+        memory: memory,
+        replayManagerAddress: _replayManager,
+        maxEntries: 8,
+        live: true,
+      );
+      expect(row['seats'], [
+        [0x00020025],
+        [0x00060012]
+      ]);
+      expect(row['source'], 'live');
+    });
+
     test('the manager pattern matches GetReplayManager and resolves lea - 8',
         () {
       final code = <int>[
@@ -459,6 +505,38 @@ void main() {
           reason: 'The stream read at stop is preferred.');
       expect(source.streamReads, 2,
           reason: 'One snapshot at the first row, one read at stop.');
+    });
+
+    test('live capture retains the latest non-empty input snapshot', () async {
+      final time = _FakeCaptureTime(stopAfterDelays: 5);
+      final source = _FakeInputStreamSource(
+        frames: [100, 101, 102, 103, 104],
+        reads: {
+          for (final frame in [100, 101, 102, 103, 104])
+            frame: LinuxFrameRowRead(row: {'type': 'frame', 'f': frame}),
+        },
+        streams: [
+          _inputs(frames: 5),
+          _inputs(frames: 20),
+          null,
+          _inputs(frames: 0)
+        ],
+      );
+      final sink = _FakeCaptureSink();
+      final loop = LinuxFrameCaptureLoop(
+        replayIndex: 1,
+        source: source,
+        sink: sink,
+        elapsed: () => time.now,
+        delay: time.delay,
+        startedUtc: '2026-11-17T00:00:00Z',
+        afterimageVersion: 'test',
+        live: true,
+      );
+      await loop.run(shouldStop: () => time.stopRequested);
+      final inputs = sink.lines.singleWhere((row) => row['type'] == 'inputs');
+      expect(inputs['frames'], [20, 20]);
+      expect(inputs['source'], 'live');
     });
 
     test(
@@ -605,6 +683,8 @@ void main() {
       'rows': 0,
       'frameGaps': 0,
       'maxFrameGap': 0,
+      'rewinds': 0,
+      'maxRewind': 0,
       'polls': 2,
       'tornRows': 0,
       'readErrors': 2,

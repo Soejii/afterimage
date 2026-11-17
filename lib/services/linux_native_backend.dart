@@ -51,7 +51,8 @@ class LinuxNativeRecorderBackend
     implements
         NativeRecorderBackend,
         InputModeAwareNativeRecorderBackend,
-        FrameCaptureAwareNativeRecorderBackend {
+        FrameCaptureAwareNativeRecorderBackend,
+        LiveCaptureAwareNativeRecorderBackend {
   LinuxNativeRecorderBackend({
     this.obsDiscovery = const ObsWebSocketConfigDiscovery(),
     this.obsConfig,
@@ -250,6 +251,12 @@ class LinuxNativeRecorderBackend
   Future<FrameCapturePort> openFrameCapture() async {
     _ensureLinux();
     return LinuxFrameCapture(processName: ggstLinuxExecutable);
+  }
+
+  @override
+  Future<LiveCapturePort> openLiveCapture() async {
+    _ensureLinux();
+    return LinuxLiveCapture();
   }
 
   Future<LinuxReadinessCheck> _inspectGame() async {

@@ -188,6 +188,17 @@ abstract interface class FrameCaptureAwareNativeRecorderBackend {
   Future<FrameCapturePort> openFrameCapture();
 }
 
+abstract interface class LiveCapturePort {
+  Future<void> start(
+      {required String outputParent, required void Function(int) onGame});
+  Future<String?> get finished;
+  Future<void> stop();
+}
+
+abstract interface class LiveCaptureAwareNativeRecorderBackend {
+  Future<LiveCapturePort> openLiveCapture();
+}
+
 /// Optional engine extension so existing engine factories remain compatible.
 abstract interface class FrameCaptureAwareRecordingEngine
     implements RecordingEngine {

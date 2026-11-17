@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -9,6 +10,8 @@ import '../domain/recorder_contracts.dart';
 import '../domain/replay_batch.dart';
 import 'linux_process_memory.dart';
 import 'linux_replay_monitor.dart';
+import 'live_capture_runner.dart';
+import 'replay_clock.dart';
 
 const int linuxEnginePlayersOffset = 0x0;
 const int linuxEnginePlayerStride = 0x198;
@@ -33,6 +36,7 @@ const int linuxEngineP2BurstOffset = 0x14CC;
 const int linuxReplayPeersOffset = 0xD5438;
 const int linuxReplayPeerStride = 0x28;
 const int linuxReplayReadHeadSolidOffset = 0x10;
+const int linuxReplayWriteHeadSolidOffset = 0x1c;
 const int linuxReplaySeatCount = 2;
 
 /// One seat's inline buffer holds 36000 uint32 entries (0x23280 bytes).
@@ -120,6 +124,7 @@ class LinuxFrameCaptureLoop {
     required this.delay,
     required this.startedUtc,
     required this.afterimageVersion,
+    this.live = false,
   });
 
   final int replayIndex;
@@ -129,6 +134,7 @@ class LinuxFrameCaptureLoop {
   final Future<void> Function(Duration duration) delay;
   final String startedUtc;
   final String afterimageVersion;
+  final bool live;
 
   Future<FrameCaptureResult> run({
     required bool Function() shouldStop,
@@ -144,6 +150,8 @@ class LinuxFrameCaptureLoop {
     var rows = 0;
     var frameGaps = 0;
     var maxFrameGap = 0;
+    var rewinds = 0;
+    var maxRewind = 0;
     var polls = 0;
     var tornRows = 0;
     var readErrors = 0;
@@ -157,6 +165,7 @@ class LinuxFrameCaptureLoop {
         ? source as LinuxFrameCaptureInputStreamSource
         : null;
     Map<String, Object?>? streamSnapshot;
+    var lastStreamRead = elapsed();
 
     while (!shouldStop()) {
       polls++;
@@ -177,6 +186,11 @@ class LinuxFrameCaptureLoop {
             frameGaps++;
             if (missing > maxFrameGap) maxFrameGap = missing;
           }
+          if (prior != null && frame < prior) {
+            rewinds++;
+            final rewind = prior - frame;
+            if (rewind > maxRewind) maxRewind = rewind;
+          }
           await sink.writeLine(candidate.row!);
           rows++;
           previousFrame = frame;
@@ -188,6 +202,13 @@ class LinuxFrameCaptureLoop {
       }
 
       final now = elapsed();
+      if (live &&
+          streamSource != null &&
+          now - lastStreamRead >= const Duration(seconds: 1)) {
+        final snapshot = _readStream(streamSource);
+        if (_streamIsUsable(snapshot)) streamSnapshot = snapshot;
+        lastStreamRead = now;
+      }
       if (now - lastFlush >= const Duration(seconds: 1)) {
         await sink.flush();
         lastFlush = now;
@@ -196,9 +217,8 @@ class LinuxFrameCaptureLoop {
     }
 
     if (streamSource != null) {
-      await sink.writeLine(
-        _chooseStream(_readStream(streamSource), streamSnapshot),
-      );
+      final stream = _chooseStream(_readStream(streamSource), streamSnapshot);
+      await sink.writeLine(live ? {...stream, 'source': 'live'} : stream);
     }
 
     await sink.writeLine(<String, Object?>{
@@ -207,6 +227,8 @@ class LinuxFrameCaptureLoop {
       'rows': rows,
       'frameGaps': frameGaps,
       'maxFrameGap': maxFrameGap,
+      'rewinds': rewinds,
+      'maxRewind': maxRewind,
       'polls': polls,
       'tornRows': tornRows,
       'readErrors': readErrors,
@@ -266,6 +288,7 @@ Map<String, Object?> readLinuxReplayInputStream({
   required LinuxMemorySession memory,
   required int replayManagerAddress,
   int maxEntries = linuxReplayStreamMaxEntries,
+  bool live = false,
 }) {
   final seats = <List<int>>[];
   final frames = <int>[];
@@ -278,8 +301,22 @@ Map<String, Object?> readLinuxReplayInputStream({
     );
     final words = <int>[];
     var held = 0;
-    if (buffer != 0) {
-      final bytes = memory.readBytes(buffer, maxEntries * 4);
+    final count = live
+        ? _readUint32(
+            memory,
+            replayManagerAddress +
+                linuxReplayPeersOffset +
+                seat * linuxReplayPeerStride +
+                0x14)
+        : maxEntries;
+    if (count > maxEntries) {
+      throw StateError('The replay input cursor exceeds the buffer size.');
+    }
+    if (buffer != 0 && count > 0) {
+      final bytes = memory.readBytes(buffer, count * 4);
+      if (bytes.length != count * 4) {
+        throw const OSError('The replay input stream read was incomplete.');
+      }
       for (var offset = 0; offset + 4 <= bytes.length; offset += 4) {
         final word = bytes[offset] |
             (bytes[offset + 1] << 8) |
@@ -295,6 +332,7 @@ Map<String, Object?> readLinuxReplayInputStream({
   }
   return <String, Object?>{
     'type': 'inputs',
+    if (live) 'source': 'live',
     'seats': seats,
     'frames': frames,
     'error': null,
@@ -306,6 +344,7 @@ Map<String, Object?> readLinuxReplayInputStream({
 List<int>? _readReplayPositions(
   LinuxMemorySession memory,
   int? replayManagerAddress,
+  int solidOffset,
 ) {
   if (replayManagerAddress == null) return null;
   try {
@@ -316,12 +355,155 @@ List<int>? _readReplayPositions(
           replayManagerAddress +
               linuxReplayPeersOffset +
               seat * linuxReplayPeerStride +
-              linuxReplayReadHeadSolidOffset,
+              solidOffset,
         ),
     ];
   } on Object {
     return null;
   }
+}
+
+/// The live watcher owns its process-memory session and capture loop in a
+/// separate isolate. It has no access to platform input or OBS adapters.
+class LinuxLiveCapture implements LiveCapturePort {
+  final _ready = Completer<void>();
+  final _finished = Completer<String?>();
+  ReceivePort? _messages;
+  SendPort? _commands;
+
+  @override
+  Future<String?> get finished => _finished.future;
+
+  @override
+  Future<void> start(
+      {required String outputParent,
+      required void Function(int) onGame}) async {
+    if (_messages != null) throw StateError('Live session already started.');
+    final messages = ReceivePort();
+    final errors = ReceivePort();
+    _messages = messages;
+    void fail(Object error) {
+      if (!_ready.isCompleted) _ready.completeError(error);
+      if (!_finished.isCompleted) _finished.completeError(error);
+    }
+
+    errors.listen(
+        (message) => fail(StateError('Live capture isolate failed: $message')));
+    messages.listen((message) {
+      if (message == null) {
+        if (!_finished.isCompleted) {
+          fail(StateError('Live capture isolate exited unexpectedly.'));
+        }
+        messages.close();
+        errors.close();
+        return;
+      }
+      if (message is! Map) return;
+      switch (message['type']) {
+        case 'ready':
+          _commands = message['port'] as SendPort;
+          if (!_ready.isCompleted) _ready.complete();
+        case 'game':
+          onGame(message['count'] as int);
+        case 'done':
+          if (!_finished.isCompleted) {
+            _finished.complete(message['directory'] as String?);
+          }
+        case 'error':
+          fail(StateError(message['error'].toString()));
+      }
+    });
+    await Isolate.spawn(_linuxLiveEntry, [messages.sendPort, outputParent],
+        onError: errors.sendPort, onExit: messages.sendPort);
+    await _ready.future;
+  }
+
+  @override
+  Future<void> stop() async {
+    _commands?.send('stop');
+    await _finished.future;
+  }
+}
+
+void _linuxLiveEntry(List<Object?> args) async {
+  final parent = args[0] as SendPort;
+  final outputParent = args[1] as String;
+  final commands = ReceivePort();
+  LinuxMemorySession? memory;
+  LiveCaptureRunner? runner;
+  var stopRequested = false;
+  commands.listen((message) {
+    if (message == 'stop') {
+      stopRequested = true;
+      runner?.requestStop();
+    }
+  });
+  try {
+    memory = LinuxProcessMemory.open(ggstLinuxExecutable);
+    final module = memory.moduleFromName(ggstLinuxExecutable);
+    final hit = const LinuxPatternScanner()
+        .scan(
+            module: module, pattern: ggstGWorldPattern, read: memory.readBytes)
+        .address;
+    if (hit == null) {
+      throw StateError('The GGST GWorld signature was not found.');
+    }
+    final gworld = resolveRipRelativeAddress(
+        hit, decodeSignedInt32(memory.readBytes(hit + 8, 4)));
+    final manager = _findReplayManager(memory, ggstLinuxExecutable);
+    if (manager == null) {
+      throw StateError('The GGST replay manager signature was not found.');
+    }
+    runner = LiveCaptureRunner(
+      source: _LinuxProcessFrameSource(
+          memory: memory,
+          gWorldPointerAddress: gworld,
+          replayManagerAddress: manager,
+          live: true),
+      clock: SystemReplayClock(),
+      reserveDirectory: () => _reserveLiveDirectory(outputParent),
+      menuInput: const ForbiddenLiveInput(),
+      obs: const ForbiddenLiveObs(),
+      onGame: (count) => parent.send({'type': 'game', 'count': count}),
+    );
+    if (stopRequested) runner.requestStop();
+    parent.send({'type': 'ready', 'port': commands.sendPort});
+    final directory = await runner.run();
+    parent.send({'type': 'done', 'directory': directory});
+  } catch (error) {
+    parent.send({'type': 'error', 'error': error.toString()});
+  } finally {
+    memory?.close();
+    commands.close();
+  }
+}
+
+Future<String> _reserveLiveDirectory(String parent) async {
+  final local = DateTime.now();
+  String pad(int value) => value.toString().padLeft(2, '0');
+  final stamp =
+      '${local.year}${pad(local.month)}${pad(local.day)}_${pad(local.hour)}${pad(local.minute)}${pad(local.second)}';
+  final libc = DynamicLibrary.process();
+  final malloc = libc.lookupFunction<Pointer<Void> Function(IntPtr),
+      Pointer<Void> Function(int)>('malloc');
+  final free = libc.lookupFunction<Void Function(Pointer<Void>),
+      void Function(Pointer<Void>)>('free');
+  final mkdir = libc.lookupFunction<Int32 Function(Pointer<Uint8>, Uint32),
+      int Function(Pointer<Uint8>, int)>('mkdir');
+  for (var i = 0; i < 100; i++) {
+    final path =
+        '$parent${Platform.pathSeparator}batch_$stamp${i == 0 ? '' : '_$i'}_live';
+    final bytes = utf8.encode(path);
+    final ptr = malloc(bytes.length + 1).cast<Uint8>();
+    if (ptr.address == 0) throw StateError('Cannot allocate directory path.');
+    try {
+      ptr.asTypedList(bytes.length + 1).setAll(0, [...bytes, 0]);
+      if (mkdir(ptr, 448) == 0) return path;
+    } finally {
+      free(ptr.cast<Void>());
+    }
+  }
+  throw StateError('Could not reserve a live capture folder.');
 }
 
 /// Decodes raw GGST memory into one contract row. The function performs no IO
@@ -372,7 +554,10 @@ LinuxFrameRowRead decodeLinuxFrameRow({
     _readPlayer(memory, state.player2),
   ];
   final entities = _readEntities(memory, state);
-  final replayPositions = _readReplayPositions(memory, replayManagerAddress);
+  final replayPositions = _readReplayPositions(
+      memory, replayManagerAddress, linuxReplayReadHeadSolidOffset);
+  final writePositions = _readReplayPositions(
+      memory, replayManagerAddress, linuxReplayWriteHeadSolidOffset);
 
   final finalFrame =
       _readUint32(memory, state.engine + linuxEngineGameFrameOffset);
@@ -387,6 +572,7 @@ LinuxFrameRowRead decodeLinuxFrameRow({
       't': elapsedMicros,
       'in': inputs,
       'rp': replayPositions,
+      'wp': writePositions,
       'ten': tension,
       'bur': burst,
       'p': players,
@@ -744,6 +930,7 @@ Future<FrameCaptureResult> runLinuxFrameCaptureSession({
   required bool Function() shouldStop,
   required FrameCaptureEndReason Function() endReason,
   required String outputPath,
+  bool live = false,
 }) async {
   final loop = LinuxFrameCaptureLoop(
     replayIndex: replayIndex,
@@ -753,6 +940,7 @@ Future<FrameCaptureResult> runLinuxFrameCaptureSession({
     delay: delay,
     startedUtc: startedUtc,
     afterimageVersion: afterimageVersion,
+    live: live,
   );
   try {
     final result = await loop.run(
@@ -959,17 +1147,31 @@ class _LinuxProcessFrameSource
     implements
         LinuxFrameCaptureSource,
         LinuxFrameCaptureSourceDiagnostics,
-        LinuxFrameCaptureInputStreamSource {
+        LinuxFrameCaptureInputStreamSource,
+        LiveCaptureSource {
   _LinuxProcessFrameSource({
     required this.memory,
     required this.gWorldPointerAddress,
     required this.replayManagerAddress,
+    this.live = false,
   });
 
   final LinuxMemorySession memory;
   final int gWorldPointerAddress;
   final int? replayManagerAddress;
+  final bool live;
   bool _lastReadFailed = false;
+
+  @override
+  bool get processAlive => Directory('/proc/${memory.processId}').existsSync();
+
+  @override
+  int readWriteSolid() {
+    final manager = replayManagerAddress;
+    if (manager == null) throw StateError('Replay manager unavailable.');
+    return _readUint32(memory,
+        manager + linuxReplayPeersOffset + linuxReplayWriteHeadSolidOffset);
+  }
 
   @override
   Map<String, Object?> readInputStream() {
@@ -980,6 +1182,7 @@ class _LinuxProcessFrameSource
     return readLinuxReplayInputStream(
       memory: memory,
       replayManagerAddress: manager,
+      live: live,
     );
   }
 

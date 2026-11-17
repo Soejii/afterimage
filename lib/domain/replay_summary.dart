@@ -62,6 +62,7 @@ class ReplayBatchSummary {
     this.combinedPartial,
     this.error,
     this.videoMode,
+    this.source,
   });
 
   factory ReplayBatchSummary.fromResults({
@@ -94,11 +95,13 @@ class ReplayBatchSummary {
   final bool? combinedPartial;
   final String? error;
   final VideoMode? videoMode;
+  final String? source;
 
   Map<String, Object?> toJson() {
     return {
       'schemaVersion': 2,
       if (videoMode != null) 'videoMode': videoMode!.name,
+      if (source != null) 'source': source,
       'updatedAt': updatedAt.toUtc().toIso8601String(),
       'outcome': outcome.name,
       'replays': replays.map((replay) => replay.toJson()).toList(),
